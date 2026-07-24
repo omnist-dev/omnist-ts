@@ -584,20 +584,40 @@ it("golden mixed-token fixture round-trips", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Schema-directed reads (validation-shape only -- issue #7 not yet built)
+// Schema-directed reads (materialize wiring -- issue #7)
 // ---------------------------------------------------------------------------
 
 describe("schema-directed reads", () => {
-  it("accepts a schema and validates shape (no leaf-type conversion; issue #7)", () => {
+  it("accepts a schema and leaf-converts via materialize (issue #7)", () => {
     const s = parseSchema('record R { "d": date, "n": number }\nroot R');
+    // "d" arrives as an OML DATE token (already a Date); "n" is written as
+    // a JSON/YAML-style string here to exercise materialize's own
+    // integer/number-exact upgrade, not OML's own literal-number parsing.
     const node = readOml('d: 2024-01-01\nn: 3', { schema: s });
-    // No materialize() yet: values pass through as read, un-converted.
     expect(node).toEqual([e("d", new Date(Date.UTC(2024, 0, 1))), e("n", 3)]);
+  });
+
+  it("leaf-converts an ISO date string (not an OML DATE token) via materialize", () => {
+    const s = parseSchema('record R { "d": date }\nroot R');
+    const node = readOml('d: "2024-01-01"', { schema: s });
+    expect(node).toEqual([e("d", new Date(Date.UTC(2024, 0, 1)))]);
   });
 
   it("throws when the document does not conform to the schema", () => {
     const s = parseSchema('record R { "d": date }\nroot R');
     expect(() => readOml('d: "not a date"', { schema: s })).toThrow(ParseError);
+  });
+
+  it("throws a ParseError with structured errors on a shape mismatch", () => {
+    const s = parseSchema('record R { "d": date }\nroot R');
+    let caught: ParseError | undefined;
+    try {
+      readOml('d: "not a date"', { schema: s });
+    } catch (err) {
+      caught = err as ParseError;
+    }
+    expect(caught).toBeInstanceOf(ParseError);
+    expect(caught?.errors.length).toBeGreaterThan(0);
   });
 
   it("validates a nested document against a schema after reading", () => {
@@ -607,6 +627,7 @@ describe("schema-directed reads", () => {
     );
     const node = readOml(
       'name: "Platform"\n' + 'members: {\n' + '  name: "Ann"\n' + '  role: "dev"\n' + '}\n',
+      { schema: s },
     );
     expect(s.validate(new Doc(node as Edge[])).ok).toBe(true);
   });
