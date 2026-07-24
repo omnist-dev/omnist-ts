@@ -973,7 +973,15 @@ const arrayScalarArb = fc.oneof(
 );
 
 function writeTestScalar(v: unknown): string {
-  return writeOml([e("x", v as Node)]).split(": ", 2)[1] as string;
+  const omlOutput = writeOml([e("x", v as Node)]);
+  // Match the label followed by ": " separator.
+  // Labels in OML match [A-Za-z_][A-Za-z0-9_-]*, and we need to respect
+  // quoting rules to avoid splitting inside quoted string values.
+  const match = omlOutput.match(/^[A-Za-z_][A-Za-z0-9_-]*: /);
+  if (!match) {
+    throw new Error('Invalid OML output from writeOml: ' + omlOutput);
+  }
+  return omlOutput.slice(match[0].length);
 }
 
 describe("property: array form equals repeated-label form", () => {
