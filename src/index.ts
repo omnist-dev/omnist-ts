@@ -17,4 +17,12 @@ export {
   type OmnistIssue,
 } from "./errors.js";
 
+export {
+  Doc,
+  doc,
+  type Node,
+  type Edge,
+  type Scalar,
+} from "./document.js";
+
 export const VERSION = "0.0.1-alpha";
