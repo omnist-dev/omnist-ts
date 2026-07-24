@@ -413,14 +413,16 @@ describe("public-API-shaped usage (TestPublicApi's non-OSD assertions)", () => {
     expect(s.validate(doc({ v: "other" })).ok).toBe(false);
   });
 
-  it("compatibleWith/equivalent/normalize/extract/prune/isEmpty are stubs pending issue #6", () => {
+  it("compatibleWith/equivalent/normalize/extract/prune/isEmpty delegate to ops/*.ts (issue #6)", () => {
     const s = schema(ref("R"), { R: record(field("v", t.integer)) });
-    const other = schema(ref("R"), { R: record(field("v", t.number)) });
-    expect(() => s.compatibleWith(other)).toThrow(/issue #6/);
-    expect(() => s.equivalent(other)).toThrow(/issue #6/);
-    expect(() => s.normalize()).toThrow(/issue #6/);
-    expect(() => s.extract("v")).toThrow(/issue #6/);
-    expect(() => s.prune()).toThrow(/issue #6/);
-    expect(() => s.isEmpty()).toThrow(/issue #6/);
+    const wide = schema(ref("R"), { R: record(field("v", t.number)) });
+    expect(s.compatibleWith(wide)).toBe(true);
+    expect(wide.compatibleWith(s)).toBe(false);
+    expect(s.equivalent(s)).toBe(true);
+    expect(s.equivalent(wide)).toBe(false);
+    expect(s.normalize().equivalent(s)).toBe(true);
+    expect(s.extract("v").equivalent(s)).toBe(true);
+    expect(s.prune().equivalent(s)).toBe(true);
+    expect(s.isEmpty()).toBe(false);
   });
 });
