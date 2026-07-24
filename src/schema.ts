@@ -25,6 +25,10 @@
 
 import { SchemaError, type OmnistIssue } from "./errors.js";
 import { Doc } from "./document.js";
+import { compatibleWith as opsCompatibleWith, equivalent as opsEquivalent } from "./ops/subschema.js";
+import { normalize as opsNormalize } from "./ops/minimize.js";
+import { extract as opsExtract } from "./ops/extract.js";
+import { prune as opsPrune, isEmpty as opsIsEmpty } from "./ops/prune.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -493,42 +497,39 @@ export class Schema {
   // -- comparison (delegate to operations; issue #6) -------------------
 
   /** True if every document this schema accepts is also accepted by
-   * `other`. Delegates to `ops/*.ts` (issue #6). */
+   * `other`. Delegates to `ops/subschema.ts`. */
   compatibleWith(other: Schema): boolean {
-    void other;
-    throw new Error("not implemented (see issue #6)");
+    return opsCompatibleWith(this, other);
   }
 
   /** True if both schemas accept exactly the same documents. Delegates to
-   * `ops/*.ts` (issue #6). */
+   * `ops/subschema.ts`. */
   equivalent(other: Schema): boolean {
-    void other;
-    throw new Error("not implemented (see issue #6)");
+    return opsEquivalent(this, other);
   }
 
   /** The canonical minimal schema equivalent to this one. Delegates to
-   * `ops/*.ts` (issue #6). */
+   * `ops/minimize.ts`. */
   normalize(): Schema {
-    throw new Error("not implemented (see issue #6)");
+    return opsNormalize(this);
   }
 
   /** The minimal subschema recognizing only documents built from `labels`.
-   * Delegates to `ops/*.ts` (issue #6). */
+   * Delegates to `ops/extract.ts`. */
   extract(...labels: string[]): Schema {
-    void labels;
-    throw new Error("not implemented (see issue #6)");
+    return opsExtract(this, labels);
   }
 
   /** An equivalent schema with everything that can never match removed.
-   * Delegates to `ops/*.ts` (issue #6). */
+   * Delegates to `ops/prune.ts`. */
   prune(): Schema {
-    throw new Error("not implemented (see issue #6)");
+    return opsPrune(this);
   }
 
   /** True iff this schema's root record is unsatisfiable. Delegates to
-   * `ops/*.ts` (issue #6). */
+   * `ops/prune.ts`. */
   isEmpty(): boolean {
-    throw new Error("not implemented (see issue #6)");
+    return opsIsEmpty(this);
   }
 }
 
