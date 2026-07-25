@@ -6,6 +6,82 @@ the first documented release of the TypeScript port; the public API
 mirrors the upstream Python package's `__all__` (camelCase names of the
 same functions).
 
+## [v0.0.3-alpha] -- cross-implementation correctness pass
+
+A systematic differential comparison against the real Python `omnist`
+runtime (not just reading source side by side), covering the Document
+model, Schema model, OSD, OML, all four codecs, infer/deserialize, the
+schema algebra, the CLI, and the public API surface. Full report at
+[docs/python-parity.md](docs/python-parity.md). Nine categories confirmed
+identical, six deliberate divergences documented with rationale, and nine
+genuine correctness gaps found and fixed -- every fix independently
+verified against live CPython, not just against expectations.
+
+**Correctness fixes:**
+- **`validate()` accepted calendar-invalid dates and out-of-range times**
+  (issue #49, #50): `matchesKind` used JS's lenient `Date.parse` for
+  date/time/datetime validity, which rolls a day overflow forward
+  (`"2024-02-30"` validated as a `date`) and permits `24:00` as a time
+  per the ECMAScript Date Time String Format. This also meant `validate`
+  and `materialize` could disagree -- a documented invariant this port
+  claims never to violate. Both now route through the same
+  `parseDateToken`/`parseTimeToken`/`parseDatetimeToken` functions
+  `oml.ts`'s tokenizer and `materialize` already used, so the two layers
+  can't drift again. Confirmed against CPython 3.13.5 directly.
+- **`writeOml` erased a datetime's UTC offset** (issue #51): the issue
+  #26 fix (preserving local-vs-offset datetimes) landed for TOML only.
+  OML datetimes now carry the same tagging via `temporal.ts`, and an
+  offset-tagged midnight datetime no longer collapses to a bare `DATE`
+  token.
+- **A bare OML `TIME` literal didn't round-trip** (issue #52): `writeOml`
+  now emits a bare `TIME` token for any string that's a valid time
+  literal by shape and range, instead of always quoting it. Documented
+  tradeoff: an ordinary `"12:00"` string gets promoted to a bare token on
+  write, since a string primitive has no identity for schema-aware
+  tagging.
+- **`lint()`/`prune()` output ordering diverged from Python** (issue #56):
+  `lint`'s sort used locale-aware `localeCompare` instead of plain
+  codepoint comparison. `prune`'s environment reconstruction now
+  preserves the input schema's declared order, filtered to what's
+  reachable -- notably, Python's own equivalent turned out to be
+  non-deterministic (`PYTHONHASHSEED`-dependent, confirmed by rerunning
+  it repeatedly), so an exact "match Python" target wasn't even
+  well-defined; filed upstream as
+  [omnist-dev/omnist#253](https://github.com/omnist-dev/omnist/issues/253).
+- **Over-large integer literals silently became `Infinity` in JSON/YAML**
+  (issue #54): now raise `ParseError` past the same 4300-digit cap
+  CPython itself uses (`sys.get_int_max_str_digits()`), matching the
+  precedent already accepted for TOML (issue #25). The YAML-side fix
+  needed a second pass after review found a false positive on ordinary
+  word+digit plain scalars (an id/hash/token ending in a long digit run).
+- **Missing public API exports** (issue #58): the seven scalar constants
+  (`STRING`/`INTEGER`/.../`DATETIME`) and `satisfiableSet`/
+  `equivalenceClasses` exist in Python's own `__all__` but weren't
+  exported from this port's entry point. Now are.
+
+**Documented, not fixed (deliberate divergences, not gaps):**
+- XML scalar coercion stays narrower than Python's (doesn't accept
+  Python numeric-literal spellings like `nan`/`inf`/`1_0`) -- matching
+  Python here would let `readXml` manufacture `NaN`/`Infinity` values
+  this port's own `writeJson` can't represent (issue #53).
+- The `12:00+05:60` case: Python silently renormalizes an invalid offset
+  minute to `+06:00`; this port rejects it outright rather than silently
+  changing a user's value.
+- `docs/formats/{json,yaml,toml,xml}.md` now document all nine
+  `Adjustment`/`WriteReport` codes this port's codecs can produce, with
+  severity and worked examples (issue #57). `docs/formats/oml.md`
+  remains comparatively thin and is tracked separately (issue #67).
+
+**Process:** every fix in this release went through independent review
+that reproduced the claimed behavior against live CPython, not just
+trusted the report -- and two rounds surfaced real problems before merge
+(a YAML scanner false positive on issue #54, and stale test assertions
+in `test/python-parity.test.ts` left over from issue #56 landing on
+`master` mid-cycle). Full suite (909 tests, 100% coverage), the fuzz
+suite stress-tested at 20x normal iterations, and the full semantic
+oracle (24,025 pairs, zero definite bugs) all verified clean before this
+release.
+
 ## [v0.0.2-alpha] -- security and performance hardening
 
 A security and performance audit pass over the v0.0.1-alpha codebase,
