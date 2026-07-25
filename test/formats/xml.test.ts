@@ -189,6 +189,60 @@ describe("readXml", () => {
       expect(() => readXml(payload)).toThrow(ParseError);
     });
   });
+
+  describe("__proto__-labeled elements (prototype-pollution hardening)", () => {
+    it("reads a __proto__ element as the real tag name, not fast-xml-parser's #__proto__ alias", () => {
+      // fast-xml-parser aliases an element literally named __proto__ to
+      // "#__proto__" internally (xmlNode.js addChild: if tagname is
+      // "__proto__" it is reassigned to "#__proto__") to protect its own
+      // object construction. readXml must undo that alias so the
+      // document's label is the real tag name the input actually used.
+      const node = readXml("<root><__proto__><polluted>true</polluted></__proto__><kept>1</kept></root>");
+      expect(node).toEqual([
+        {
+          label: "root",
+          target: [
+            { label: "__proto__", target: [{ label: "polluted", target: true }] },
+            { label: "kept", target: 1 },
+          ],
+        },
+      ]);
+    });
+
+    it("round-trips a __proto__ element through write and read unchanged", () => {
+      const xml = "<root><__proto__><polluted>true</polluted></__proto__><kept>1</kept></root>";
+      const node = readXml(xml);
+      const written = writeXml(node);
+      expect(written).not.toContain("___proto__");
+      expect(written).toContain("<__proto__>");
+      expect(readXml(written)).toEqual(node);
+    });
+
+    it("does not pollute Object.prototype when reading a __proto__ element", () => {
+      const before = ({} as Record<string, unknown>).polluted;
+      readXml("<root><__proto__><polluted>true</polluted></__proto__></root>");
+      expect(({} as Record<string, unknown>).polluted).toBe(before);
+      expect(Object.prototype.hasOwnProperty.call(Object.prototype, "polluted")).toBe(false);
+    });
+
+    it("__proto__ as the document (root) element itself also reads back correctly", () => {
+      const node = readXml("<__proto__><a>1</a></__proto__>");
+      expect(node).toEqual([{ label: "__proto__", target: [{ label: "a", target: 1 }] }]);
+    });
+
+    it("leaves constructor/prototype element labels untouched (fast-xml-parser does not alias those)", () => {
+      const node = readXml("<root><constructor><x>1</x></constructor><prototype><y>2</y></prototype></root>");
+      expect(node).toEqual([
+        {
+          label: "root",
+          target: [
+            { label: "constructor", target: [{ label: "x", target: 1 }] },
+            { label: "prototype", target: [{ label: "y", target: 2 }] },
+          ],
+        },
+      ]);
+    });
+  });
 });
 
 describe("writeXml", () => {

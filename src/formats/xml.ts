@@ -185,9 +185,27 @@ function coerce(text: string): Scalar {
   return text;
 }
 
+// fast-xml-parser aliases an element literally named __proto__ to the
+// internal marker "#__proto__" (xmlNode.js addChild/add: unconditionally,
+// on every parse, to stop the tag name from ever reaching a raw property
+// assignment on one of its own plain objects). It never applies the same
+// treatment to "constructor" or "prototype" -- those pass through
+// untouched, verified directly against the installed source and by the
+// "leaves constructor/prototype element labels untouched" test below. The
+// alias is unconditional and keyed on exact equality, not an opt-out
+// option, so there is no parser flag to disable it; this module corrects
+// the label back afterwards instead. The corrected string can never
+// collide with a genuine input tag: "#" is not a legal XML name-start
+// character (XML_NAME below, and the spec's NameStartChar production), so
+// no well-formed document can contain an element actually named
+// "#__proto__" -- every occurrence this function sees originated from
+// the parser's own aliasing, and undoing it is lossless.
+const FAST_XML_PARSER_PROTO_ALIAS = "#__proto__";
+
 function local(tag: string): string {
-  const i = tag.lastIndexOf(":");
-  return i === -1 ? tag : tag.slice(i + 1);
+  const real = tag === FAST_XML_PARSER_PROTO_ALIAS ? "__proto__" : tag;
+  const i = real.lastIndexOf(":");
+  return i === -1 ? real : real.slice(i + 1);
 }
 
 export interface WriteXmlOptions {
