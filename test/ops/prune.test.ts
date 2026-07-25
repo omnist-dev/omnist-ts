@@ -101,4 +101,17 @@ describe("prune", () => {
     expect(recordField(getRec(p, "A"), "optional")).not.toBeUndefined();
     expect(equivalent(p, s)).toBe(true);
   });
+
+  // Issue #56: prune must rebuild the surviving environment in the
+  // original *declaration* order of the input schema, not in
+  // traversal (DFS-from-root) order. Python preserves declaration
+  // order; the TS port was emitting traversal order, so
+  // omnist schema prune produced differently-ordered toOsd output
+  // for the same input across the two implementations.
+  it("preserves the input schema's declaration order in the pruned env, not traversal order", () => {
+    const s = parseSchema(
+      'record A { "x": string }\nrecord B { "x": string }\nrecord R { "p": A, "q": B }\nroot R',
+    );
+    expect([...prune(s).env.keys()]).toEqual(["A", "B", "R"]);
+  });
 });

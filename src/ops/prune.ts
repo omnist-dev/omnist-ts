@@ -84,7 +84,13 @@ export function prune(s: Schema): Schema {
   const reachable = reachableForPrune(s, sat, rootOk);
 
   const newEnv = new Map<string, OmnistRecord>();
-  for (const name of reachable) {
+  // Iterate `s.env`'s own (declaration) order, filtered to what survived
+  // the reachability walk -- not `reachable`'s own order, which is a
+  // traversal (DFS-from-root) order and would silently reorder the
+  // rebuilt environment relative to the input schema. Python preserves
+  // declaration order here; see issue #56.
+  for (const name of s.env.keys()) {
+    if (!reachable.has(name)) continue;
     // `reachable` only ever gains a name after confirming `s.env.has(name)`
     // (see `reachableForPrune`), and `s.env` doesn't change during the
     // walk, so this lookup always succeeds.

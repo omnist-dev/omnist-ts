@@ -96,4 +96,20 @@ describe("lint: sort comparator branch coverage", () => {
     );
     expect(keys).toEqual(sorted);
   });
+  it("sorts unreachable-record locations by codepoint, not locale-aware collation", () => {
+    // Issue #56: `localeCompare` without an explicit locale does
+    // Unicode-collation-aware comparison, which orders "aaa" before "B"
+    // (case-insensitive-ish collation). Python's plain tuple sort is a
+    // codepoint comparison, where uppercase "B" (0x42) sorts before
+    // lowercase "aaa" (0x61). Only "R" is reachable from root, so "aaa"
+    // and "B" are both unreachable-record findings whose relative order
+    // is exactly what's under test.
+    const s = parseSchema(
+      'record R { "a": string }\nrecord aaa { "b": string }\nrecord B { "c": string }\nroot R',
+    );
+    const locations = lint(s)
+      .filter((f) => f.code === "unreachable-record")
+      .map((f) => f.location);
+    expect(locations).toEqual(["B", "aaa"]);
+  });
 });
