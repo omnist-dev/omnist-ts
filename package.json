@@ -9,7 +9,16 @@
     "type": "git",
     "url": "git+https://github.com/omnist-dev/omnist-ts.git"
   },
-  "keywords": ["schema", "validation", "json", "yaml", "toml", "xml", "data", "convert"],
+  "keywords": [
+    "schema",
+    "validation",
+    "json",
+    "yaml",
+    "toml",
+    "xml",
+    "data",
+    "convert"
+  ],
   "engines": {
     "node": ">=20"
   },
@@ -34,12 +43,19 @@
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "oracle": "tsx tools/semantic_oracle.ts"
   },
   "peerDependenciesMeta": {
-    "yaml": { "optional": true },
-    "smol-toml": { "optional": true },
-    "fast-xml-parser": { "optional": true }
+    "yaml": {
+      "optional": true
+    },
+    "smol-toml": {
+      "optional": true
+    },
+    "fast-xml-parser": {
+      "optional": true
+    }
   },
   "optionalDependencies": {
     "yaml": "^2.5.0",
@@ -54,6 +70,8 @@
     "fast-xml-parser": "^4.5.7",
     "typescript": "^5.6.0",
     "typescript-eslint": "^8.0.0",
-    "vitest": "^2.0.0"
+    "vitest": "^2.0.0",
+    "tsx": "^4.19.0",
+    "@types/node": "^20.14.0"
   }
 }
