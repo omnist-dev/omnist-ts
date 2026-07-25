@@ -369,6 +369,33 @@ describe("checkXml", () => {
     expect(out).toContain("x�y");
   });
 
+  it("replaces ALL illegal XML characters on write, not just the first (issue #36)", () => {
+    // Regression test: XML_ILLEGAL_CHAR has no `g` flag (it doubles as a
+    // .test() predicate in scanXmlNode), so passing it directly to
+    // .replace() only substituted the FIRST illegal character and left
+    // every subsequent one as a raw byte in the output. fast-xml-parser
+    // reads that malformed output back without complaint, but a
+    // conformant parser (e.g. Python's xml.etree.ElementTree, which the
+    // omnist Python port uses) rejects it as not well-formed.
+    const bad = "a" + String.fromCharCode(1) + "b" + String.fromCharCode(2) + "c";
+    const node = [{ label: "r", target: [{ label: "v", target: bad }] }];
+    const out = writeXml(node);
+
+    const illegal = [...out]
+      .map((c) => c.charCodeAt(0))
+      .filter((n) => n < 0x20 && n !== 9 && n !== 10 && n !== 13);
+    expect(illegal).toEqual([]);
+    expect(out).toContain("a�b�c");
+
+    // Bonus verification: the sanitized output round-trips through
+    // readXml (fast-xml-parser) and, more importantly, contains no raw
+    // control characters at all -- the property a strict, conformant XML
+    // 1.0 parser (like Python's ElementTree) requires to accept it.
+    expect(readXml(out)).toEqual([
+      { label: "r", target: [{ label: "v", target: "a�b�c" }] },
+    ]);
+  });
+
   it("reports string.cr_normalized as a warning, leaving \\r as-is on write", () => {
     const node = [{ label: "a", target: "x\ry" }];
     const rep = checkXml(node);
