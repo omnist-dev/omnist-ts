@@ -70,6 +70,26 @@ describe("readXml", () => {
     ]);
   });
 
+  it("does not coerce Python-literal numeric spellings (issue #53)", () => {
+    // Characterizes a deliberate, documented divergence from Python's
+    // `_coerce` (omnist/formats.py): Python's int()/float() also accept
+    // Python literal syntax -- "nan"/"inf"/"infinity" (float specials) and
+    // "1_0" (underscore digit-group separator) -- which is not data-XML
+    // syntax. This port intentionally does not coerce those spellings, so
+    // it never manufactures a NaN/Infinity value that other codecs (e.g.
+    // JSON) cannot represent. See docs/formats/xml.md and
+    // docs/python-parity.md ("deliberate divergences").
+    const d = readXml("<r><a>nan</a><b>inf</b><c>infinity</c><d>1_0</d></r>");
+    expect(d).toEqual([
+      { label: "r", target: [
+        { label: "a", target: "nan" },
+        { label: "b", target: "inf" },
+        { label: "c", target: "infinity" },
+        { label: "d", target: "1_0" },
+      ] },
+    ]);
+  });
+
   it("strips namespace prefixes from tag names", () => {
     const d = readXml("<n:a>x</n:a>");
     expect(d).toEqual([{ label: "a", target: "x" }]);
