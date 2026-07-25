@@ -55,6 +55,14 @@ export {
   type WriteOmlOptions,
 } from "./oml.js";
 
+export {
+  readXml,
+  writeXml,
+  checkXml,
+  type ReadXmlOptions,
+  type WriteXmlOptions,
+} from "./formats/xml.js";
+
 // ---------------------------------------------------------------------------
 // Built-in format registration -- mirrors omnist/registry.py's
 // _register_builtins, called once from omnist/__init__.py on import.
@@ -67,6 +75,7 @@ import type { WriteReport as _WriteReport } from "./report.js";
 import { registerFormat as _registerFormat } from "./registry.js";
 import { readJson as _readJson, writeJson as _writeJson, checkJson as _checkJson } from "./formats/json.js";
 import { readOml as _readOml, writeOml as _writeOml, checkOml as _checkOml } from "./oml.js";
+import { readXml as _readXml, writeXml as _writeXml, checkXml as _checkXml } from "./formats/xml.js";
 
 _registerFormat({
   name: "json",
@@ -80,6 +89,13 @@ _registerFormat({
   read: _readOml,
   write: _writeOml as (node: unknown, opts?: unknown) => string,
   check: _checkOml as unknown as (node: unknown) => _WriteReport,
+});
+
+_registerFormat({
+  name: "xml",
+  read: _readXml,
+  write: _writeXml as (node: unknown, opts?: unknown) => string,
+  check: _checkXml as (node: unknown) => _WriteReport,
 });
 
 export const VERSION = "0.0.1-alpha";
