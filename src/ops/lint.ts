@@ -120,9 +120,13 @@ export function lint(s: Schema): LintFinding[] {
     }
   }
 
-  // localeCompare gives a signed ordering directly, so there is no
-  // discrete "which direction" branch to cover here (unlike a hand-rolled
-  // </>/=== ternary chain) -- the same effect as Python's tuple-key sort.
-  findings.sort((a, b) => (a.code === b.code ? a.location.localeCompare(b.location) : a.code.localeCompare(b.code)));
+  // Plain relational operators on strings compare by UTF-16 code unit
+  // (codepoint order for BMP characters), matching Python's default
+  // tuple-key sort exactly. localeCompare (without an explicit locale)
+  // does Unicode-collation-aware comparison instead, which can invert
+  // the order of differently-cased names (e.g. "aaa" vs. "B") relative
+  // to Python -- see issue #56.
+  const compare = (a: string, b: string): number => Number(a > b) - Number(a < b);
+  findings.sort((a, b) => (a.code === b.code ? compare(a.location, b.location) : compare(a.code, b.code)));
   return findings;
 }
