@@ -183,6 +183,46 @@ undetected, because the test guarding it checked the *live* version, never
 the doc's own displayed text. A test existing with a plausible name is not
 proof the doc's actual content is checked.
 
+## When the port disagrees with upstream Python
+
+Porting will surface cases where this implementation's behavior differs
+from the Python original. Two different situations, two different
+responses — don't default to "match Python" without asking which one
+you're in:
+
+1. **The difference is a bug in *this* port** (a mistranslation of the
+   spec, a missed edge case). Fix the port to match Python. This is the
+   default assumption — check it first.
+2. **The difference exists because Python's behavior is itself wrong**
+   against the formal spec (`docs/design/model.md` and the other design
+   docs in the upstream repo), and you have concrete evidence for that —
+   a worked example from the spec that Python gets wrong, a property the
+   algebra is supposed to guarantee that Python violates, a genuine
+   correctness bug independent of language. In this case:
+   - **Do not silently replicate the wrong behavior** just to match
+     upstream. Implement the port against the *spec*, not against
+     Python's actual output, when the two disagree.
+   - **File an issue on `omnist-dev/omnist`** (the Python repo, not this
+     one) describing the discrepancy: the spec section it violates, a
+     concrete input/output pair showing the wrong behavior, and a
+     suggested direction for the fix. Don't just flag it — give the
+     upstream maintainer(s) enough to act on without re-deriving the
+     finding themselves.
+   - Note the divergence and the upstream issue number in this repo's own
+     issue/PR for the port work, so anyone reading this repo's history
+     understands *why* it doesn't match Python's current released
+     behavior.
+   - Don't assume the upstream issue will be fixed quickly, or fixed the
+     way you suggested — the port's behavior is the port maintainer's
+     call either way, but it should be a *deliberate* call, made with the
+     evidence in hand, not an accidental one from copying a bug forward
+     into a second language.
+
+The bar for "evidence" here is the same rigor this playbook already
+expects elsewhere (rule 6, red-before-green): a concrete, reproducible
+input/output pair or a specific spec citation, not "this looks off."
+Confirm it against the formal spec doc, not just intuition, before filing.
+
 ## Toolchain mapping (Python → TypeScript)
 
 | Python | TypeScript equivalent |
