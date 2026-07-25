@@ -134,15 +134,15 @@ describe("gap: XML scalar coercion is narrower than Python int()/float()", () =>
   });
 });
 
-describe("gap: integer-literal limits diverge per codec", () => {
+describe("fixed: integer-literal limits (issue #54)", () => {
   const big = "1".repeat(4301);
 
-  it("JSON/YAML silently yield Infinity where Python raises ParseError", () => {
-    expect(readJson('{"a": ' + big + "}")).toEqual([{ label: "a", target: Infinity }]);
-    expect(readYaml("a: " + big)).toEqual([{ label: "a", target: Infinity }]);
+  it("JSON/YAML now raise ParseError past the 4300-digit cap, matching CPython's int_max_str_digits, instead of silently yielding Infinity", () => {
+    expect(() => readJson('{"a": ' + big + "}")).toThrow(ParseError);
+    expect(() => readYaml("a: " + big)).toThrow(ParseError);
   });
 
-  it("TOML instead rejects any integer past 2^53, which Python accepts", () => {
+  it("TOML instead rejects any integer past 2^53, which Python accepts (issue #25, accepted structural limitation)", () => {
     expect(() => readToml("a = 9007199254740993")).toThrow(ParseError);
   });
 });
@@ -158,21 +158,20 @@ describe("divergence: reader strictness JSON/YAML inherit from their parsers", (
   });
 });
 
-describe("gap: deterministic-output ordering differs from Python", () => {
-  it("lint sorts locations by locale, not codepoint", () => {
+describe("fixed: deterministic-output ordering now matches Python (issue #56)", () => {
+  it("lint now sorts locations by codepoint, matching Python's sorted()", () => {
     const s = parseSchema(
       'record R { "a": string }\nrecord aaa { "b": string }\nrecord B { "c": string }\nroot R',
     );
     // Python: ["B", "aaa"] (codepoint order -- uppercase first).
-    expect(lint(s).map((f) => f.location)).toEqual(["aaa", "B"]);
+    expect(lint(s).map((f) => f.location)).toEqual(["B", "aaa"]);
   });
 
-  it("prune reorders the surviving environment", () => {
+  it("prune now preserves the input schema's declared order (Python's own equivalent is non-deterministic, PYTHONHASHSEED-dependent -- see omnist-dev/omnist#253)", () => {
     const s = parseSchema(
       'record A { "x": string }\nrecord B { "x": string }\nrecord R { "p": A, "q": B }\nroot R',
     );
-    // Python keeps the authored order: A, B, R.
-    expect([...prune(s).env.keys()]).toEqual(["R", "B", "A"]);
+    expect([...prune(s).env.keys()]).toEqual(["A", "B", "R"]);
     expect(toOsd(prune(s), { indent: null }).trim()).toContain("record R {");
   });
 });

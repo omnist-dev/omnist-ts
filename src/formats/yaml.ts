@@ -54,6 +54,80 @@ import type { Schema } from "../schema.js";
 // file for this convention's precedent in this port).
 const MAX_DEPTH = 200;
 
+// Matches src/document.ts's own MAX_INT_DIGITS / src/formats/json.ts's own
+// copy of the same guard constant (see json.ts's comment for why this
+// needs to be checked against the raw source text, not the parsed value:
+// by the time YAML.parse hands back a JS `number`, an over-long integer
+// literal has already silently become `Infinity`, indistinguishable from a
+// genuine `.inf` scalar -- see issue #54).
+const MAX_INT_DIGITS = 4300;
+
+/**
+ * Scan raw YAML text for a bare integer-shaped token (all digits, no `.`,
+ * `e`/`E`, or surrounding letters -- so not a float literal and not part
+ * of a larger word) whose digit count exceeds MAX_INT_DIGITS, skipping
+ * quoted scalars and comments.
+ *
+ * This is a heuristic, not a full YAML tokenizer: it does not track block
+ * scalar (`|`/`>`) indentation, so an over-long digit run that appears
+ * inside literal block-scalar *text* (not a bare integer value) could in
+ * principle be misflagged. That mirrors this port's other documented,
+ * accepted format-layer gaps (e.g. the YAML "<<" merge-key limitation --
+ * docs/formats/yaml.md) rather than a full YAML grammar reimplementation,
+ * which is out of scope for this fix (see issue #54's discussion of BigInt
+ * threading being out of scope for the same reason).
+ */
+function checkYamlIntegerDigits(text: string): void {
+  const n = text.length;
+  let i = 0;
+  while (i < n) {
+    const c = text.charAt(i);
+    if (c === "#" && (i === 0 || /\s/.test(text.charAt(i - 1)))) {
+      while (i < n && text.charAt(i) !== "\n") i++;
+      continue;
+    }
+    if (c === '"' || c === "'") {
+      const quote = c;
+      i++;
+      while (i < n && text.charAt(i) !== quote) {
+        if (quote === '"' && text.charAt(i) === "\\") i++;
+        i++;
+      }
+      i++;
+      continue;
+    }
+    if (c === "-" || (c >= "0" && c <= "9")) {
+      let j = c === "-" ? i + 1 : i;
+      const digitsStart = j;
+      while (j < n && text.charAt(j) >= "0" && text.charAt(j) <= "9") j++;
+      const digitsLen = j - digitsStart;
+      const next = text.charAt(j);
+      const isFloat = next === "." || next === "e" || next === "E";
+      // Unlike JSON (where a bare digit outside quotes can only ever start
+      // a number), YAML plain scalars freely mix letters and digits (an
+      // id/hash/token like "abc123..." or "key456"). Only treat this run
+      // as a candidate standalone integer literal -- not part of a larger
+      // word -- if it's not glued to a word character on either side.
+      const isWordChar = (ch: string): boolean => /[A-Za-z0-9_]/.test(ch);
+      const precededByWord = i > 0 && isWordChar(text.charAt(i - 1));
+      const followedByWord = !isFloat && isWordChar(next);
+      if (!isFloat && !precededByWord && !followedByWord && digitsLen > MAX_INT_DIGITS) {
+        throw new ParseError(
+          "invalid YAML: integer literal has more than " +
+            String(MAX_INT_DIGITS) +
+            " digits, exceeding the digit limit (security: unbounded-digit " +
+            "int-to-str conversion is superlinear); matches this port's " +
+            "digit cap elsewhere (src/document.ts's MAX_INT_DIGITS) and " +
+            "CPython's own int-to-str digit cap",
+        );
+      }
+      i = j;
+      continue;
+    }
+    i++;
+  }
+}
+
 function checkWriteDepth(depth: number): void {
   // NOT unreachable (issue #37): writeYaml takes a raw `Node`, a publicly
   // exported type -- a caller can hand-build one (or splice a subtree in
@@ -94,6 +168,7 @@ export interface ReadYamlOptions {
 
 /** Parse YAML text into a Document node. */
 export function readYaml(text: string, opts: ReadYamlOptions = {}): Node {
+  checkYamlIntegerDigits(text);
   let parsed: unknown;
   try {
     parsed = YAML.parse(text, { schema: "yaml-1.1" });
