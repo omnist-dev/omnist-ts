@@ -244,3 +244,13 @@ describe("convertTomlDates is hardened against __proto__/constructor labels (iss
     expect(({} as Record<string, unknown>).polluted).toBeUndefined();
   });
 });
+
+describe("checkWriteDepth is a real, reachable guard (issue #37)", () => {
+  it("writeToml rejects a hand-built Node deeper than MAX_DEPTH", () => {
+    let node: import("../../src/document.js").Node = 1;
+    for (let i = 0; i < 250; i++) {
+      node = [{ label: "a", target: node }];
+    }
+    expect(() => writeToml(node)).toThrow(/nesting exceeds the maximum depth \(200\)/);
+  });
+});

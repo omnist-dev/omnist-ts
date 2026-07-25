@@ -341,3 +341,98 @@ describe("Doc: grouped() is hardened against __proto__/constructor labels (issue
     expect(grouped.prototype).toBe("y");
   });
 });
+
+// Issue #37: Doc.add/Doc.set called buildNode without the cursor's own
+// depth, so every mutation restarted the MAX_DEPTH counter from zero --
+// repeated add()-and-descend calls could build an unboundedly deep
+// Document, and nodeEquals/reprNode (backing Doc.equals/Doc.toString) had
+// no depth guard at all because they trusted that invariant.
+describe("Doc: add/set depth guard (issue #37)", () => {
+  it("repeated add()-and-descend cannot build a document past MAX_DEPTH", () => {
+    let cur = doc({});
+    expect(() => {
+      for (let i = 0; i < 5000; i++) {
+        cur.add("a", {});
+        cur = cur.child("a");
+      }
+    }).toThrow(/nesting exceeds the maximum depth \(200\)/);
+  });
+
+  it("a single add() composes with the cursor's existing depth", () => {
+    // Descend 190 levels via add()+child(), then add() a 190-deep plain
+    // object at that cursor -- 190 + 190 = 380 > 200, so this must be
+    // rejected even though each individual step looks "under the limit".
+    let cur = doc({});
+    for (let i = 0; i < 190; i++) {
+      cur.add("a", {});
+      cur = cur.child("a");
+    }
+    let deepValue: unknown = "leaf";
+    for (let i = 0; i < 190; i++) {
+      deepValue = { a: deepValue };
+    }
+    expect(() => cur.add("b", deepValue)).toThrow(/nesting exceeds the maximum depth \(200\)/);
+  });
+
+  it("set() is guarded the same way as add()", () => {
+    let cur = doc({ a: 1 });
+    expect(() => {
+      for (let i = 0; i < 5000; i++) {
+        cur.set("a", {});
+        cur = cur.child("a");
+      }
+    }).toThrow(/nesting exceeds the maximum depth \(200\)/);
+  });
+
+  it("add() well within the limit still succeeds normally", () => {
+    const d = doc({});
+    d.add("a", 1);
+    expect(d.getOne("a").value).toBe(1);
+  });
+
+  it("child() cursors keep accruing depth across multiple add() calls", () => {
+    // A regression guard for the fix itself: depth must accrue through
+    // child() navigation, not just through add()'s own recursion.
+    let cur = doc({});
+    for (let i = 0; i < 199; i++) {
+      cur.add("a", {});
+      cur = cur.child("a");
+    }
+    // Cursor is now at depth 199; one more level of nesting is still ok...
+    cur.add("a", 1);
+    // ...but two more levels is not.
+    expect(() => cur.set("a", { x: 1 })).toThrow(/nesting exceeds the maximum depth \(200\)/);
+  });
+});
+
+describe("Doc: equals/toString depth guard (issue #37)", () => {
+  const DEEP = 60000;
+
+  function deepNode(depth: number, leaf: Node = 1): Node {
+    let node: Node = leaf;
+    for (let i = 0; i < depth; i++) {
+      node = [{ label: "a", target: node }];
+    }
+    return node;
+  }
+
+  it("equals() raises DocumentError, not a raw RangeError, on an over-deep node", () => {
+    const d1 = new Doc(deepNode(DEEP));
+    const d2 = new Doc(deepNode(DEEP));
+    expect(() => d1.equals(d2)).toThrow(DocumentError);
+    expect(() => d1.equals(d2)).toThrow(/nesting exceeds the maximum depth \(200\)/);
+  });
+
+  it("toString() raises DocumentError, not a raw RangeError, on an over-deep node", () => {
+    const d = new Doc(deepNode(DEEP));
+    expect(() => d.toString()).toThrow(DocumentError);
+    expect(() => d.toString()).toThrow(/nesting exceeds the maximum depth \(200\)/);
+  });
+
+  it("equals()/toString() just under the limit still succeed", () => {
+    const d1 = new Doc(deepNode(190));
+    const d2 = new Doc(deepNode(190));
+    expect(d1.equals(d2)).toBe(true);
+    expect(() => d1.toString()).not.toThrow();
+  });
+});

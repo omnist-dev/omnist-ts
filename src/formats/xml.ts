@@ -80,14 +80,15 @@ const PARSER = new XMLParser({
 type XmlEntry = Record<string, unknown>;
 
 function checkWriteDepth(depth: number): void {
-  /* v8 ignore start -- unreachable via the public API: a Node this writer
-   * ever sees was built by buildNode (document.ts), which already rejects
-   * nesting past MAX_DEPTH at construction time. Kept as a defensive
-   * backstop, same convention as json.ts's checkWriteDepth. */
+  // NOT unreachable (issue #37): writeXml takes a raw `Node`, a publicly
+  // exported type -- a caller can hand-build one (or splice a subtree in
+  // via Doc.add()/Doc.set()) that exceeds MAX_DEPTH without ever going
+  // through buildNode()'s own guard. This branch is a real, exercised
+  // backstop, not a dormant one; see test/formats/xml.test.ts's
+  // depth-guard test.
   if (depth > MAX_DEPTH) {
     throw new WriteError("nesting exceeds the maximum depth (" + String(MAX_DEPTH) + ")");
   }
-  /* v8 ignore stop */
 }
 
 export interface ReadXmlOptions {
