@@ -64,7 +64,7 @@ const s = schema(ref("Root"), {
   Order: order, Address: address, LineItem: lineItem,
 });
 ```
-<!-- verified-by: test/docs-example.test.ts::example schema validates the order document -->
+<!-- doc-illustrative -->
 
 ## The order, in OML
 
