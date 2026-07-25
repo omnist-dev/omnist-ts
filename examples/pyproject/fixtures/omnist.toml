@@ -1,0 +1,69 @@
+# fixtures/omnist.toml -- this repo's own pyproject.toml, copied verbatim.
+# Provenance: first-party (github.com/omnist-dev/omnist), snapshot at 0.5.4.
+# Exercises the legacy `license = {text=...}` table form and two
+# [tool.*] sections ([tool.setuptools], [tool.ruff]).
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "omnist"
+version = "0.5.4"
+description = "One data model, many formats: read, validate, and write JSON, YAML, TOML, XML, and OML."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Thomas Y. Lee" }]
+keywords = ["schema", "validation", "json", "yaml", "toml", "xml", "data", "convert"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Software Development :: Libraries",
+]
+dependencies = []
+
+[project.scripts]
+omnist = "omnist.cli:main"
+
+[project.optional-dependencies]
+yaml = ["pyyaml"]
+toml = ["tomli_w"]          # writing TOML; reading uses stdlib tomllib (3.11+)
+xml = ["defusedxml"]
+all = ["pyyaml", "tomli_w", "defusedxml"]
+dev = [
+    "pytest~=9.1",
+    "pyyaml~=6.0",
+    "tomli_w~=1.2",
+    "defusedxml~=0.7",
+    "ruff~=0.15",
+    "hypothesis~=6.155",
+    "jsonschema~=4.26",
+    "mypy~=2.1",
+]
+
+[project.urls]
+Homepage = "https://github.com/omnist-dev/omnist"
+Repository = "https://github.com/omnist-dev/omnist"
+Issues = "https://github.com/omnist-dev/omnist/issues"
+Changelog = "https://github.com/omnist-dev/omnist/blob/master/CHANGELOG.md"
+
+[tool.setuptools]
+packages = ["omnist", "omnist.ops"]
+
+[tool.setuptools.package-data]
+omnist = ["py.typed"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+ignore = ["E701", "E702"]  # this codebase uses ; and one-line class/def bodies (osd.py, examples)

@@ -41,6 +41,48 @@ export {
 } from "./registry.js";
 
 export {
+  Schema,
+  schema,
+  t,
+  ANY,
+  field,
+  record,
+  ref,
+  nullable,
+  cardinalityStr,
+  recordField,
+  fieldTypeEquals,
+  recordEquals,
+  schemaEquals,
+  matchesKind,
+  valueKind,
+  validationResultToString,
+  SCALAR_KINDS,
+  type ScalarKind,
+  type FieldType,
+  type ScalarType,
+  type RefType,
+  type AnyFieldType,
+  type Field,
+  type Record,
+  type ValidationResult,
+} from "./schema.js";
+
+export { parseSchema, toOsd, type ToOsdOptions } from "./osd.js";
+
+export {
+  infer,
+  inferWithReport,
+  type AnyFallback,
+  type InferOptions,
+} from "./infer.js";
+
+export { materialize } from "./deserialize.js";
+
+export { lint, type LintFinding } from "./ops/lint.js";
+
+
+export {
   readJson,
   writeJson,
   checkJson,

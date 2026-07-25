@@ -5,6 +5,26 @@ import { WriteReport } from "../../src/report.js";
 import { readXml, writeXml, checkXml } from "../../src/formats/xml.js";
 
 describe("readXml", () => {
+  it("parses a document with a standard XML declaration prologue", () => {
+    // Regression test: fast-xml-parser's preserveOrder output surfaces the
+    // "<?xml version="1.0"?>" declaration as its own top-level entry
+    // (keyed "?xml"), which used to be miscounted as a second document
+    // element -- so effectively every real-world XML document (which
+    // almost always opens with this declaration) failed to parse. See
+    // examples/sitemap/convert.ts and docs/formats/xml.md.
+    const d = readXml('<?xml version="1.0" encoding="UTF-8"?><root><a>1</a></root>');
+    expect(d).toEqual([{ label: "root", target: [{ label: "a", target: 1 }] }]);
+  });
+
+  it("parses a document with a leading comment and an XML declaration", () => {
+    const d = readXml(
+      '<?xml version="1.0"?>' + String.fromCharCode(10) +
+        '<!-- a provenance comment -->' + String.fromCharCode(10) +
+        '<root><a>1</a></root>',
+    );
+    expect(d).toEqual([{ label: "root", target: [{ label: "a", target: 1 }] }]);
+  });
+
   it("parses a single-rooted document into a single top-level edge", () => {
     const d = readXml("<team><name>P</name><member>x</member><member>y</member></team>");
     expect(d).toEqual([
