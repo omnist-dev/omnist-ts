@@ -5,6 +5,20 @@ import { WriteReport } from "../../src/report.js";
 import { readYaml, writeYaml, checkYaml } from "../../src/formats/yaml.js";
 
 describe("readYaml", () => {
+  it("does not flag a plain scalar whose trailing digit run merely happens to be long (issue #64 review finding)", () => {
+    const longDigits = "4".repeat(4301);
+    // A plain-scalar value like an id/hash/token ending in a long digit
+    // run is not a numeric literal -- must not be flagged as an oversized
+    // integer just because its tail looks like one.
+    expect(() => readYaml("a: abc" + longDigits)).not.toThrow();
+    // A short key with a long word+digits value, same idea.
+    expect(() => readYaml("key: id" + longDigits)).not.toThrow();
+    // A genuine oversized integer, not glued to a word, must still throw.
+    expect(() => readYaml("a: " + longDigits)).toThrow(ParseError);
+    // A genuine oversized negative integer must still throw too.
+    expect(() => readYaml("a: -" + longDigits)).toThrow(ParseError);
+  });
+
   it("parses a YAML mapping into a Document node", () => {
     const node = readYaml("a: 1\nb:\n  - 1\n  - 2\n");
     expect(node).toEqual(doc({ a: 1, b: [1, 2] }).toData());

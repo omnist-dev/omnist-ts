@@ -103,7 +103,15 @@ function checkYamlIntegerDigits(text: string): void {
       const digitsLen = j - digitsStart;
       const next = text.charAt(j);
       const isFloat = next === "." || next === "e" || next === "E";
-      if (!isFloat && digitsLen > MAX_INT_DIGITS) {
+      // Unlike JSON (where a bare digit outside quotes can only ever start
+      // a number), YAML plain scalars freely mix letters and digits (an
+      // id/hash/token like "abc123..." or "key456"). Only treat this run
+      // as a candidate standalone integer literal -- not part of a larger
+      // word -- if it's not glued to a word character on either side.
+      const isWordChar = (ch: string): boolean => /[A-Za-z0-9_]/.test(ch);
+      const precededByWord = i > 0 && isWordChar(text.charAt(i - 1));
+      const followedByWord = !isFloat && isWordChar(next);
+      if (!isFloat && !precededByWord && !followedByWord && digitsLen > MAX_INT_DIGITS) {
         throw new ParseError(
           "invalid YAML: integer literal has more than " +
             String(MAX_INT_DIGITS) +
