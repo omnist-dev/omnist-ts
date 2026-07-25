@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { doc } from "../../src/document.js";
+import type { Node } from "../../src/document.js";
 import { ParseError, WriteError } from "../../src/errors.js";
 import { WriteReport } from "../../src/report.js";
 import { readJson, writeJson, checkJson } from "../../src/formats/json.js";
@@ -224,5 +225,22 @@ describe("readJson/writeJson: __proto__ label round-trips safely (issue #32)", (
     const text = writeJson(node);
     expect(JSON.parse(text)).toEqual({ constructor: { prototype: { polluted: true } } });
     expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+  });
+
+  it("regression: fast-check counterexample from PR #30 CI (seed 1037922291) via writeJson directly", () => {
+    // Reported independently by a user against master (pre-fix): fast-check's
+    // property fuzzing in test/fuzz.test.ts intermittently found this exact
+    // document -- a " "-labeled edge nesting an empty "__proto__" edge list --
+    // crashing writeJson with "TypeError: cannot serialize Object", because
+    // grouped() (document.ts) built its output object via a plain {} literal:
+    // out["__proto__"] = value reassigns the built object's own prototype
+    // rather than creating a property, so the corrupted object then fails
+    // isPlainRecord's Object.getPrototypeOf check inside serialize(). Fixed
+    // by grouped() using Object.create(null); this pins the exact reported
+    // counterexample as a permanent regression rather than relying on
+    // fast-check's random seed to rediscover it.
+    const node: Node = [{ label: " ", target: [{ label: "__proto__", target: [] }] }];
+    expect(() => writeJson(node)).not.toThrow();
+    expect(writeJson(node)).toBe('{" ": {"__proto__": {}}}');
   });
 });
