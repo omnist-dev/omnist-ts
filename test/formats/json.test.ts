@@ -260,3 +260,24 @@ describe("checkWriteDepth is a real, reachable guard (issue #37)", () => {
     expect(() => writeJson(node)).toThrow(/nesting exceeds the maximum depth \(200\)/);
   });
 });
+
+describe("over-large integer literal (issue #54)", () => {
+  it("raises ParseError instead of silently producing Infinity", () => {
+    const text = '{"a": ' + "1".repeat(4301) + "}";
+    expect(() => readJson(text)).toThrow(ParseError);
+    expect(() => readJson(text)).toThrow(/digit/);
+  });
+
+  it("does not reject a legitimately-overflowing float literal (1e400)", () => {
+    // 1e400 overflows float64 to Infinity on both this port and Python --
+    // matches Python's own behavior, so it must NOT raise. Only an
+    // integer-shaped literal past the digit cap should.
+    const node = readJson('{"a": 1e400}');
+    expect(node).toEqual([{ label: "a", target: Infinity }]);
+  });
+
+  it("does not reject a large-but-safe integer", () => {
+    const node = readJson('{"a": 12345}');
+    expect(node).toEqual([{ label: "a", target: 12345 }]);
+  });
+});
