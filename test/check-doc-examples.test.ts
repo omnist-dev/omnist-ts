@@ -139,6 +139,10 @@ describe("check_doc_examples", () => {
     expect(MARKER_RE.test("<!-- some other comment -->")).toBe(false);
   });
 
+  it("recognizes markers with spaces in test names (realistic case)", () => {
+    expect(MARKER_RE.test("<!-- verified-by: test/docs-quickstart.test.ts::quickstart snippet reproduces the documented output -->")).toBe(true);
+  });
+
   it("defaults --base-ref to origin/master when not passed", () => {
     const code = main([], repo);
     expect(code).toBe(0);

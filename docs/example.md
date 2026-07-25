@@ -32,6 +32,7 @@ record Order {
 record Root { "order": Order }      # single top-level key
 root Root
 ```
+<!-- doc-illustrative -->
 
 ```mermaid
 graph LR

@@ -3,6 +3,7 @@
 ```bash
 npm install @omnist-dev/omnist
 ```
+<!-- doc-illustrative -->
 
 The shortest possible tour -- one OML snippet, one schema, one validation,
 one inference. For the fuller order/address/line-item walkthrough, see

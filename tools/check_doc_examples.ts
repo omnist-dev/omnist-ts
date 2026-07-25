@@ -15,7 +15,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 
 export const FENCE_RE = /^```/;
-export const MARKER_RE = /<!--\s*(verified-by:\s*\S+|doc-illustrative)\s*-->/;
+export const MARKER_RE = /<!--\s*(verified-by:\s*[^>]+?|doc-illustrative)\s*-->/;
 
 function git(cwd: string, ...args: string[]): string {
   return execFileSync("git", args, { cwd, encoding: "utf-8" });
