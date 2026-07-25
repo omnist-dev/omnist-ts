@@ -77,6 +77,21 @@ describe("round-trip", () => {
     expect(text).toContain("2024-01-01");
     expect(readToml(text)).toEqual(node);
   });
+
+  it("a local (no-offset) datetime leaf round-trips as local, not offset (issue #26)", () => {
+    const read = readToml("dt = 2024-01-01T12:00:00");
+    const text = writeToml(read);
+    // Must NOT gain an offset/Z marker that wasn't in the source literal.
+    expect(text.trim()).toBe("dt = 2024-01-01T12:00:00.000");
+    expect(readToml(text)).toEqual(read);
+  });
+
+  it("an offset datetime leaf still round-trips as offset (issue #26 doesn't regress this)", () => {
+    const read = readToml("dt = 2024-01-01T12:00:00+02:00");
+    const text = writeToml(read);
+    expect(text.trim()).toBe("dt = 2024-01-01T10:00:00.000Z");
+    expect(readToml(text)).toEqual(read);
+  });
 });
 
 describe("writing", () => {

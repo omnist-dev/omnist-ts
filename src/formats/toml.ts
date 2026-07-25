@@ -52,6 +52,36 @@ function checkWriteDepth(depth: number): void {
 }
 
 // ---------------------------------------------------------------------------
+// Local-vs-offset datetime tagging (issue #26)
+// ---------------------------------------------------------------------------
+
+/**
+ * TOML distinguishes an offset datetime (`2024-01-01T12:00:00Z`) from a
+ * local datetime with no offset (`2024-01-01T12:00:00`); smol-toml's
+ * TomlDate.isLocal() reports which one a parsed literal was. This port's
+ * Date-kind tagging (temporal.ts, issue #14) only tags date-vs-datetime, not
+ * local-vs-offset -- there was no TOML-specific concept for it to track.
+ * Rather than extend that shared, cross-format WeakMap with a dimension
+ * only TOML cares about, tag it here instead: a second, module-local
+ * WeakSet (same non-invasive by-identity technique, scoped to this file)
+ * that remembers which datetimes convertTomlDates produced from a *local*
+ * literal, so toTomlDate (below) can write them back out the same way
+ * instead of defaulting to an offset ("Z") datetime -- fixing the
+ * read/write asymmetry reported in issue #26.
+ *
+ * Confirmed structural (worth fixing), not parity-with-Python (which would
+ * make it accepted, documented lossiness instead): Python's tomllib/
+ * tomli_w round-trip this correctly today -- tomllib produces a naive
+ * datetime.datetime for a local literal and an aware one for an offset
+ * literal, and tomli_w's dumps() reproduces whichever it got (see
+ * docs/formats/toml.md: "TOML round-trips date/time/datetime natively in
+ * both directions"). So this was a genuine TS-specific gap against the
+ * Python port, not something both ports already share -- worth closing
+ * rather than just documenting.
+ */
+const LOCAL_DATETIME = new WeakSet<Date>();
+
+// ---------------------------------------------------------------------------
 // Reading
 // ---------------------------------------------------------------------------
 
@@ -97,10 +127,18 @@ function convertTomlDates(value: unknown): unknown {
     // constructor rejects an invalid date -- see smol-toml's date.js), so
     // the fallback is defensive, not reachable from a text this
     // port's own parseToml call above accepted.
-    /* v8 ignore start */
-    if (value.isDate()) return parseDateToken(value.toISOString()) ?? value;
-    return parseDatetimeToken(normalizeOffset(value.toISOString())) ?? value;
-    /* v8 ignore stop */
+    if (value.isDate()) {
+      /* v8 ignore next -- see the block comment above: unreachable. */
+      return parseDateToken(value.toISOString()) ?? value;
+    }
+    const dt = parseDatetimeToken(normalizeOffset(value.toISOString()));
+    /* v8 ignore next -- see the block comment above: unreachable. */
+    if (dt === null) return value;
+    // Tag a *local* datetime (no offset in the source literal) so
+    // toTomlDate (below) can write it back out the same way -- see the
+    // LOCAL_DATETIME comment above (issue #26).
+    if (value.isLocal()) LOCAL_DATETIME.add(dt);
+    return dt;
   }
   if (Array.isArray(value)) return value.map(convertTomlDates);
   if (isPlainObject(value)) {
@@ -116,7 +154,24 @@ export interface ReadTomlOptions {
   schema?: Schema;
 }
 
-/** Parse TOML text into a Document node. */
+/**
+ * Parse TOML text into a Document node.
+ *
+ * Integers beyond ±2^53-1 (Number.MAX_SAFE_INTEGER): TOML's spec
+ * requires support for 64-bit signed integers, but this port's Document
+ * model unifies Python's separate int/float onto a single JS `number`
+ * (see schema.ts/document.ts), and JS numbers can't represent an integer
+ * beyond 2^53-1 losslessly. smol-toml enforces this at parse time -- an
+ * integer literal outside that range throws ("integer value cannot be
+ * represented losslessly", confirmed during issue #8/PR #24's review) --
+ * which surfaces here as a ParseError, same as any other malformed input.
+ * This is accepted, not a bug: Python's tomllib/tomli_w support arbitrary-
+ * precision integers because Python's own `int` does, but adding that here
+ * would mean a parallel BigInt-shaped numeric pipeline throughout this
+ * port, a structural change out of scope for the TOML codec alone (see
+ * issue #25). Rejecting with a clear ParseError, rather than silently
+ * losing precision, matches this port's numeric model everywhere else.
+ */
 export function readToml(text: string, opts: ReadTomlOptions = {}): Node {
   let parsed: unknown;
   try {
@@ -166,12 +221,21 @@ function typeName(v: unknown): string {
 
 /** A Date leaf's kind (see temporal.ts's dateKind) picks which TOML
  * temporal literal it's written as: a tagged "date" becomes a local TOML
- * date; anything else (a tagged "datetime", or an untagged Date -- this
- * port's own Date is always UTC-based, see document.ts's file-top comment)
- * becomes an offset ("Z") TOML datetime, mirroring how tomli_w writes an
- * aware (UTC) Python datetime. */
+ * date. A tagged "datetime" becomes either a local or an offset ("Z") TOML
+ * datetime depending on whether it was read from a local literal (see the
+ * LOCAL_DATETIME tagging above, issue #26); an untagged Date -- this port's
+ * own Date is always UTC-based, see document.ts's file-top comment --
+ * always becomes an offset datetime, mirroring how tomli_w writes an aware
+ * (UTC) Python datetime. */
 function toTomlDate(d: Date): TomlDate {
   if (dateKind(d) === "date") return TomlDate.wrapAsLocalDate(d);
+  // A datetime read in from a *local* (no-offset) TOML literal round-trips
+  // back out the same way (issue #26); anything else -- a tagged
+  // "datetime" read from an offset literal, or an untagged Date this
+  // port's own Date is always UTC-based, see document.ts's file-top
+  // comment) -- becomes an offset ("Z") TOML datetime, mirroring how
+  // tomli_w writes an aware (UTC) Python datetime.
+  if (LOCAL_DATETIME.has(d)) return TomlDate.wrapAsLocalDateTime(d);
   return TomlDate.wrapAsOffsetDateTime(d);
 }
 
