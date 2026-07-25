@@ -63,6 +63,14 @@ export {
   type WriteTomlOptions,
 } from "./formats/toml.js";
 
+export {
+  readYaml,
+  writeYaml,
+  checkYaml,
+  type ReadYamlOptions,
+  type WriteYamlOptions,
+} from "./formats/yaml.js";
+
 // ---------------------------------------------------------------------------
 // Built-in format registration -- mirrors omnist/registry.py's
 // _register_builtins, called once from omnist/__init__.py on import.
@@ -76,6 +84,7 @@ import { registerFormat as _registerFormat } from "./registry.js";
 import { readJson as _readJson, writeJson as _writeJson, checkJson as _checkJson } from "./formats/json.js";
 import { readOml as _readOml, writeOml as _writeOml, checkOml as _checkOml } from "./oml.js";
 import { readToml as _readToml, writeToml as _writeToml, checkToml as _checkToml } from "./formats/toml.js";
+import { readYaml as _readYaml, writeYaml as _writeYaml, checkYaml as _checkYaml } from "./formats/yaml.js";
 
 _registerFormat({
   name: "json",
@@ -96,6 +105,13 @@ _registerFormat({
   read: _readToml,
   write: _writeToml as (node: unknown, opts?: unknown) => string,
   check: _checkToml as (node: unknown) => _WriteReport,
+});
+
+_registerFormat({
+  name: "yaml",
+  read: _readYaml,
+  write: _writeYaml as (node: unknown, opts?: unknown) => string,
+  check: _checkYaml as (node: unknown) => _WriteReport,
 });
 
 export const VERSION = "0.0.1-alpha";
