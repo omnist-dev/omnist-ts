@@ -97,6 +97,36 @@ type GroupName =
   | "SQUOTE"
   | Exclude<TokKind, "SEP" | "STRING" | "EOF">;
 
+// Static, allocation-free list of GroupName in MASTER's alternation order --
+// used by Scanner.next to find which named group matched without calling
+// Object.keys(m.groups) (a fresh array + linear scan) on every single token.
+// See issue #35: on a 100k-edge document this dispatch runs ~400k-500k
+// times, so avoiding the per-call allocation matters.
+const GROUP_NAMES: readonly GroupName[] = [
+  "SEPWS",
+  "DQUOTE3",
+  "DQFAST",
+  "DQUOTE",
+  "RAW",
+  "SQUOTE",
+  "LBRACE",
+  "RBRACE",
+  "LBRACKET",
+  "RBRACKET",
+  "COMMA",
+  "COLON",
+  "DATETIME",
+  "DATE",
+  "TIME",
+  "NUMDEC",
+  "NUMEXP",
+  "NEGINF",
+  "NANLIT",
+  "POSINF",
+  "INTEGER",
+  "IDENT",
+];
+
 const RESERVED: ReadonlySet<string> = new Set(["null", "true", "false"]);
 const RESERVED_NUMBER: ReadonlySet<string> = new Set(["nan", "inf", "-inf"]);
 
@@ -218,9 +248,21 @@ class Scanner {
       // of `(?<name>...)` groups), so a successful match always has `.groups`.
       // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
       const groups = m.groups!;
-      const kind = (Object.keys(groups) as GroupName[]).find(
-        (k) => groups[k] !== undefined,
-      );
+      let kind: GroupName | undefined;
+      // Walk the static GROUP_NAMES array instead of Object.keys(groups):
+      // no per-call allocation, and a plain indexed for-loop over a small
+      // fixed array beats both Object.keys().find() and a for-in loop over
+      // the (null-prototype) match-groups object -- measured in the PR for
+      // issue #35.
+      for (let gi = 0; gi < GROUP_NAMES.length; gi++) {
+        // In-bounds index; see the bounds check in the loop condition.
+        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+        const k = GROUP_NAMES[gi]!;
+        if (groups[k] !== undefined) {
+          kind = k;
+          break;
+        }
+      }
       const end = MASTER.lastIndex;
       /* v8 ignore start -- unreachable: MASTER always has exactly one named
        * alternative matched whenever `m` is non-null (the whole pattern is
