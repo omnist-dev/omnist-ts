@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { doc } from "../../src/document.js";
+import type { Node } from "../../src/document.js";
 import { ParseError, WriteError } from "../../src/errors.js";
 import { WriteReport } from "../../src/report.js";
 import { readJson, writeJson, checkJson } from "../../src/formats/json.js";
@@ -189,4 +190,57 @@ describe("remaining serialize branches", () => {
     expect(writeJson(node)).toBe("{}");
   });
 
+});
+
+// Issue #32 (security regression): a JSON document with a "__proto__" key
+// is untrusted input reaching readJson/writeJson via document.ts's
+// grouped(). Before the fix, writeJson(readJson(...)) on such input threw
+// "cannot serialize Object" -- a denial-of-service crash -- because
+// grouped() corrupted the built object's own prototype instead of storing
+// "__proto__" as a normal data key. This proves the full read/write round
+// trip is safe end-to-end, and that global Object.prototype is never
+// touched.
+describe("readJson/writeJson: __proto__ label round-trips safely (issue #32)", () => {
+  it("round-trips a top-level __proto__ key without throwing or corrupting data", () => {
+    const malicious = '{"__proto__": {"polluted": true}, "safe": 1}';
+    const node = readJson(malicious);
+    const text = writeJson(node);
+    const reparsed = JSON.parse(text);
+    expect(Object.prototype.hasOwnProperty.call(reparsed, "__proto__")).toBe(true);
+    expect((reparsed as Record<string, unknown>)["__proto__"]).toEqual({ polluted: true });
+    expect((reparsed as Record<string, unknown>).safe).toBe(1);
+  });
+
+  it("never pollutes the global Object.prototype", () => {
+    const malicious = '{"__proto__": {"polluted": true}}';
+    const node = readJson(malicious);
+    writeJson(node);
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+    expect(Object.getPrototypeOf({})).toBe(Object.prototype);
+  });
+
+  it("constructor/prototype keys also round-trip as ordinary data", () => {
+    const malicious = '{"constructor": {"prototype": {"polluted": true}}}';
+    const node = readJson(malicious);
+    const text = writeJson(node);
+    expect(JSON.parse(text)).toEqual({ constructor: { prototype: { polluted: true } } });
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+  });
+
+  it("regression: fast-check counterexample from PR #30 CI (seed 1037922291) via writeJson directly", () => {
+    // Reported independently by a user against master (pre-fix): fast-check's
+    // property fuzzing in test/fuzz.test.ts intermittently found this exact
+    // document -- a " "-labeled edge nesting an empty "__proto__" edge list --
+    // crashing writeJson with "TypeError: cannot serialize Object", because
+    // grouped() (document.ts) built its output object via a plain {} literal:
+    // out["__proto__"] = value reassigns the built object's own prototype
+    // rather than creating a property, so the corrupted object then fails
+    // isPlainRecord's Object.getPrototypeOf check inside serialize(). Fixed
+    // by grouped() using Object.create(null); this pins the exact reported
+    // counterexample as a permanent regression rather than relying on
+    // fast-check's random seed to rediscover it.
+    const node: Node = [{ label: " ", target: [{ label: "__proto__", target: [] }] }];
+    expect(() => writeJson(node)).not.toThrow();
+    expect(writeJson(node)).toBe('{" ": {"__proto__": {}}}');
+  });
 });
