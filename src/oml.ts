@@ -32,16 +32,17 @@
  * written back as a quoted string -- reading that string back yields the
  * identical string value either way, so the round trip still holds exactly.
  *
- * ## Schema-directed reads (scoping note, issue #5)
+ * ## Schema-directed reads (issue #7)
  *
  * `readOml(text, { schema })` accepts a `Schema` (issue #3, `src/schema.ts`)
- * but only uses it for validation-shape checking via `schema.validate` --
- * it does *not* perform leaf-type conversion/coercion (e.g. turning a
- * schema-declared `number` field's integer-shaped value into a
- * floating-point one, or a `date`-shaped string into a `Date`). That is
- * `materialize`/`deserialize.ts`'s job (issue #7), which does not exist yet.
- * If the parsed document fails `schema.validate`, `readOml` raises a
- * `ParseError` carrying the full structured issue list.
+ * and hands the parsed node to `materialize` (`src/deserialize.ts`, issue
+ * #7), which both leaf-type-converts (e.g. a schema-declared `number`
+ * field's integer-shaped value into a floating-point one, or a
+ * `date`-shaped string into a `Date`) and shape-checks (cardinality,
+ * closedness) in one pass -- see that module's file-top comment. If the
+ * result can't be made to conform, `materialize` raises a `ParseError`
+ * carrying the full structured issue list (every problem found, not just
+ * the first); `readOml` lets that propagate as-is.
  *
  * ## `WriteReport`/`Adjustment` stub (issue #5 -> #8 handoff note)
  *
@@ -56,9 +57,10 @@
  */
 
 import type { Edge, Node, Scalar } from "./document.js";
-import { Doc } from "./document.js";
 import { ParseError } from "./errors.js";
 import type { Schema } from "./schema.js";
+import { materialize } from "./deserialize.js";
+import { parseDateToken, parseDatetimeToken, parseTimeToken } from "./temporal.js";
 
 // Matches src/document.ts's own MAX_DEPTH and MAX_INT_DIGITS constants
 // (locally redefined here, same as src/schema.ts's own MAX_DEPTH -- see
@@ -484,95 +486,6 @@ function decodeEscape(s: string, i: number): [string, number] {
 }
 
 // ---------------------------------------------------------------------------
-// Temporal literal parsing (DATE / TIME / DATETIME) -- see file-top comment
-// for the date/datetime -> Date mapping this port uses.
-// ---------------------------------------------------------------------------
-
-function daysInMonth(y: number, m: number): number {
-  return new Date(Date.UTC(y, m, 0)).getUTCDate();
-}
-
-const DATE_TOKEN_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
-const TIME_TOKEN_RE =
-  /^(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,6}))?)?(?:([+-])(\d{2}):(\d{2}))?$/;
-
-function parseDateToken(text: string): Date | null {
-  const m = DATE_TOKEN_RE.exec(text);
-  /* v8 ignore start -- unreachable via the public API: this is only ever
-   * called with text already matched by the tokenizer's DATE/DATETIME
-   * lexical rule (DATE_SRC), which is a strict superset-shape of
-   * DATE_TOKEN_RE, so the exec above always succeeds. Kept as a defensive
-   * backstop matching this function's `| null` return contract. */
-  if (!m) return null;
-  /* v8 ignore stop */
-  const y = Number(m[1]);
-  const mo = Number(m[2]);
-  const d = Number(m[3]);
-  if (mo < 1 || mo > 12) return null;
-  if (d < 1 || d > daysInMonth(y, mo)) return null;
-  return new Date(Date.UTC(y, mo - 1, d));
-}
-
-interface TimeParts {
-  hh: number;
-  mm: number;
-  ss: number;
-  ms: number;
-  offsetMin: number | null;
-}
-
-function parseTimeToken(text: string): TimeParts | null {
-  const m = TIME_TOKEN_RE.exec(text);
-  /* v8 ignore start -- unreachable via the public API: this is only ever
-   * called with text already matched by the tokenizer's TIME/DATETIME
-   * lexical rule (TIME_BODY_SRC), which TIME_TOKEN_RE mirrors exactly, so
-   * the exec above always succeeds. Kept as a defensive backstop matching
-   * this function's `| null` return contract. */
-  if (!m) return null;
-  /* v8 ignore stop */
-  const hh = Number(m[1]);
-  const mm = Number(m[2]);
-  const ss = m[3] !== undefined ? Number(m[3]) : 0;
-  if (hh > 23 || mm > 59 || ss > 59) return null;
-  let ms = 0;
-  if (m[4] !== undefined) {
-    ms = Number((m[4] + "000").slice(0, 3));
-  }
-  let offsetMin: number | null = null;
-  if (m[5] !== undefined) {
-    const sign = m[5] === "-" ? -1 : 1;
-    const oh = Number(m[6]);
-    const om = Number(m[7]);
-    if (oh > 23 || om > 59) return null;
-    offsetMin = sign * (oh * 60 + om);
-  }
-  return { hh, mm, ss, ms, offsetMin };
-}
-
-function parseDatetimeToken(text: string): Date | null {
-  const tIdx = text.indexOf("T");
-  /* v8 ignore start -- unreachable via the public API: this is only ever
-   * called with a DATETIME token's matched text, and DATETIME_SRC (the
-   * tokenizer's regex, above) is literally `DATE_SRC + "T" + TIME_BODY_SRC`,
-   * so `text` always contains a "T". Kept as a defensive backstop matching
-   * this function's `| null` return contract, not a reachable branch. */
-  if (tIdx === -1) return null;
-  /* v8 ignore stop */
-  const date = parseDateToken(text.slice(0, tIdx));
-  if (date === null) return null;
-  const time = parseTimeToken(text.slice(tIdx + 1));
-  if (time === null) return null;
-  let epoch =
-    date.getTime() +
-    ((time.hh * 60 + time.mm) * 60 + time.ss) * 1000 +
-    time.ms;
-  if (time.offsetMin !== null) {
-    epoch -= time.offsetMin * 60000;
-  }
-  return new Date(epoch);
-}
-
-// ---------------------------------------------------------------------------
 // Parser
 // ---------------------------------------------------------------------------
 
@@ -868,9 +781,11 @@ class Parser {
 // ---------------------------------------------------------------------------
 
 export interface ReadOmlOptions {
-  /** If given, the parsed document is checked against this schema's shape
-   * via `schema.validate` (see file-top comment: no leaf-type conversion --
-   * that is issue #7's `materialize`, not implemented here). */
+  /** If given, the parsed document is run through `materialize` (issue #7,
+   * `src/deserialize.ts`) against this schema: leaf values are upgraded
+   * (e.g. an ISO date string to a `Date`) and the shape is checked
+   * (cardinality, closedness), guaranteeing the result conforms -- or
+   * raising `ParseError` with the full structured issue list otherwise. */
   readonly schema?: Schema;
 }
 
@@ -879,14 +794,7 @@ export function readOml(text: string, opts: ReadOmlOptions = {}): Node {
   const scanner = new Scanner(text);
   const node = new Parser(scanner).parseDocument();
   if (opts.schema !== undefined) {
-    const result = opts.schema.validate(new Doc(node));
-    if (!result.ok) {
-      throw new ParseError(
-        "document does not conform to the schema:\n" +
-          result.errors.map((e) => `  at ${e.path}: ${e.message}`).join("\n"),
-        result.errors,
-      );
-    }
+    return materialize(node, opts.schema);
   }
   return node;
 }
