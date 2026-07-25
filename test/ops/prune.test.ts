@@ -87,4 +87,18 @@ describe("prune", () => {
     expect(recordField(getRec(p, "A"), "x")).not.toBeUndefined();
     expect(equivalent(p, s)).toBe(true);
   });
+
+  it("keeps an unsatisfiable root's optional unsatisfiable fields intact", () => {
+    const s = parseSchema(
+      'record A { "mandatory": B, "optional" [0,1]: Dead }\n' +
+      'record B { "ref": A }\n' +
+      'record Dead { "self": Dead }\n' +
+      'root A'
+    );
+    const p = prune(s);
+    expect(isEmpty(p)).toBe(true);
+    expect(recordField(getRec(p, "A"), "mandatory")).not.toBeUndefined();
+    expect(recordField(getRec(p, "A"), "optional")).not.toBeUndefined();
+    expect(equivalent(p, s)).toBe(true);
+  });
 });
