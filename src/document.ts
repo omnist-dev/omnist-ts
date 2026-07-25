@@ -384,7 +384,7 @@ function copyNode(node: Node, depth = 0): Node {
   return node;
 }
 
-function grouped(node: Node, depth = 0): unknown {
+export function grouped(node: Node, depth = 0): unknown {
   if (!Array.isArray(node)) return node;
   if (depth > MAX_DEPTH) {
     throw new DocumentError(`nesting exceeds the maximum depth (${MAX_DEPTH})`);

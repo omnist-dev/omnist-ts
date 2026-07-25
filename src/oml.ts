@@ -43,21 +43,11 @@
  * result can't be made to conform, `materialize` raises a `ParseError`
  * carrying the full structured issue list (every problem found, not just
  * the first); `readOml` lets that propagate as-is.
- *
- * ## `WriteReport`/`Adjustment` stub (issue #5 -> #8 handoff note)
- *
- * `report.ts` (issue #8) doesn't exist yet, so this module defines a
- * minimal local `WriteReport`/`Adjustment` shape matching the public
- * surface of Python's `omnist/report.py` (`Adjustment { path, code,
- * severity, message }`, `WriteReport { adjustments: Adjustment[] }`).
- * `checkOml` always returns an empty report -- OML is lossless, so it never
- * actually has anything to report -- but the *shape* matches so issue #8
- * can consolidate this into a shared `report.ts` later without an API
- * break on this module's exports.
  */
 
 import type { Edge, Node, Scalar } from "./document.js";
 import { ParseError } from "./errors.js";
+import { WriteReport } from "./report.js";
 import type { Schema } from "./schema.js";
 import { materialize } from "./deserialize.js";
 import { parseDateToken, parseDatetimeToken, parseTimeToken } from "./temporal.js";
@@ -68,30 +58,6 @@ import { parseDateToken, parseDatetimeToken, parseTimeToken } from "./temporal.j
 // shared guard constant" convention in this port).
 const MAX_DEPTH = 200;
 const MAX_INT_DIGITS = 4300;
-
-// ---------------------------------------------------------------------------
-// WriteReport / Adjustment stub (see file-top comment) -- issue #8's scope
-// to consolidate into a shared report.ts.
-// ---------------------------------------------------------------------------
-
-/** One adjustment a (lossy) writer had to make. Mirrors `omnist/report.py`'s
- * `Adjustment` NamedTuple. OML's own writer never produces one of these --
- * see `checkOml`. */
-export interface Adjustment {
-  readonly path: string;
-  readonly code: string;
-  readonly severity: "warning" | "error";
-  readonly message: string;
-}
-
-/** Everything a writer adjusted. Mirrors `omnist/report.py`'s `WriteReport`,
- * minimally: just the flat adjustment list (no `warnings`/`errors`
- * getters yet -- add those when `report.ts` lands, issue #8). */
-export interface WriteReport {
-  readonly adjustments: readonly Adjustment[];
-}
-
-const EMPTY_REPORT: WriteReport = { adjustments: [] };
 
 // ---------------------------------------------------------------------------
 // Tokenizer
@@ -828,11 +794,10 @@ export function writeOml(node: Node, opts: WriteOmlOptions = {}): string {
   return writeEdges(node, 0, indent, arrays, 0);
 }
 
-/** OML can hold every Document losslessly; always an empty report. See the
- * file-top comment for the `WriteReport` stub this returns. */
+/** OML can hold every Document losslessly; always returns an empty {@link WriteReport}. */
 export function checkOml(node: Node): WriteReport {
   void node; // OML is lossless: nothing to inspect, always an empty report.
-  return EMPTY_REPORT;
+  return new WriteReport();
 }
 
 /** Group `edges` into maximal runs of consecutive same-label edges,
