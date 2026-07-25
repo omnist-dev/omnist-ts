@@ -6,6 +6,44 @@ the first documented release of the TypeScript port; the public API
 mirrors the upstream Python package's `__all__` (camelCase names of the
 same functions).
 
+## [v0.0.4-alpha] -- OML write-side depth guard, docs completeness
+
+- **`writeOml` had no depth guard** (issue #70): every other codec's
+  writer (`writeJson`/`writeYaml`/`writeToml`/`writeXml`) got a
+  `checkWriteDepth` call as part of issue #37's fix; `writeOml` was
+  missed. A hand-built `Node` (bypassing `buildNode`'s construction-time
+  check, since `Node`/`Edge` are exported public types) nested past 200
+  levels wrote successfully with no error, risking an uncaught
+  `RangeError` (stack overflow) instead of the library's own error type.
+  Now raises `WriteError` naming the limit, matching `readOml`'s existing
+  guard, in both pretty and compact write modes.
+- **`docs/formats/oml.md` brought to full documentation depth** (issue
+  #67): expanded from 38 lines to the same grammar-complete coverage the
+  other three format pages already have (issue #57) -- reading/writing,
+  the zero-adjustment guarantee, temporal-offset and TIME-literal
+  round-tripping (issues #51/#52), numeric edge cases, comments, raw/
+  multiline strings, reserved words, and the depth guard. Took three
+  review rounds to land clean: the first pass had a fabricated claim
+  about integer vs. float `-0` sign handling on read (both actually
+  preserve sign; only write loses it), and issue #70 landing mid-review
+  required two follow-up passes to fully reconcile every reference to
+  the depth-guard behavior across the page, including one stale internal
+  anchor link -- a reminder that a page under active review needs a full
+  re-read, not just a diff-check, when its subject matter changes under
+  it.
+- **Workflow playbook**: added an explicit policy
+  (`docs/workflow-playbook.md`) for when this port's behavior disagrees
+  with upstream Python -- fix the port by default, but implement against
+  the formal spec and file an issue on the upstream repo when Python
+  itself is demonstrably wrong. Formalizes the practice already used for
+  the `prune()` non-determinism finding
+  ([omnist-dev/omnist#253](https://github.com/omnist-dev/omnist/issues/253)).
+
+**Process:** full suite (911 tests, 100% coverage), `tsc --noEmit`, and
+`eslint` verified clean before this release; every fix independently
+reviewed by a separate agent that reproduced the claimed behavior itself
+rather than trusting the report, per this repo's standing playbook rule.
+
 ## [v0.0.3-alpha] -- cross-implementation correctness pass
 
 A systematic differential comparison against the real Python `omnist`

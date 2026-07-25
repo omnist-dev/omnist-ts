@@ -25,7 +25,7 @@ describe("public entry point", () => {
   });
 
   it("exposes the current version", () => {
-    expect(VERSION).toBe("0.0.3-alpha");
+    expect(VERSION).toBe("0.0.4-alpha");
   });
 
   it("exports the seven scalar constants matching their t.* equivalents", () => {
