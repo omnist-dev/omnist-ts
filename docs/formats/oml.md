@@ -170,7 +170,8 @@ Unlike `readOml`, `writeOml` does **not** enforce the 200-level depth cap
 -- confirmed by writing a hand-built `Node` 201 levels deep (something
 `readOml` itself could never produce, since it *does* enforce the cap on
 the way in): the write succeeds with no error and no adjustment. See
-[The depth guard](#the-depth-guard) below for the read-side behavior and
+[the depth guard](#known-limitation-writeoml-has-no-depth-guard-issue-70)
+below for the read-side behavior and
 why this asymmetry exists.
 
 ## The zero-adjustment guarantee
@@ -278,15 +279,17 @@ is not one (hour must be 0-23, matching the Python implementation).
 
 ## Numeric edge cases
 
-- **Signed zero.** `-0` (integer literal) reads back as plain `0` --
-  there's no negative-zero integer at the JS numeric level, so
-  `readOml("a: -0")` gives `target === 0` with no distinguishable sign.
-  `-0.0` (float literal) *does* preserve the sign: `Object.is(target,
-  -0)` is `true`. But that sign does not survive a write -- `writeScalar`
-  renders a number with `String(v)`, and `String(-0) === "0"` in JS, so
-  `writeOml(readOml("a: -0.0"))` comes back as `a: 0`, not `a: -0.0`. This
-  is a real, one-directional loss (read preserves the sign; write does
-  not), unlike every other case on this page.
+- **Signed zero.** Both `-0` (integer literal) and `-0.0` (float
+  literal) preserve the sign on read: `Object.is(target, -0)` is `true`
+  for `readOml("a: -0")` and for `readOml("a: -0.0")` alike, since JS
+  has only one underlying numeric type and both branches route through
+  `Number(text)`, where `Number("-0") === -0`. There is no
+  int-vs-float distinction here. That sign does not survive a write,
+  though -- `writeScalar` renders a number with `String(v)`, and
+  `String(-0) === "0"` in JS, so `writeOml(readOml("a: -0.0"))` comes
+  back as `a: 0`, not `a: -0.0`. This is a real, one-directional loss
+  (read preserves the sign; write does not), unlike every other case on
+  this page.
 - **Scientific notation.** `1e10`, `1.5e-3`, and similar exponent forms
   are all valid `NUMBER` literals and parse to the expected finite
   `number`; `writeOml` renders a value like `1e10` back out via JS's
@@ -450,7 +453,7 @@ readOml("b: [1, 2, 3,]")   // [{ label: "b", target: 1 }, { label: "b", target: 
 `writeOml(node, { arrays: true })` is the write-side inverse -- see
 [Writing](#writing) above.
 
-## The depth guard
+## Known limitation: writeOml has no depth guard (issue #70)
 
 Nesting depth (the number of `{` a value may be wrapped in) is capped at
 200 **on read**, matching the Document model's own bound (`MAX_DEPTH` in
@@ -469,15 +472,20 @@ or exhausting the call stack, not a data-modeling constraint -- see
 [Numeric edge cases](#numeric-edge-cases) above for the matching integer
 digit cap.
 
-**The guard is read-side only.** `writeOml` does not re-check depth on the
-way out: a `Node` built directly (not via `readOml`, which itself could
-never hand back something over the cap) that nests past 200 levels
-writes successfully with no error. In practice this only matters for a
-`Node` assembled programmatically -- `buildNode` and every reader in this
-port cap out at 200 the same way `readOml` does, so this gap isn't
-reachable through the normal read -> transform -> write path. It's called
-out here because it's a real asymmetry with `readOml`'s own guard, not
-because it's expected to bite in practice.
+`writeOml` does not have the equivalent guard. Issue #37 gave
+`writeJson`/`writeYaml`/`writeToml`/`writeXml` their own
+`checkWriteDepth` call so that a hand-constructed `Node`/`Edge` (bypassing
+`buildNode`'s construction-time check, since both are exported public
+types) can't smuggle an over-deep structure past the writer and crash it
+with a raw `RangeError` (stack overflow) instead of the library's own
+error type. `writeOml` was apparently missed from that fix and, as of
+this writing, still has no check: a `Node` assembled programmatically
+that nests past 200 levels writes successfully with no error, and one
+deep enough would let a raw `RangeError` escape. In practice this only
+matters for a `Node` assembled programmatically -- `buildNode` and every
+reader in this port cap out at 200 the same way `readOml` does, so this
+gap isn't reachable through the normal read -> transform -> write path.
+Tracked in [issue #70](https://github.com/omnist-dev/omnist-ts/issues/70).
 
 ## Not yet implemented
 
