@@ -27,10 +27,38 @@
  * means `readOml(writeOml(node)) == node` at the *Document-node* level
  * (value equality, per `nodeEquals`), not byte-identical source-token-kind
  * preservation, which the Document model itself cannot represent losslessly
- * for a `Date` at exactly UTC midnight. A `TIME` token maps to a plain
- * `string` (again matching `document.ts`'s mapping) and is therefore always
- * written back as a quoted string -- reading that string back yields the
- * identical string value either way, so the round trip still holds exactly.
+ * for a `Date` at exactly UTC midnight -- except where the source literal
+ * carried an explicit UTC offset, which `src/temporal.ts` now records
+ * out-of-band (issue #51) so `writeOml` re-emits the offset it was given
+ * rather than silently normalizing the value to UTC. That normalization was
+ * only round-trip-safe with this implementation on both ends: Python reads an
+ * offset-less literal as a *naive local* datetime, so `2024-01-01T12:00:00Z`
+ * written back as `2024-01-01T12:00:00` changed the value across
+ * implementations. An offset-tagged datetime is also never collapsed to a bare
+ * `DATE`, even at exactly midnight, since the offset is itself the signal that
+ * a DATETIME was read.
+ *
+ * ## The `TIME` token and time-shaped strings (issue #52)
+ *
+ * A `TIME` token maps to a plain `string` (again matching `document.ts`'s
+ * mapping -- JS has no bare time-of-day type). OML is the one format this port
+ * supports whose grammar has a native `TIME` token, so quoting every such
+ * string on the way out meant a valid OML document did not survive
+ * `readOml` then `writeOml` unchanged: `a: 12:00` came back as `a: "12:00"`,
+ * which a later reader -- or Python -- sees as a string, not a time. `writeOml`
+ * therefore emits a bare `TIME` token for any string whose text is a valid TIME
+ * literal (shape *and* range, via `parseTimeToken`, so e.g. `"24:00"` stays
+ * quoted).
+ *
+ * The deliberate cost, stated because it is a real one: the Document model
+ * cannot tell a string that came from a `TIME` token from an ordinary string of
+ * the same shape, and no `WeakMap` tag can close that gap because a string is a
+ * primitive with no identity to key on. So an ordinary `"12:00"` is promoted
+ * to a `TIME` literal on write. That direction is the cheaper loss: it does not
+ * affect the Document-level round trip at all (reading a `TIME` token yields
+ * the same string back, so `readOml(writeOml(n)) == n` either way), whereas the
+ * old behavior destroyed a token the format can carry. See
+ * `docs/formats/oml.md`.
  *
  * ## Schema-directed reads (issue #7)
  *
@@ -50,7 +78,12 @@ import { ParseError } from "./errors.js";
 import { WriteReport } from "./report.js";
 import type { Schema } from "./schema.js";
 import { materialize } from "./deserialize.js";
-import { parseDateToken, parseDatetimeToken, parseTimeToken } from "./temporal.js";
+import {
+  datetimeOffset,
+  parseDateToken,
+  parseDatetimeToken,
+  parseTimeToken,
+} from "./temporal.js";
 
 // Matches src/document.ts's own MAX_DEPTH and MAX_INT_DIGITS constants
 // (locally redefined here, same as src/schema.ts's own MAX_DEPTH -- see
@@ -138,6 +171,11 @@ const RESERVED_NUMBER: ReadonlySet<string> = new Set(["nan", "inf", "-inf"]);
 const DATE_SRC = String.raw`\d{4}-\d{2}-\d{2}`;
 const TIME_BODY_SRC = String.raw`\d{2}:\d{2}(?::\d{2}(?:\.\d{1,6})?)?(?:[+-]\d{2}:\d{2})?`;
 const DATETIME_SRC = `${DATE_SRC}T${TIME_BODY_SRC}`;
+
+// The TIME token's shape, anchored, for the writer's `isTimeLiteral` check
+// (issue #52). Built from the same `TIME_BODY_SRC` the tokenizer uses, so the
+// reader and the writer cannot disagree about what a TIME literal looks like.
+const TIME_ONLY_RE = new RegExp(`^(?:${TIME_BODY_SRC})$`);
 
 // One compiled alternation, tried in the exact priority order the grammar
 // (docs/design/oml-grammar.md §1) specifies -- see that file and
@@ -963,16 +1001,44 @@ function pad4(n: number): string {
 }
 
 function writeDate(v: Date): string {
+  // An offset-tagged datetime (issue #51) is written at its source offset's
+  // wall-clock time with that offset spelled out, and never collapsed to a bare
+  // DATE: the tag is proof a DATETIME literal was read, so the midnight
+  // heuristic below has no work to do.
+  const offsetMin = datetimeOffset(v);
+  if (offsetMin !== undefined) {
+    const wall = new Date(v.getTime() + offsetMin * 60000);
+    const sign = offsetMin < 0 ? "-" : "+";
+    const abs = Math.abs(offsetMin);
+    const offset = `${sign}${pad2(Math.floor(abs / 60))}:${pad2(abs % 60)}`;
+    return `${writeDatePart(wall)}T${writeTimePart(wall)}${offset}`;
+  }
   const isMidnight =
     v.getUTCHours() === 0 &&
     v.getUTCMinutes() === 0 &&
     v.getUTCSeconds() === 0 &&
     v.getUTCMilliseconds() === 0;
-  const datePart = `${pad4(v.getUTCFullYear())}-${pad2(v.getUTCMonth() + 1)}-${pad2(v.getUTCDate())}`;
-  if (isMidnight) return datePart;
+  if (isMidnight) return writeDatePart(v);
+  return `${writeDatePart(v)}T${writeTimePart(v)}`;
+}
+
+function writeDatePart(v: Date): string {
+  return `${pad4(v.getUTCFullYear())}-${pad2(v.getUTCMonth() + 1)}-${pad2(v.getUTCDate())}`;
+}
+
+function writeTimePart(v: Date): string {
   const ms = v.getUTCMilliseconds();
   const frac = ms === 0 ? "" : `.${String(ms).padStart(3, "0")}`;
-  return `${datePart}T${pad2(v.getUTCHours())}:${pad2(v.getUTCMinutes())}:${pad2(v.getUTCSeconds())}${frac}`;
+  return `${pad2(v.getUTCHours())}:${pad2(v.getUTCMinutes())}:${pad2(v.getUTCSeconds())}${frac}`;
+}
+
+/** Whether a string is a valid OML TIME literal, and can therefore be written
+ * back as a bare TIME token rather than a quoted string (issue #52). Both
+ * halves are required: `TIME_ONLY_RE` is the token's shape and
+ * `parseTimeToken` its range/component check, so `"24:00"` -- shaped like a
+ * time but not one -- stays quoted. See the file-top comment. */
+function isTimeLiteral(s: string): boolean {
+  return TIME_ONLY_RE.test(s) && parseTimeToken(s) !== null;
 }
 
 function writeScalar(v: Scalar): string {
@@ -984,7 +1050,7 @@ function writeScalar(v: Scalar): string {
     return String(v);
   }
   if (v instanceof Date) return writeDate(v);
-  if (typeof v === "string") return writeString(v);
+  if (typeof v === "string") return isTimeLiteral(v) ? v : writeString(v);
   throw new TypeError(`${typeName(v)} has no OML scalar form`);
 }
 

@@ -463,3 +463,63 @@ describe("public-API-shaped usage (TestPublicApi's non-OSD assertions)", () => {
     expect(s.isEmpty()).toBe(false);
   });
 });
+
+describe("issue #49: calendar validity, not Date.parse day-rollover", () => {
+  // `Date.parse("2024-02-30")` rolls the overflowing day forward to 1 March
+  // instead of failing, so a nonexistent calendar date used to satisfy
+  // `date`/`datetime`. Python rejects both (`date.fromisoformat("2024-02-30")`
+  // raises "day is out of range for month"), and model.md section 10 requires
+  // a string that is not a valid bare ISO date to be rejected.
+  it("rejects a day that overflows a real month", () => {
+    for (const v of ["2024-02-30", "2023-02-29", "2024-04-31", "2024-06-31"]) {
+      expect(matchesKind(v, "date")).toBe(false);
+      expect(matchesKind(`${v}T00:00`, "datetime")).toBe(false);
+    }
+  });
+
+  it("still accepts the last real day of each of those months", () => {
+    for (const v of ["2024-02-29", "2023-02-28", "2024-04-30", "2024-06-30"]) {
+      expect(matchesKind(v, "date")).toBe(true);
+      expect(matchesKind(`${v}T00:00`, "datetime")).toBe(true);
+    }
+  });
+
+  it("agrees with the pre-existing month/day range rejections", () => {
+    expect(matchesKind("2024-13-01", "date")).toBe(false);
+    expect(matchesKind("2024-01-32", "date")).toBe(false);
+    expect(matchesKind("2024-00-01", "date")).toBe(false);
+    expect(matchesKind("2024-01-00", "date")).toBe(false);
+  });
+});
+
+describe("issue #50: hour 24 is not a valid time", () => {
+  // ISO 8601 permits 24:00 as end-of-day, and so does the ECMAScript Date Time
+  // String Format, so `Date.parse` used to accept it. Python rejects it
+  // (`time.fromisoformat("24:00")` raises "hour must be in 0..23") and so does
+  // this port's own OML tokenizer, so `matchesKind` was the odd one out.
+  it("rejects hour 24 in a time, matching the OML tokenizer and Python", () => {
+    expect(matchesKind("24:00", "time")).toBe(false);
+    expect(matchesKind("24:00:00", "time")).toBe(false);
+    expect(matchesKind("24:00:00.000", "time")).toBe(false);
+    expect(matchesKind("24:00+01:00", "time")).toBe(false);
+  });
+
+  it("rejects hour 24 in a datetime too", () => {
+    expect(matchesKind("2024-01-01T24:00", "datetime")).toBe(false);
+  });
+
+  it("still accepts the last real minute of a day", () => {
+    expect(matchesKind("23:59", "time")).toBe(true);
+    expect(matchesKind("23:59:59", "time")).toBe(true);
+    expect(matchesKind("00:00", "time")).toBe(true);
+  });
+
+  it("keeps this port's stricter offset-minute check (a decision, not an accident)", () => {
+    // Python accepts an offset of 5h60m (`time.fromisoformat("12:00+05:60")`
+    // normalizes it to +06:00); this port's `parseTimeToken` rejects an offset
+    // minute > 59, and the OML tokenizer therefore does too. Kept deliberately:
+    // one spelling per instant, and the two layers agree with each other.
+    expect(matchesKind("12:00+05:60", "time")).toBe(false);
+    expect(matchesKind("12:00+05:59", "time")).toBe(true);
+  });
+});

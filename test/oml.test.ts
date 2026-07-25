@@ -1047,3 +1047,96 @@ describe("property: writeOml({ arrays: true }) never reorders / always round-tri
     );
   });
 });
+
+/** A literal newline, spelled without an escape so a multi-edge document
+ * literal below reads as the exact text the doc example shows. */
+const NEWLINE = String.fromCharCode(10);
+
+describe("issue #51: writeOml preserves a datetime's UTC offset", () => {
+  // Issue #26 fixed the local-vs-offset asymmetry for TOML with a module-local
+  // WeakSet; oml.ts had the identical asymmetry and never got the treatment, so
+  // an offset literal was normalized to UTC and written back with no offset at
+  // all. That is only round-trip-stable if this implementation is on both ends
+  // -- Python reads an offset-less literal as a naive local datetime.
+  it.each([
+    "a: 2024-01-01T12:00:00-08:00",
+    "a: 2024-01-01T12:00:00+00:00",
+    "a: 2024-01-01T12:00:00+05:30",
+    "a: 2024-01-01T00:00:00+00:00",
+    "a: 2024-01-01T08:00:00+08:00",
+    "a: 2024-01-01T12:00:00.500-08:00",
+  ])("round-trips %s as text", (src) => {
+    expect(writeOml(readOml(src), { indent: null })).toBe(src);
+  });
+
+  it("keeps the instant unchanged while preserving the offset spelling", () => {
+    const edges = readOml("a: 2024-01-01T12:00:00-08:00") as Edge[];
+    expect((at(edges, 0).target as Date).toISOString()).toBe("2024-01-01T20:00:00.000Z");
+  });
+
+  it("leaves an offset-less datetime literal offset-less", () => {
+    const src = "a: 2024-01-01T12:00:00";
+    expect(writeOml(readOml(src), { indent: null })).toBe(src);
+  });
+
+  it("writes an untagged Date (built by application code) with no offset", () => {
+    const edges: Edge[] = [{ label: "a", target: new Date(Date.UTC(2024, 0, 1, 12, 0, 0)) }];
+    expect(writeOml(edges, { indent: null })).toBe("a: 2024-01-01T12:00:00");
+  });
+
+  it("a DATE token stays a bare date, offsets being meaningless for it", () => {
+    expect(writeOml(readOml("a: 2024-01-01"), { indent: null })).toBe("a: 2024-01-01");
+  });
+
+  it("round-trips docs/formats/oml.md's temporal-offset example verbatim", () => {
+    const src = [
+      "a: 2024-01-01T12:00:00-08:00",
+      "b: 2024-01-01T12:00:00+00:00",
+      "c: 2024-01-01T12:00:00",
+    ].join(NEWLINE);
+    expect(writeOml(readOml(src))).toBe(src);
+  });
+});
+
+describe("issue #52: a TIME literal round-trips as a TIME token", () => {
+  // `time` is a plain string at the Document layer (no bare time-of-day type in
+  // JS), and the writer used to quote every string -- so `a: 12:00` came back
+  // out as `a: "12:00"`, which a subsequent OML reader (or Python) sees as a
+  // string, not a time. OML is the one supported format with a native TIME
+  // token, so this was the one place the port discarded information the format
+  // itself can carry.
+  it.each(["a: 12:00", "a: 12:00:00", "a: 23:59:59.500", "a: 12:00+05:30", "a: 00:00"])(
+    "round-trips %s as text",
+    (src) => {
+      expect(writeOml(readOml(src), { indent: null })).toBe(src);
+    },
+  );
+
+  it("still reads a TIME token as a plain string at the Document layer", () => {
+    expect(readOml("a: 12:00")).toEqual([e("a", "12:00")]);
+  });
+
+  it("a time-shaped string is written as a TIME token, and reads back identically", () => {
+    // The documented cost of this fix: the Document model cannot tell a string
+    // that came from a TIME token from an ordinary string of that exact shape,
+    // so an ordinary string is promoted to a TIME token on write. The value
+    // round-trip is unaffected -- reading a TIME token yields the same string
+    // back -- so `readOml(writeOml(n))` still equals `n`.
+    const edges: Edge[] = [{ label: "a", target: "12:00" }];
+    expect(writeOml(edges, { indent: null })).toBe("a: 12:00");
+    expect(readOml(writeOml(edges))).toEqual(edges);
+  });
+
+  it("round-trips docs/formats/oml.md's TIME-token example verbatim", () => {
+    const src = ["a: 12:00", 'b: "24:00"', 'c: "noon"'].join(NEWLINE);
+    expect(writeOml(readOml(src))).toBe(src);
+  });
+
+  it("a string that is only time-shaped, not a valid time, stays quoted", () => {
+    for (const s of ["24:00", "12:60", "12:00:60", "12:00+05:60", "12:0", "1:00"]) {
+      const written = writeOml([{ label: "a", target: s }], { indent: null });
+      expect(written).toBe(`a: ${JSON.stringify(s)}`);
+      expect(readOml(written)).toEqual([e("a", s)]);
+    }
+  });
+});

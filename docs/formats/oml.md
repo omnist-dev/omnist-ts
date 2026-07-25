@@ -34,5 +34,50 @@ d: 2024-01-01
   unsuffixed integers, decimal/exponent numbers, `true`/`false`, ISO
   `date`/`time`/`datetime` tokens, and `null`.
 
+## Temporal values
+
+OML is the only supported format whose grammar has native `date`, `time` and
+`datetime` tokens, so it is the only one where the Document model -- not the
+format -- is the limiting factor. Two consequences are worth knowing.
+
+**A datetime keeps its UTC offset.** An offset in the source literal is
+preserved on write, rather than normalized away:
+
+```
+a: 2024-01-01T12:00:00-08:00
+b: 2024-01-01T12:00:00+00:00
+c: 2024-01-01T12:00:00
+```
+<!-- verified-by: test/oml.test.ts "issue #51: writeOml preserves a datetime's UTC offset" -->
+
+All three round-trip as written. `a` and `b` are the same instants they were
+read as; `c` carries no offset and gets none back. This matters across
+implementations, not just within one: the Python implementation reads an
+offset-less literal as a *naive local* datetime, so rewriting `b` as `c` would
+change the value for a Python reader even though this port reads both as UTC.
+
+**A time-shaped string is written as a `TIME` token.** `time` has no native JS
+type, so the Document model represents it as a plain string (see
+[overview.md](overview.md)). Nothing distinguishes a string that came from a
+`TIME` token from an ordinary string of the same text -- a string is a
+primitive, so there is no identity to hang an out-of-band tag on, which is how
+the `date`-vs-`datetime` and local-vs-offset ambiguities are resolved. `writeOml`
+resolves the ambiguity in favour of the token: any string that is a valid TIME
+literal is written bare.
+
+```
+a: 12:00
+b: "24:00"
+c: "noon"
+```
+<!-- verified-by: test/oml.test.ts "issue #52: a TIME literal round-trips as a TIME token" -->
+
+So `a: 12:00` survives a read/write round trip as a `TIME` token, and the
+trade-off is that an ordinary string `"12:00"` is promoted to one. The
+Document-level round trip is exact either way, since reading a `TIME` token
+yields that same string back; only the token kind seen by a *later* reader
+changes. `b` stays quoted because `24:00` is shaped like a time but is not one
+(hour must be 0-23, matching the Python implementation).
+
 The full ABNF grammar, verified against the parser, lives at
 [design/oml-grammar.md](../design/oml-grammar.md).

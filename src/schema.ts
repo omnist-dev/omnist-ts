@@ -25,7 +25,12 @@
 
 import { SchemaError, type OmnistIssue } from "./errors.js";
 import { Doc } from "./document.js";
-import { dateKind } from "./temporal.js";
+import {
+  dateKind,
+  parseDateToken,
+  parseDatetimeToken,
+  parseTimeToken,
+} from "./temporal.js";
 import { compatibleWith as opsCompatibleWith, equivalent as opsEquivalent } from "./ops/subschema.js";
 import { normalize as opsNormalize } from "./ops/minimize.js";
 import { extract as opsExtract } from "./ops/extract.js";
@@ -285,20 +290,38 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const TIME_RE = /^\d{2}:\d{2}(:\d{2}(\.\d{1,6})?)?([+-]\d{2}:\d{2})?$/;
 const DATETIME_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,6})?)?([+-]\d{2}:\d{2})?$/;
 
+// Shape check, then range/calendar check via `src/temporal.ts` -- NOT via
+// `Date.parse` (issues #49 and #50). `Date.parse` is wrong for this job twice
+// over: it rolls a day overflow forward rather than failing, so
+// `Date.parse("2024-02-30")` returns 1 March and a nonexistent calendar date
+// used to satisfy `date`; and the ECMAScript Date Time String Format permits
+// `24:00` as end-of-day, so hour 24 used to satisfy `time`. Python rejects
+// both (`date.fromisoformat("2024-02-30")` and `time.fromisoformat("24:00")`
+// each raise `ValueError`), and model.md section 10 requires a string that is
+// not a valid bare ISO date to be rejected.
+//
+// Routing these through `parseDateToken`/`parseTimeToken`/`parseDatetimeToken`
+// -- the same functions `oml.ts`'s tokenizer and `deserialize.ts`'s
+// `materialize` already use -- puts the range and calendar rules in exactly
+// one place, so the validation layer and the parse layer cannot drift apart
+// again. That drift was issue #49's second, worse symptom: `validate` and
+// `materialize` disagreed on `"2024-02-30"`, violating the invariant
+// `deserialize.ts` states in its own file header.
+//
+// The `*_RE` shape test still runs first, both because it is the documented
+// spelling gate (narrower than the tokenizer regexes' supersets are allowed to
+// be) and because `temporal.ts` documents that its callers shape-check first.
+
 function isIsoDateString(v: unknown): boolean {
-  return typeof v === "string" && DATE_RE.test(v) && !Number.isNaN(Date.parse(v));
+  return typeof v === "string" && DATE_RE.test(v) && parseDateToken(v) !== null;
 }
 
 function isIsoTimeString(v: unknown): boolean {
-  if (typeof v !== "string" || !TIME_RE.test(v)) return false;
-  // A bare time has no calendar date; compose one to validate the
-  // time-of-day components via the platform parser (matches Python's
-  // `datetime.time.fromisoformat` shape check + parse split).
-  return !Number.isNaN(Date.parse(`1970-01-01T${v}`));
+  return typeof v === "string" && TIME_RE.test(v) && parseTimeToken(v) !== null;
 }
 
 function isIsoDatetimeString(v: unknown): boolean {
-  return typeof v === "string" && DATETIME_RE.test(v) && !Number.isNaN(Date.parse(v));
+  return typeof v === "string" && DATETIME_RE.test(v) && parseDatetimeToken(v) !== null;
 }
 
 /**
@@ -349,12 +372,13 @@ export function matchesKind(value: unknown, name: ScalarKind): boolean {
       return isIsoTimeString(value);
     case "datetime":
       if (value instanceof Date) return dateKind(value) !== "date";
-      // `Date.parse` on a bare date string succeeds (defaults the missing
-      // time to midnight UTC) -- exclude anything that's ALSO a bare date
-      // string so `date`/`datetime` stay mutually exclusive on the string
-      // form, matching Python's `_is_iso(..., datetime) and not
-      // _is_iso(..., date)`.
-      return isIsoDatetimeString(value) && !isIsoDateString(value);
+      // `date`/`datetime` stay mutually exclusive on the string form, matching
+      // Python's `_is_iso(..., datetime) and not _is_iso(..., date)`: no extra
+      // exclusion clause is needed for it, since `DATETIME_RE` requires the
+      // 'T' separator that `DATE_RE` forbids. (Before issue #49 one was
+      // needed, because `Date.parse` accepted a bare date string as a
+      // datetime, defaulting the missing time to midnight UTC.)
+      return isIsoDatetimeString(value);
     /* v8 ignore start -- exhaustiveness guard: ScalarKind is a closed
      * 7-member union; every member is handled above, so this default can
      * never fire through the public API (only via an explicit type

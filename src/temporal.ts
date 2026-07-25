@@ -43,6 +43,35 @@
  * only ever originates from a parse or a schema-directed construction in
  * Python too; there's no "bare, unattributed" `date` object floating
  * around outside one).
+ *
+ * ## UTC-offset tagging (issue #51)
+ *
+ * The same problem one level down. A DATETIME literal may carry an explicit
+ * UTC offset (`2024-01-01T12:00:00-08:00`) or none at all
+ * (`2024-01-01T12:00:00`); `parseDatetimeToken` normalizes both to a `Date`,
+ * which is a bare instant and remembers neither. Writing such a value back out
+ * therefore used to drop the offset entirely, so `writeOml` turned
+ * `a: 2024-01-01T12:00:00-08:00` into `a: 2024-01-01T20:00:00` -- the same
+ * instant to *this* implementation (which reads an offset-less literal as
+ * UTC), but a different one to Python, which reads an offset-less literal as a
+ * naive local datetime. The value drifted across implementations.
+ *
+ * So `parseDatetimeToken` also records the source literal's offset, in minutes
+ * east of UTC, in `DATETIME_OFFSET` -- the same by-identity `WeakMap`
+ * technique as `DATE_KIND`, and `undefined` for an offset-less literal.
+ * `oml.ts`'s writer consults `datetimeOffset()` and re-emits the offset it was
+ * given, so an OML datetime is text-stable through a read/write round trip.
+ *
+ * Issue #26 solved the narrower local-vs-offset half of this for TOML with a
+ * module-local `WeakSet` in `src/formats/toml.ts`, and deferred the choice of
+ * where the tag should live on the grounds that only one codec cared. Two now
+ * do, so the tag lives here. `toml.ts` keeps its own `WeakSet` rather than
+ * sharing this map, for a reason that is not inertia: TOML datetimes are
+ * parsed by `smol-toml`, not by this module, so there is no shared *producer*
+ * to hang the tag on -- and TOML only needs the local-vs-offset bit, since
+ * `tomli_w` (and this port, matching it) writes every aware datetime as `Z`
+ * rather than preserving the source offset. OML preserves the offset itself,
+ * which needs the full minute count.
  */
 
 function daysInMonth(y: number, m: number): number {
@@ -59,6 +88,11 @@ export type DateKind = "date" | "datetime";
 
 const DATE_KIND = new WeakMap<Date, DateKind>();
 
+/** Minutes east of UTC, for a `Date` built from a DATETIME literal that
+ * carried an explicit offset. See the file-top comment ("UTC-offset
+ * tagging"). */
+const DATETIME_OFFSET = new WeakMap<Date, number>();
+
 function tagDateKind(d: Date, kind: DateKind): Date {
   DATE_KIND.set(d, kind);
   return d;
@@ -69,6 +103,17 @@ function tagDateKind(d: Date, kind: DateKind): Date {
  * any schema-directed read). Exported for `schema.ts`'s `matchesKind`. */
 export function dateKind(d: Date): DateKind | undefined {
   return DATE_KIND.get(d);
+}
+
+/** The UTC offset, in minutes east of UTC, of the DATETIME literal
+ * `parseDatetimeToken` built this `Date` from, or `undefined` if that literal
+ * carried no offset (or the `Date` never came from this module at all).
+ * Exported for `oml.ts`'s writer -- see the file-top comment ("UTC-offset
+ * tagging", issue #51). Note that `0` (`+00:00`) and `undefined` (no offset)
+ * are meaningfully different and must not be conflated: OML, like TOML, writes
+ * them back as different literals. */
+export function datetimeOffset(d: Date): number | undefined {
+  return DATETIME_OFFSET.get(d);
 }
 
 /** Parse a `YYYY-MM-DD` date token into a UTC-midnight `Date`, or `null` if
@@ -160,5 +205,10 @@ export function parseDatetimeToken(text: string): Date | null {
   if (time.offsetMin !== null) {
     epoch -= time.offsetMin * 60000;
   }
-  return tagDateKind(new Date(epoch), "datetime");
+  const out = tagDateKind(new Date(epoch), "datetime");
+  // Remember the source literal's offset so a writer can re-emit it (issue
+  // #51). An offset-less literal is left untagged, which is *not* the same as
+  // tagging it 0 -- see `datetimeOffset`.
+  if (time.offsetMin !== null) DATETIME_OFFSET.set(out, time.offsetMin);
+  return out;
 }

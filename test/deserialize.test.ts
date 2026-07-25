@@ -314,3 +314,45 @@ describe("materialize: a Date instance is checked against the field's kind, not 
     expect(materialize([e("x", bare)], datetimeSchema)).toEqual([e("x", bare)]);
   });
 });
+
+describe("issue #49: validate/materialize agreement on a calendar-invalid date", () => {
+  // The stated invariant (file header, and `materializeTemporal`'s own comment)
+  // is that `validate` and `materialize` can never disagree on whether a
+  // string upgrades. They did: `matchesKind` deferred to `Date.parse`, which
+  // rolls a day overflow forward, while `materialize` additionally called
+  // `parseDateToken`, which is calendar-validated.
+  const CALENDAR_INVALID = ["2024-02-30", "2023-02-29", "2024-04-31"];
+
+  it("validate() rejects a calendar-invalid date, as materialize() already did", () => {
+    const s = parseSchema('record R { "d": date }\nroot R');
+    for (const v of CALENDAR_INVALID) {
+      expect(s.validate(doc({ d: v })).ok).toBe(false);
+      expect(() => materialize([e("d", v)], s)).toThrow(ParseError);
+    }
+  });
+
+  it("validate() and materialize() agree for the datetime spelling too", () => {
+    const s = parseSchema('record R { "dt": datetime }\nroot R');
+    for (const v of CALENDAR_INVALID) {
+      const spelling = `${v}T00:00:00`;
+      expect(s.validate(doc({ dt: spelling })).ok).toBe(false);
+      expect(() => materialize([e("dt", spelling)], s)).toThrow(ParseError);
+    }
+  });
+});
+
+describe("issue #50: validate/materialize agreement on hour 24", () => {
+  it("rejects 24:00 in a time field on both paths", () => {
+    const s = parseSchema('record R { "t": time }\nroot R');
+    for (const v of ["24:00", "24:00:00"]) {
+      expect(s.validate(doc({ t: v })).ok).toBe(false);
+      expect(() => materialize([e("t", v)], s)).toThrow(ParseError);
+    }
+  });
+
+  it("readOml with a schema rejects it as well, matching the bare tokenizer", () => {
+    const s = parseSchema('record R { "t": time }\nroot R');
+    expect(() => readOml('t: "24:00"', { schema: s })).toThrow(ParseError);
+    expect(() => readOml("t: 24:00")).toThrow(ParseError);
+  });
+});
