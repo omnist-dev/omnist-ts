@@ -172,4 +172,4 @@ _registerFormat({
   check: _checkYaml as (node: unknown) => _WriteReport,
 });
 
-export const VERSION = "0.0.1-alpha";
+export const VERSION = "0.0.2-alpha";

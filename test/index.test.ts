@@ -7,6 +7,6 @@ describe("public entry point", () => {
   });
 
   it("exposes the current version", () => {
-    expect(VERSION).toBe("0.0.1-alpha");
+    expect(VERSION).toBe("0.0.2-alpha");
   });
 });
