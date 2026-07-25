@@ -56,6 +56,7 @@ flowchart TD
     id -->|yes| ID["IDENT"]
     id -->|no| err(["ParseError:\nstray character"])
 ```
+<!-- doc-illustrative -->
 
 This is exactly why `nan: 1` and `inf: 1` are `ParseError`s (Worked example
 #9 below) — `nan`/`inf`/`-inf` are claimed by the reserved-float branch
@@ -149,6 +150,7 @@ multiline-string = DQUOTE DQUOTE DQUOTE [newline]
 mlchar      = %x09 / %x0A / %x20-10FFFF     ; tab, LF, or >= U+0020
               ; (control chars other than tab/LF are rejected)
 ```
+<!-- doc-illustrative -->
 
 ### 1.1 DATE vs. DATETIME disambiguation
 
@@ -240,6 +242,7 @@ array       = "[" [SEP] array-element *( "," [SEP] array-element ) [","]
 array-element = scalar / "{" [SEP] node-edges [SEP] "}"
               ; everything "value" allows except another array.
 ```
+<!-- doc-illustrative -->
 
 Nesting depth — the number of `{` braces a value may be wrapped in — is
 capped at 200 (`_MAX_DEPTH`); see §6.

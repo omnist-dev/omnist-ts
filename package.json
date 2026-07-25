@@ -44,7 +44,10 @@
     "test:coverage": "vitest run --coverage",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
-    "oracle": "tsx tools/semantic_oracle.ts"
+    "oracle": "tsx tools/semantic_oracle.ts",
+    "docs:dev": "vitepress dev docs",
+    "docs:build": "vitepress build docs",
+    "docs:preview": "vitepress preview docs"
   },
   "peerDependenciesMeta": {
     "yaml": {
@@ -69,9 +72,10 @@
     "eslint": "^9.0.0",
     "fast-check": "^3.20.0",
     "fast-xml-parser": "^4.5.7",
+    "tsx": "^4.19.0",
     "typescript": "^5.6.0",
     "typescript-eslint": "^8.0.0",
-    "vitest": "^2.0.0",
-    "tsx": "^4.19.0"
+    "vitepress": "^1.6.4",
+    "vitest": "^2.0.0"
   }
 }

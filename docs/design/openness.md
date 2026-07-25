@@ -45,6 +45,7 @@ whose values all share one type — the `{ [string]: T }` of TypeScript, the
 ```
 record Config { "env" map[string]: string }     # NOT valid OSD — refused
 ```
+<!-- doc-illustrative -->
 
 **`any`** would be an eighth type keyword (lowercase, joining the seven
 scalar keywords) usable as a field's type. A field typed `any` accepts
@@ -63,6 +64,7 @@ record Event {
 }
 root Event
 ```
+<!-- doc-illustrative -->
 
 `any` includes `null` (it is the top of the value lattice), so `any?` is
 redundant and rejected by the grammar. The `root` statement continues to
@@ -116,6 +118,7 @@ record Env      { "entry" [0,]: EnvEntry }
 record EnvEntry { "key": string, "value": string }
 root Env
 ```
+<!-- doc-illustrative -->
 
 This round-trips all four formats (repeated `<entry>` elements in XML,
 naturally), touches zero algorithms, and keeps every guarantee intact.
@@ -259,6 +262,7 @@ record Event {
 }
 root Event
 ```
+<!-- doc-illustrative -->
 
 Both of these documents validate against that one schema:
 
@@ -267,12 +271,14 @@ Both of these documents validate against that one schema:
  "created": "2026-07-01T09:30:00",
  "data": {"name": "Ann", "email": "ann@example.com"}}
 ```
+<!-- doc-illustrative -->
 
 ```json
 {"id": "evt_2", "type": "payment.settled",
  "created": "2026-07-01T09:31:00",
  "data": {"amount_cents": 1250, "currency": "EUR"}}
 ```
+<!-- doc-illustrative -->
 
 Today's closed model cannot express this schema *at all*: there is no type
 for `"data"` that accepts both payloads, because there are (deliberately)
@@ -283,6 +289,7 @@ validates the payload against a per-event-type **closed** schema —
 record PaymentSettled { "amount_cents": integer, "currency": string }
 root PaymentSettled
 ```
+<!-- doc-illustrative -->
 
 — so each validation step stays closed and decidable; the dispatch lives
 in user code, visibly.
@@ -300,6 +307,7 @@ record Event {                          record Event {
 }                                       }
 root Event                              root Event
 ```
+<!-- doc-illustrative -->
 
 Payloads change from `{"amount_cents": 1250}` to `{"amount": 1250}` — a
 breaking change for every consumer. Yet `v2.compatible_with(v1)` returns
@@ -311,6 +319,7 @@ record Event { "type": string, "data": Payment }
 record Payment { "amount_cents": integer }
 root Event
 ```
+<!-- doc-illustrative -->
 
 — the same rename would make `compatible_with` return **False**, catching
 the break before it ships. **Checking ends exactly where `any` begins**:
@@ -322,6 +331,7 @@ the flagship guarantee is only as strong as the schema's closed portion.
 record R { "when": datetime, "data": any }
 root R
 ```
+<!-- doc-illustrative -->
 
 Reading `{"when": "2026-07-01T09:30:00", "data": {"since": "2024-01-01"}}`
 with `schema=` upgrades `"when"` to a real `datetime` object — but
@@ -336,11 +346,13 @@ One document, two would-be readings:
 ```json
 {"red": 5, "blue": 3}
 ```
+<!-- doc-illustrative -->
 
 ```
 record Palette { "red": integer, "blue": integer }   # closed reading (valid today)
 record Counts  { map[string]: integer }              # open reading (refused)
 ```
+<!-- doc-illustrative -->
 
 Both accept the document, and nothing in the data says which is meant.
 `infer` would be forced to guess between them on every input;
@@ -357,6 +369,7 @@ record Env      { "entry" [0,]: EnvEntry }
 record EnvEntry { "key": string, "value": string }
 root Env
 ```
+<!-- doc-illustrative -->
 
 What it gives: full guarantees, `extract`/`normalize`/`compatible_with`
 all meaningful, round-trips XML naturally as repeated `<entry>` elements.
@@ -366,6 +379,7 @@ What it gives up, shown rather than told — duplicate keys validate:
 {"entry": [{"key": "A", "value": "1"},
            {"key": "A", "value": "2"}]}
 ```
+<!-- doc-illustrative -->
 
 …and the data must be *authored in this shape*: a third party's
 `{"A": "1", "B": "2"}` cannot be validated without restructuring it

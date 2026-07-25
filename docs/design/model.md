@@ -84,6 +84,7 @@ edge    = (label: String, target)            where target = value | node
 node    = [ edge, edge, … ]                  -- ordered; labels MAY repeat
 Document = node                              -- (or a bare value at a leaf)
 ```
+<!-- doc-illustrative -->
 
 **Properties**
 
@@ -114,6 +115,7 @@ Type    = Scalar | Ref(Name)                 -- exactly one scalar kind, or a na
 Scalar  = (kind, nullable: bool)             -- kind ∈ { string, integer, number, boolean, date, time, datetime }
           -- exactly one of the seven fixed kinds; never composed with another kind or a literal value
 ```
+<!-- doc-illustrative -->
 
 **Rules**
 
@@ -139,6 +141,7 @@ record Service {
 }
 root Service
 ```
+<!-- doc-illustrative -->
 
 - **Quoting rule:** `"quoted"` = a **data string** (a field label); an **unquoted identifier** = a **schema name** (a scalar kind or a `Ref`).
 - `string?`, `integer?`, etc. are the nullable form of a scalar — the only suffix the grammar allows.
@@ -459,6 +462,7 @@ record Service {
 }
 root Service
 ```
+<!-- doc-illustrative -->
 
 Document (canonical edge list) for a service with two databases and two tags:
 
@@ -470,6 +474,7 @@ Document (canonical edge list) for a service with two databases and two tags:
   ("tags", "prod"),
   ("tags", "us-east") ]
 ```
+<!-- doc-illustrative -->
 
 - JSON projection: `{"host":"api.internal","port":8443,"databases":[{"type":"prod","server":"db1.internal.example.com","port":5432},{"type":"test","server":"db2.internal.example.com","port":5433}],"tags":["prod","us-east"]}`
 - XML projection: `<host>…</host><port>…</port><databases>…5432…</databases><databases>…5433…</databases><tags>prod</tags><tags>us-east</tags>` (and an interleaved XML input round-trips through the *same* Document).
@@ -494,6 +499,7 @@ graph LR
     D2 -->|server| D2Server["db2.internal.example.com"]
     D2 -->|port| D2Port["5433"]
 ```
+<!-- doc-illustrative -->
 
 And the schema behind it, as a graph: every record is a state, and a
 field is a labeled, cardinality-counted edge to another state (`databases`
@@ -510,3 +516,4 @@ graph LR
     Db -->|"server [1,1]"| String
     Db -->|"port [1,1]"| Integer
 ```
+<!-- doc-illustrative -->

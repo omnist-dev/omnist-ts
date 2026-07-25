@@ -48,6 +48,7 @@ DIGIT       = %x30-39
 
 punct       = "{" / "}" / "[" / "]" / ":" / "," / "?"
 ```
+<!-- doc-illustrative -->
 
 ### 1.1 String unescaping
 
@@ -140,6 +141,7 @@ ref-type    = name
               ; only concept; optionality on a Ref is expressed via
               ; cardinality [0,1] instead.
 ```
+<!-- doc-illustrative -->
 
 ### 2.1 Reserved names
 

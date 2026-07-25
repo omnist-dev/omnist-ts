@@ -107,10 +107,25 @@ export function readXml(text: string, opts: ReadXmlOptions = {}): Node {
     const message = exc instanceof Error ? exc.message : String(exc);
     throw new ParseError("invalid XML: " + message);
   }
-  const roots = parsed.filter((e) => !("#text" in e) && Object.keys(e).length > 0);
-  /* v8 ignore start -- unreachable via the public API: XMLValidator.validate
-   * already rejects any input with more than one top-level element or none,
-   * so parsed always yields exactly one root here. Defensive backstop. */
+  // fast-xml-parser's preserveOrder output keeps top-level non-element
+  // nodes alongside the real root: an XML declaration ("<?xml ...?>")
+  // surfaces as its own top-level entry keyed "?xml" (verified empirically
+  // -- this was previously assumed unreachable and was wrong: any ordinary
+  // XML document with a standard declaration hit this and threw). Comments
+  // are already dropped by the parser itself with these options. Filter out
+  // processing-instruction entries (key starting with "?") before counting
+  // roots, so a standard "<?xml version="1.0"?>" prologue -- present on
+  // effectively all real-world XML -- doesn't get miscounted as a second
+  // document element.
+  const roots = parsed.filter(
+    (e) => !("#text" in e) && Object.keys(e).length > 0 && !Object.keys(e)[0]?.startsWith("?"),
+  );
+  /* v8 ignore start -- defensive backstop: XMLValidator.validate already
+   * requires exactly one element node for well-formed XML, and the "?"-key
+   * filter above accounts for the one non-element top-level entry
+   * (the XML declaration) empirically observed in preserveOrder output.
+   * No known well-formed input reaches this branch; kept rather than
+   * asserted non-null, per this file's own defensive-check convention. */
   if (roots.length !== 1) {
     throw new ParseError("invalid XML: expected exactly one document element");
   }

@@ -151,6 +151,7 @@ class AnyType:
 
 ANY = AnyType()
 ```
+<!-- doc-illustrative -->
 
 - The `Type` alias in `schema.py` becomes `Union[Ref, Scalar, AnyType]`.
 - `Schema.resolve()` return type becomes `Union[Record, Scalar, AnyType]`;
@@ -175,12 +176,14 @@ changes from
 ```
 type = scalar-name ["?"] / record-name
 ```
+<!-- doc-illustrative -->
 
 to
 
 ```
 type = scalar-name ["?"] / "any" / record-name
 ```
+<!-- doc-illustrative -->
 
 with three hard rules:
 
