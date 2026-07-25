@@ -182,3 +182,30 @@ describe("checkWriteDepth is a real, reachable guard (issue #37)", () => {
     expect(() => writeYaml(node)).toThrow(/nesting exceeds the maximum depth \(200\)/);
   });
 });
+
+describe("over-large integer literal (issue #54)", () => {
+  it("raises ParseError instead of silently producing Infinity", () => {
+    const text = "a: " + "1".repeat(4301) + "\n";
+    expect(() => readYaml(text)).toThrow(ParseError);
+    expect(() => readYaml(text)).toThrow(/digit/);
+  });
+
+  it("does not reject YAML's native .inf scalar", () => {
+    // .inf is a native YAML 1.1 scalar (not an over-large integer literal)
+    // and this port documents that Infinity round-trips natively -- must
+    // not be caught by the new digit-cap guard.
+    const node = readYaml("a: .inf\n");
+    expect(node).toEqual([{ label: "a", target: Infinity }]);
+  });
+
+  it("does not reject a large-but-safe integer", () => {
+    const node = readYaml("a: 12345\n");
+    expect(node).toEqual([{ label: "a", target: 12345 }]);
+  });
+
+  it("does not scan an over-long digit run inside a comment", () => {
+    const text = "# " + "1".repeat(4301) + "\na: 1\n";
+    const node = readYaml(text);
+    expect(node).toEqual([{ label: "a", target: 1 }]);
+  });
+});

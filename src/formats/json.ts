@@ -25,6 +25,66 @@ import type { Schema } from "../schema.js";
 // this convention's precedent in this port).
 const MAX_DEPTH = 200;
 
+// Matches src/document.ts's own MAX_INT_DIGITS (locally redefined here for
+// the same reason MAX_DEPTH is above -- see that file's comment for this
+// convention's precedent). Unlike document.ts's checkIntDigits -- which
+// runs on an already-parsed JS `number` and so can never see more than
+// ~309 digits' worth of magnitude before float64 rounds it away -- this
+// check runs on the raw JSON *text*, the only place an integer literal's
+// true digit count (e.g. 4301 "1"s) still exists. CPython's json module
+// hits this exact cap first, at int()-construction time, which is why
+// Python raises ValueError on the same input instead of silently
+// producing `Infinity` (see issue #54). A bare float literal that
+// overflows float64 (e.g. `1e400`) is deliberately NOT covered here --
+// Python overflows to `inf` for that case too, so rejecting it would be
+// a new mismatch, not a fix. Only an integer-shaped literal (no `.`, no
+// exponent) past the digit cap is a Python/JS behavioral gap.
+const MAX_INT_DIGITS = 4300;
+
+/**
+ * Scan raw JSON text for an integer literal (a token with no `.` and no
+ * `e`/`E`, i.e. not a float) whose digit count exceeds MAX_INT_DIGITS,
+ * outside of any string literal. JSON.parse itself has no such guard --
+ * it would silently round an over-long integer literal to `Infinity` --
+ * so this check has to run on the source text, before JSON.parse ever
+ * sees it, matching the point at which CPython's own int() raises.
+ */
+function checkJsonIntegerDigits(text: string): void {
+  const n = text.length;
+  let i = 0;
+  while (i < n) {
+    const c = text.charAt(i);
+    if (c === '"') {
+      i++;
+      while (i < n && text.charAt(i) !== '"') {
+        if (text.charAt(i) === "\\") i++;
+        i++;
+      }
+      i++;
+      continue;
+    }
+    if (c === "-" || (c >= "0" && c <= "9")) {
+      if (c === "-") i++;
+      const digitsStart = i;
+      while (i < n && text.charAt(i) >= "0" && text.charAt(i) <= "9") i++;
+      const digitsLen = i - digitsStart;
+      const isFloat = i < n && (text.charAt(i) === "." || text.charAt(i) === "e" || text.charAt(i) === "E");
+      if (!isFloat && digitsLen > MAX_INT_DIGITS) {
+        throw new ParseError(
+          "invalid JSON: integer literal has more than " +
+            String(MAX_INT_DIGITS) +
+            " digits, exceeding the digit limit (security: unbounded-digit " +
+            "int-to-str conversion is superlinear); matches this port's " +
+            "digit cap elsewhere (src/document.ts's MAX_INT_DIGITS) and " +
+            "CPython's own int-to-str digit cap",
+        );
+      }
+      continue;
+    }
+    i++;
+  }
+}
+
 function checkWriteDepth(depth: number): void {
   // NOT unreachable (issue #37): writeJson takes a raw `Node`, a publicly
   // exported type -- a caller can hand-build one (or splice a subtree in
@@ -59,6 +119,7 @@ export interface ReadJsonOptions {
 
 /** Parse JSON text into a Document node. */
 export function readJson(text: string, opts: ReadJsonOptions = {}): Node {
+  checkJsonIntegerDigits(text);
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);
