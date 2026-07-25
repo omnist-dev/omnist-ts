@@ -3,7 +3,7 @@ import { defineConfig } from "vitepress";
 export default defineConfig({
   title: "Omnist",
   description: "One data model, many formats: read, validate, and write JSON, YAML, TOML, XML, and OML.",
-  base: "/omnist-ts/",
+  base: "/",
   cleanUrls: true,
   lastUpdated: true,
 

@@ -10,8 +10,8 @@ canonical data model for JSON, YAML, TOML, XML, and its own native OML
 design rationale; this repo mirrors its module boundaries and public API
 (camelCase names of the same functions).
 
-**Docs:** <https://omnist-dev.github.io/omnist-ts/> (start at
-[Quickstart](https://omnist-dev.github.io/omnist-ts/quickstart)).
+**Docs:** <https://ts.omnist.dev/> (start at
+[Quickstart](https://ts.omnist.dev/quickstart)).
 
 Status: fully implemented -- library, CLI, and fuzz/oracle test suite are
 complete and at 100% coverage (issues #1-#11). No npm package has been
