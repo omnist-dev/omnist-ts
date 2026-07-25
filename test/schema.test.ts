@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { doc } from "../src/document.js";
+import { Doc, doc } from "../src/document.js";
+import { materialize } from "../src/deserialize.js";
 import { SchemaError } from "../src/errors.js";
+import { parseSchema } from "../src/osd.js";
 import {
   ANY,
   Schema,
@@ -334,6 +336,41 @@ describe("matchesKind / valueKind", () => {
 
   it("matches_kind time object", () => {
     expect(matchesKind("12:00:00", "time")).toBe(true);
+  });
+});
+
+describe("issue #14: cross-schema date/datetime ambiguity", () => {
+  // Reproduces the gap tracked in GitHub issue #14: the same Document
+  // value, once materialized against a schema that says "date", must NOT
+  // also satisfy a different schema that says "datetime" for the same
+  // label -- exactly as Python's `matches_kind` excludes a real
+  // `datetime.datetime` from a `date`-typed field (and vice versa), even
+  // though both collapse onto the single native `Date` type at the
+  // Document layer (src/document.ts).
+  const DATE_SCHEMA = parseSchema('record R { "x": date }\nroot R');
+  const DATETIME_SCHEMA = parseSchema('record R { "x": datetime }\nroot R');
+
+  it("a Date materialized as `date` no longer satisfies a `datetime`-typed schema", () => {
+    const node = materialize(doc({ x: "2024-01-01" }).toData(), DATE_SCHEMA);
+    const d = new Doc(node);
+    expect(DATE_SCHEMA.validate(d).ok).toBe(true);
+    expect(DATETIME_SCHEMA.validate(d).ok).toBe(false);
+  });
+
+  it("a Date materialized as `datetime` no longer satisfies a `date`-typed schema", () => {
+    const node = materialize(doc({ x: "2024-01-01T10:00:00" }).toData(), DATETIME_SCHEMA);
+    const d = new Doc(node);
+    expect(DATETIME_SCHEMA.validate(d).ok).toBe(true);
+    expect(DATE_SCHEMA.validate(d).ok).toBe(false);
+  });
+
+  it("a bare, untagged Date (constructed outside any schema context) stays ambiguous by necessity", () => {
+    // No schema-directed parse ever tagged this Date with a kind, so
+    // there's no signal to resolve the ambiguity from -- this is the
+    // documented, accepted residual limitation, not a bug.
+    const bare = new Doc([{ label: "x", target: new Date("2024-01-01T00:00:00Z") }]);
+    expect(DATE_SCHEMA.validate(bare).ok).toBe(true);
+    expect(DATETIME_SCHEMA.validate(bare).ok).toBe(true);
   });
 });
 

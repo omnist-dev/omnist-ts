@@ -25,6 +25,7 @@
 
 import { SchemaError, type OmnistIssue } from "./errors.js";
 import { Doc } from "./document.js";
+import { dateKind } from "./temporal.js";
 import { compatibleWith as opsCompatibleWith, equivalent as opsEquivalent } from "./ops/subschema.js";
 import { normalize as opsNormalize } from "./ops/minimize.js";
 import { extract as opsExtract } from "./ops/extract.js";
@@ -295,13 +296,27 @@ function isIsoDatetimeString(v: unknown): boolean {
  * The Document layer here has no such distinction -- `src/document.ts`
  * maps *both* `date` and `datetime` onto the single native `Date` type (see
  * its file-top comment) -- so a real `Date` value carries no signal, by
- * itself, of which kind its field was meant to declare. The mutual
- * exclusion this file ports is therefore the one the Document model can
- * actually express: the *string* form (a bare ISO date string never also
- * satisfies `datetime`, and vice versa, exactly as upstream). A real `Date`
- * instance satisfies whichever of `date`/`datetime` the field declares --
- * there is only ever one candidate kind per field (§5's "never a
- * composition" rule), so this is never ambiguous at the point of use.
+ * itself, of which kind its field was meant to declare, UNLESS it came from
+ * a schema-directed parse (`readOml`'s DATE/DATETIME tokens, or
+ * `deserialize.ts`'s `materialize` upgrading an ISO string). Those two call
+ * sites go through `src/temporal.ts`'s `parseDateToken`/`parseDatetimeToken`,
+ * which tag the returned `Date` with the kind that was actually read (issue
+ * #14). `dateKind()` below consults that tag when present.
+ *
+ * This resolves the issue #14 gap for the case that actually matters: the
+ * *same* Document, materialized once against a schema that says `date`, no
+ * longer also satisfies a different schema that says `datetime` for the
+ * same label -- matching Python's `isinstance`-based exclusion. A `Date`
+ * that never passed through a schema-directed parse (e.g. `new Date()`
+ * constructed directly by application code) carries no tag and stays
+ * ambiguous by necessity: there is no signal to draw a kind from, so it is
+ * still accepted for whichever of `date`/`datetime` the field declares, as
+ * before. That residual case is not a bug this change tries to close --
+ * see `temporal.ts`'s file-top comment for the full reasoning.
+ *
+ * The *string* form was already, and remains, mutually exclusive on its own
+ * terms regardless of tagging: a bare ISO date string never also satisfies
+ * `datetime`, and vice versa.
  */
 export function matchesKind(value: unknown, name: ScalarKind): boolean {
   switch (name) {
@@ -314,12 +329,12 @@ export function matchesKind(value: unknown, name: ScalarKind): boolean {
     case "number":
       return typeof value === "number";
     case "date":
-      if (value instanceof Date) return true;
+      if (value instanceof Date) return dateKind(value) !== "datetime";
       return isIsoDateString(value);
     case "time":
       return isIsoTimeString(value);
     case "datetime":
-      if (value instanceof Date) return true;
+      if (value instanceof Date) return dateKind(value) !== "date";
       // `Date.parse` on a bare date string succeeds (defaults the missing
       // time to midnight UTC) -- exclude anything that's ALSO a bare date
       // string so `date`/`datetime` stay mutually exclusive on the string
