@@ -52,3 +52,16 @@ been published yet.
   fully tested internally (the CLI already used them) but weren't
   reachable by library consumers before this release; this closes that
   gap to reach full parity with the Python package's `__all__`.
+- **Security fix** (issue #32): a Document edge labeled `__proto__`
+  could reassign an internal object's own prototype rather than being
+  stored as an ordinary property, in the JSON-shaped grouping step shared
+  by the JSON/YAML/TOML writers, in TOML's own object-copying steps, and
+  in XML's tag-name extraction (a `fast-xml-parser`-internal aliasing
+  quirk). Found via property-based fuzzing before any release shipped.
+  Fixed by building every such object with `Object.create(null)` (or
+  correcting the aliased label back to the real tag name for XML) instead
+  of a plain object literal. Confirmed, across three independent review
+  rounds, that this never reached the global `Object.prototype` -- the
+  corruption was contained to the object being built each time -- but the
+  silent data corruption and denial-of-service crash paths were real.
+  Regression tests pin the exact fuzz-discovered counterexamples.
