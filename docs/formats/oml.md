@@ -166,13 +166,12 @@ writeOml(node, { arrays: true });   // 'a: "x"\nb: [1, 2, 3]\nc: true'
 ```
 <!-- verified-by: test/oml.test.ts "collapses runs, pretty mode" -->
 
-Unlike `readOml`, `writeOml` does **not** enforce the 200-level depth cap
--- confirmed by writing a hand-built `Node` 201 levels deep (something
+`writeOml` enforces the same 200-level depth cap as `readOml` --
+confirmed by writing a hand-built `Node` 201 levels deep (something
 `readOml` itself could never produce, since it *does* enforce the cap on
-the way in): the write succeeds with no error and no adjustment. See
-[the depth guard](#known-limitation-writeoml-has-no-depth-guard-issue-70)
-below for the read-side behavior and
-why this asymmetry exists.
+the way in): the write raises `WriteError` naming the limit, matching
+the read-side behavior. See [the depth guard](#the-depth-guard) below for
+the full detail.
 
 ## The zero-adjustment guarantee
 
