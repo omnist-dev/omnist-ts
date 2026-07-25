@@ -80,6 +80,7 @@ export default defineConfig({
         items: [
           { text: "Testing", link: "/testing" },
           { text: "Performance", link: "/performance" },
+          { text: "Python parity", link: "/python-parity" },
           { text: "Repo layout", link: "/layout" },
         ],
       },

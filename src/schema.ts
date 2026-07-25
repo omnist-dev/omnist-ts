@@ -120,6 +120,20 @@ export const t = {
   },
 };
 
+/** The seven scalars as standalone, ready-to-use constants -- the same
+ * values as `t.string`, `t.integer`, ... but reachable without going
+ * through the `t` namespace, matching Python's `omnist.STRING`,
+ * `omnist.INTEGER`, etc. (see `omnist/__init__.py` `__all__`). Prefer
+ * `t.string` in new code -- these exist for parity with the Python public
+ * surface and for callers who already have a bare-name habit from there. */
+export const STRING: ScalarType = t.string;
+export const INTEGER: ScalarType = t.integer;
+export const NUMBER: ScalarType = t.number;
+export const BOOLEAN: ScalarType = t.boolean;
+export const DATE: ScalarType = t.date;
+export const TIME: ScalarType = t.time;
+export const DATETIME: ScalarType = t.datetime;
+
 /** A copy of `scalar` that also accepts `null` (the `?` form). Raises if
  * given `any` -- `any` already includes `null`, so `any?` is redundant. */
 export function nullable(scalarType: ScalarType | AnyFieldType): ScalarType {
