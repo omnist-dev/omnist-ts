@@ -1,0 +1,4 @@
+record Employee { "name": string }
+record Customer { "name": string }
+record Company  { "employee": Employee, "customer": Customer }
+root Company
