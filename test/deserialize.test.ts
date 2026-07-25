@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { doc, type Edge, type Node } from "../src/document.js";
+import { doc, Doc, type Edge, type Node } from "../src/document.js";
 import { ParseError } from "../src/errors.js";
 import { parseSchema } from "../src/osd.js";
 import { readOml } from "../src/oml.js";
@@ -263,4 +263,54 @@ describe("materialize/validate boundary-spelling agreement (deserialization subs
       }
     },
   );
+});
+
+describe("materialize: a Date instance is checked against the field's kind, not passed through unconditionally", () => {
+  // Reproduces the gap found in independent review of PR #21: readOml's
+  // DATE/DATETIME tokenizer branch (oml.ts) already calls
+  // parseDateToken/parseDatetimeToken directly, tagging the resulting Date
+  // via temporal.ts's WeakMap (issue #14) before materializeTemporal ever
+  // sees it. Pre-fix, materializeTemporal's `if (value instanceof Date)
+  // return value;` passed every Date through unconditionally, regardless of
+  // its tag, so a `date`-tagged Date silently satisfied a `datetime`-typed
+  // field at materialize/readOml time -- then failed re-validation against
+  // that same schema, breaking materialize's documented guarantee that
+  // "validate and materialize can never disagree".
+  it("a bare DATE token read against a datetime-typed schema raises, not silently passes through", () => {
+    const schema = parseSchema('record R { "x": datetime }\nroot R');
+    expect(() => readOml("x: 2024-01-01\n", { schema })).toThrow(ParseError);
+    expect(() => readOml("x: 2024-01-01\n", { schema })).toThrow(
+      /cannot be read as datetime/,
+    );
+  });
+
+  it("a bare DATETIME token read against a date-typed schema raises, not silently passes through", () => {
+    const schema = parseSchema('record R { "x": date }\nroot R');
+    expect(() => readOml("x: 2024-01-01T10:00:00\n", { schema })).toThrow(ParseError);
+  });
+
+  it("materialize never lets a mistagged Date through: the result always still validates", () => {
+    const dateSchema = parseSchema('record R { "x": date }\nroot R');
+    const datetimeSchema = parseSchema('record R { "x": datetime }\nroot R');
+    const node = readOml("x: 2024-01-01\n", { schema: dateSchema });
+    const d = new Doc(node);
+    expect(dateSchema.validate(d).ok).toBe(true);
+    // Pre-fix, this used to return `{ ok: false }` after materialize had
+    // already accepted the value silently -- now materialize itself raises
+    // before we ever get here, so this assertion documents the fixed
+    // invariant (materialize's output always validates against the schema
+    // materialize was given) rather than exercising the mismatch directly.
+    expect(datetimeSchema.validate(d).ok).toBe(false);
+  });
+
+  it("an untagged, bare Date (constructed outside any schema-directed parse) still passes through for either kind", () => {
+    // No signal to resolve the ambiguity from -- this is the documented,
+    // accepted residual limitation (see temporal.ts file-top comment and
+    // deserialize.ts's materializeTemporal), not a bug.
+    const dateSchema = parseSchema('record R { "x": date }\nroot R');
+    const datetimeSchema = parseSchema('record R { "x": datetime }\nroot R');
+    const bare = new Date("2024-01-01T00:00:00Z");
+    expect(materialize([e("x", bare)], dateSchema)).toEqual([e("x", bare)]);
+    expect(materialize([e("x", bare)], datetimeSchema)).toEqual([e("x", bare)]);
+  });
 });

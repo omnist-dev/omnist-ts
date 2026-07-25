@@ -208,15 +208,21 @@ function materializeTemporal(
   value: Exclude<Scalar, null>,
   kind: Extract<ScalarKind, "date" | "time" | "datetime">,
 ): Scalar | typeof NO_CONVERSION {
-  // A real `Date` object passes through as-is; if it was tagged by
-  // `parseDateToken`/`parseDatetimeToken` (issue #14's fix), the tag
-  // travels with it -- `matchesKind`/`Schema.validate` will honor it on
-  // any later re-validation. An untagged `Date` (never produced by a
-  // schema-directed parse) stays ambiguous by necessity -- see file-top
-  // comment and `temporal.ts`'s file-top comment. `time` never produces a
-  // `Date` (there is no bare time-of-day type), so this branch is
-  // unreachable for `kind === "time"`.
-  if (value instanceof Date) return value;
+  // A real `Date` object is checked the same way the string branch below
+  // is: via `matchesKind`, so a `Date` tagged by `parseDateToken`/
+  // `parseDatetimeToken` (issue #14's fix) with a kind that disagrees with
+  // this field's declared `kind` is rejected here -- at materialize time --
+  // rather than silently passed through and only failing later on
+  // re-validation. That mirrors the string branch's own comment: `validate`
+  // and `materialize` can never disagree. An untagged `Date` (never
+  // produced by a schema-directed parse -- e.g. constructed directly by
+  // application code) has no tag to disagree with, so `matchesKind` still
+  // accepts it for either `date` or `datetime`, preserving the pre-#14
+  // permissive behavior for that one case -- ambiguous by necessity, see
+  // `temporal.ts`'s file-top comment; this is a documented residual
+  // limitation, not a gap. `time` never produces a `Date` (there is no bare
+  // time-of-day type), so this branch is unreachable for `kind === "time"`.
+  if (value instanceof Date) return matchesKind(value, kind) ? value : NO_CONVERSION;
   if (typeof value !== "string") return NO_CONVERSION;
   // The exact same shape check `Schema.validate` uses (`matchesKind`), so
   // `validate` and `materialize` can never disagree on whether a string
