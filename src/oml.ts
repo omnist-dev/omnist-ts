@@ -74,7 +74,7 @@
  */
 
 import type { Edge, Node, Scalar } from "./document.js";
-import { ParseError } from "./errors.js";
+import { ParseError, WriteError } from "./errors.js";
 import { WriteReport } from "./report.js";
 import type { Schema } from "./schema.js";
 import { materialize } from "./deserialize.js";
@@ -859,6 +859,19 @@ export interface WriteOmlOptions {
   readonly arrays?: boolean;
 }
 
+function checkWriteDepth(depth: number): void {
+  // NOT unreachable (issue #37/#70): writeOml takes a raw Node, a publicly
+  // exported type -- a caller can hand-build one (or splice a subtree in
+  // via Doc.add()/Doc.set()) that exceeds MAX_DEPTH without ever going
+  // through buildNode()'s own guard, since buildNode() is not on the only
+  // path to a Node. Matches src/formats/json.ts's own checkWriteDepth,
+  // which the other three codecs (yaml, toml, xml) also carry -- writeOml
+  // was missed when issue #37 added this guard to the other four writers.
+  if (depth > MAX_DEPTH) {
+    throw new WriteError(`nesting exceeds the maximum depth (${MAX_DEPTH})`);
+  }
+}
+
 /**
  * Render a canonical Document node as OML source.
  *
@@ -903,6 +916,7 @@ function writeEdges(
   arrays: boolean,
   nodeDepth: number,
 ): string {
+  checkWriteDepth(nodeDepth);
   const pad = " ".repeat(indent * depth);
   const lines: string[] = [];
   const runs = arrays ? groupRuns(edges) : edges.map((e): [string, Node[]] => [e.label, [e.target]]);
@@ -949,6 +963,7 @@ function writeArrayElement(
 }
 
 function writeEdgesCompact(edges: readonly Edge[], arrays: boolean, nodeDepth: number): string {
+  checkWriteDepth(nodeDepth);
   const parts: string[] = [];
   const runs = arrays ? groupRuns(edges) : edges.map((e): [string, Node[]] => [e.label, [e.target]]);
   for (const [label, children] of runs) {
