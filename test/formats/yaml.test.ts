@@ -63,6 +63,34 @@ describe("round-trip", () => {
   });
 });
 
+describe("merge-key label is a genuine YAML limitation (issue #46)", () => {
+  // A document edge labeled literally "<<" round-trips fine through
+  // JSON/OML/TOML/XML, but YAML 1.1 gives that exact label special
+  // "merge key" meaning -- the yaml package (like PyYAML's own
+  // SafeLoader/SafeDumper: yaml.safe_load("<<: 1") raises the
+  // equivalent ConstructorError) applies this unconditionally for the
+  // "yaml-1.1" schema this port is pinned to, with no clean way to opt
+  // out short of dropping that schema (see src/formats/yaml.ts's file-top
+  // comment on why yaml-1.1 is required for date/bool parity with
+  // PyYAML). So this is a real, documented YAML-format gap -- not a TS
+  // bug -- and is excluded from test/fuzz.test.ts's YAML label generator
+  // the same way #69's NEL concern is (see that file for the full
+  // writeup). These two tests just pin down the concrete failure modes.
+  it("a non-map merge target throws ParseError on read-back", () => {
+    const text = writeYaml(doc({ "<<": -1e300 }).toData());
+    expect(text).toBe("<<: -1e+300\n");
+    expect(() => readYaml(text)).toThrow(ParseError);
+  });
+
+  it("a map merge target round-trips silently wrong -- the '<<' edge vanishes and its children splice into the parent", () => {
+    const d = doc({ "<<": { a: 1 }, b: 2 }).toData();
+    const text = writeYaml(d);
+    const back = readYaml(text);
+    expect(back).not.toEqual(d);
+    expect(back).toEqual(doc({ a: 1, b: 2 }).toData());
+  });
+});
+
 describe("temporal handling", () => {
   it("a date-shaped Date (midnight, untagged) round-trips as a bare date", () => {
     const node = doc({ born: new Date(Date.UTC(1815, 11, 10)) }).toData();
