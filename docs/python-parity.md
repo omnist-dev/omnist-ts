@@ -222,8 +222,8 @@ JS has no bare time-of-day type, so a `time` scalar is an ordinary string at
 the Document layer. Python holds a real `datetime.time`.
 
 Consequences: `readToml` of a TOML time literal yields a string, and writing
-it back produces a quoted TOML string rather than a time literal;
-`check_yaml` and `the `temporal.stringified` code for a `time` leaf has
+it back produces a quoted TOML string rather than a time literal; and the
+`temporal.stringified` code for a `time` leaf has
 nothing to fire on here, because there is no Document value this port would
 recognize as a time rather than a string. Both are accepted lossiness. The
 OML case is *not* accepted lossiness and is filed as a gap below, because
