@@ -260,81 +260,110 @@ boundary and is unrelated to the refused schema-level `Map` type (see
 
 Each of these is a behavioral divergence that is not a language consequence
 and not a decision anyone made. All nine are filed as their own issues
-(#49 through #54, #56 through #58); none are fixed here, per the issue #48
-plan.
+(#49 through #54, #56 through #58); none were fixed in the issue #48 report
+itself, per its plan. Fixes land per issue, and each entry below records its
+status.
 
-### G1. Calendar-invalid date strings pass `validate` (`src/schema.ts:263`)
+### G1. Calendar-invalid date strings passed `validate` -- **fixed**
 
-Tracked as issue [#49](https://github.com/omnist-dev/omnist-ts/issues/49).
+Issue [#49](https://github.com/omnist-dev/omnist-ts/issues/49), fixed in
+[#65](https://github.com/omnist-dev/omnist-ts/pull/65).
 
-`isIsoDateString` shape-checks with a regex and then defers to
+`isIsoDateString` shape-checked with a regex and then deferred to
 `Date.parse`, which rolls a day overflow forward instead of failing
 (`Date.parse("2024-02-30")` is 1 March, not `NaN`). So a nonexistent
-calendar date validates as a `date`, and the same string with a time
-attached validates as a `datetime`. Python rejects both via
+calendar date validated as a `date`, and the same string with a time
+attached validated as a `datetime`. Python rejects both via
 `date.fromisoformat`, and model.md section 10 says a string that is not a
 valid bare ISO date must be rejected.
 
-This also breaks an invariant `src/deserialize.ts` states outright --
-that `validate` and `materialize` can never disagree, because both go
-through `matchesKind`. They do disagree: `materialize` additionally runs
-`parseDateToken`, which *is* calendar-validated, and rejects. The
+It also broke an invariant `src/deserialize.ts` states outright -- that
+`validate` and `materialize` can never disagree, because both go through
+`matchesKind`. They did disagree: `materialize` additionally runs
+`parseDateToken`, which *is* calendar-validated. That made the
 `/* v8 ignore start -- unreachable */` pragma on that branch in
-`materializeTemporal` is therefore wrong; the branch is live.
+`materializeTemporal` a false claim; the branch was live.
+
+The three `isIso*` helpers are now defined in terms of `temporal.ts`'s
+`parseDateToken` / `parseTimeToken` / `parseDatetimeToken`, so the calendar
+and range rules live in one place and the validation and parse layers cannot
+drift apart again. The `materializeTemporal` branch is now genuinely
+unreachable.
 
 ```ts
-matchesKind("2024-02-30", "date");        // true   (Python: False)
-matchesKind("2024-02-30T00:00", "datetime"); // true (Python: False)
+matchesKind("2024-02-30", "date");           // false (Python: False)
+matchesKind("2024-02-30T00:00", "datetime"); // false (Python: False)
 
 const s = parseSchema('record R { "d": date }\nroot R');
-s.validate(doc({ d: "2024-02-30" })).ok;  // true
+s.validate(doc({ d: "2024-02-30" })).ok;        // false
 materialize(buildNode({ d: "2024-02-30" }), s); // throws ParseError
 ```
 <!-- verified-by: test/python-parity.test.ts -->
 
-### G2. Hour 24 passes `validate` as a `time` (`src/schema.ts:268`)
+### G2. Hour 24 passed `validate` as a `time` -- **fixed**
 
-Tracked as issue [#50](https://github.com/omnist-dev/omnist-ts/issues/50).
+Issue [#50](https://github.com/omnist-dev/omnist-ts/issues/50), fixed in
+[#65](https://github.com/omnist-dev/omnist-ts/pull/65).
 
-`isIsoTimeString` composes `1970-01-01T` + the value and hands it to
+`isIsoTimeString` composed `1970-01-01T` + the value and handed it to
 `Date.parse`, which accepts `24:00` as end-of-day. Python rejects it, and so
-does the `parseTimeToken` helper in this port (`src/temporal.ts`, `hh > 23`), so the
-OML tokenizer and `matchesKind` disagree about the same spelling.
+did the `parseTimeToken` helper in this port (`src/temporal.ts`, `hh > 23`), so
+the OML tokenizer and `matchesKind` disagreed about the same spelling.
+
+Settled in favour of rejecting, matching Python and the existing tokenizer,
+with `isIsoTimeString` now expressed in terms of `parseTimeToken`. ISO 8601
+itself does permit `24:00`, so this is a deliberate choice of the stricter
+reading rather than the only correct one -- but the port has to give one answer
+in both places.
 
 ```ts
-matchesKind("24:00", "time");     // true (Python: False)
+matchesKind("24:00", "time");     // false (Python: False)
 readOml("a: 24:00");              // throws ParseError
 ```
 <!-- verified-by: test/python-parity.test.ts -->
 
-### G3. `writeOml` erases a UTC offset (`src/oml.ts`)
+### G3. `writeOml` erased a UTC offset -- **fixed**
 
-Tracked as issue [#51](https://github.com/omnist-dev/omnist-ts/issues/51).
+Issue [#51](https://github.com/omnist-dev/omnist-ts/issues/51), fixed in
+[#65](https://github.com/omnist-dev/omnist-ts/pull/65).
 
-Issue #26 fixed the local-versus-offset asymmetry for TOML only. `oml.ts`
-has the same asymmetry, unfixed: an offset datetime read from OML is
-normalized to UTC and written back with no offset at all. The instant
-survives a same-implementation round-trip, but the *text* changes, and a
-Python reader interprets the offset-less result as a naive local datetime --
-so the value drifts across implementations.
+Issue #26 fixed the local-versus-offset asymmetry for TOML only. `oml.ts` had
+the same asymmetry: an offset datetime read from OML was normalized to UTC and
+written back with no offset at all. The instant survived a
+same-implementation round-trip, but the *text* changed, and a Python reader
+interprets the offset-less result as a naive local datetime -- so the value
+drifted across implementations.
+
+`parseDatetimeToken` now records the source literal's offset in
+`src/temporal.ts` (minutes east of UTC) and `oml.ts`'s writer re-emits it.
+`toml.ts` deliberately keeps its own `WeakSet`: its datetimes come from
+`smol-toml`, not `temporal.ts`, so there is no shared producer to tag, and TOML
+only needs the local-vs-offset bit rather than the full offset.
 
 ```ts
 writeOml(readOml("a: 2024-01-01T12:00:00-08:00"));
-// "a: 2024-01-01T20:00:00"   (Python: unchanged, offset preserved)
+// "a: 2024-01-01T12:00:00-08:00"   (Python: identical)
 ```
 <!-- verified-by: test/python-parity.test.ts -->
 
-### G4. An OML TIME literal does not round-trip (`src/oml.ts`)
+### G4. An OML TIME literal did not round-trip -- **fixed**
 
-Tracked as issue [#52](https://github.com/omnist-dev/omnist-ts/issues/52).
+Issue [#52](https://github.com/omnist-dev/omnist-ts/issues/52), fixed in
+[#65](https://github.com/omnist-dev/omnist-ts/pull/65).
 
-Because `time` is a plain string here, an OML TIME token reads as a string
-and is re-emitted *quoted*. Unlike JSON or XML, OML has a native TIME token,
-so this is the one format where the port discards information the format
-itself can carry.
+Because `time` is a plain string here, an OML TIME token read as a string and
+was re-emitted *quoted*. Unlike JSON or XML, OML has a native TIME token, so
+this was the one format where the port discarded information the format itself
+can carry.
+
+`writeOml` now emits a bare TIME token for any string that is a valid TIME
+literal (shape *and* range). The cost, since a primitive string has no identity
+to tag: an ordinary string of that shape is promoted to a TIME token on write.
+That does not affect the Document-level round trip, whereas the old behavior
+broke the OML text round trip. See [formats/oml.md](formats/oml.md).
 
 ```ts
-writeOml(readOml("a: 12:00"));   // 'a: "12:00"'  (Python: a: 12:00:00)
+writeOml(readOml("a: 12:00"));   // "a: 12:00"  (Python normalizes: a: 12:00:00)
 ```
 <!-- verified-by: test/python-parity.test.ts -->
 
@@ -387,11 +416,12 @@ readToml("a = 9007199254740993");
 ```
 <!-- verified-by: test/python-parity.test.ts -->
 
-### G7. Ordering of output documented as deterministic
+### G7. Ordering of output documented as deterministic -- **fixed**
 
-Tracked as issue [#56](https://github.com/omnist-dev/omnist-ts/issues/56).
+Issue [#56](https://github.com/omnist-dev/omnist-ts/issues/56), fixed in
+[#63](https://github.com/omnist-dev/omnist-ts/pull/63).
 
-Two spots where both implementations are deterministic but disagree:
+Two spots where both implementations were deterministic but disagreed:
 
 - `lint` sorts findings with `localeCompare` (`src/ops/lint.ts`), where
   Python sorts by codepoint. Record names differing in case come out in a
@@ -401,9 +431,12 @@ Two spots where both implementations are deterministic but disagree:
   the authored declaration order Python keeps, so `omnist schema prune`
   emits the same records in a different sequence.
 
+Both now match Python: `lint` sorts by codepoint and `prune` preserves the
+authored declaration order.
+
 ```ts
-// Python lint order: ["B", "aaa"]; here: ["aaa", "B"]
-// Python prune env order: ["A", "B", "R"]; here: ["R", "B", "A"]
+// lint order, both implementations: ["B", "aaa"]
+// prune env order, both implementations: ["A", "B", "R"]
 ```
 <!-- verified-by: test/python-parity.test.ts -->
 

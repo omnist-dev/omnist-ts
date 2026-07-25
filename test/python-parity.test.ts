@@ -64,49 +64,57 @@ describe("depth boundary (report: Confirmed identical -- Document model)", () =>
   });
 });
 
-describe("gap: calendar-invalid temporal strings pass matchesKind", () => {
-  it("accepts a nonexistent calendar date as date (Python: false)", () => {
-    expect(matchesKind("2024-02-30", "date")).toBe(true);
-    expect(matchesKind("2024-02-30T00:00", "datetime")).toBe(true);
-    // The out-of-range month/day cases Date.parse does reject stay rejected,
-    // so the hole is specifically day-overflow inside a real month.
+describe("fixed (issue #49): calendar-invalid temporal strings are rejected", () => {
+  it("rejects a nonexistent calendar date as date and datetime, matching Python", () => {
+    expect(matchesKind("2024-02-30", "date")).toBe(false);
+    expect(matchesKind("2024-02-30T00:00", "datetime")).toBe(false);
+    // The out-of-range month/day cases were rejected before the fix too.
     expect(matchesKind("2024-13-01", "date")).toBe(false);
     expect(matchesKind("2024-01-32", "date")).toBe(false);
   });
 
-  it("validate accepts what materialize rejects, contradicting deserialize.ts", () => {
+  it("validate and materialize now agree, as deserialize.ts claims they must", () => {
     const s = parseSchema('record R { "d": date }\nroot R');
-    expect(s.validate(Doc.of({ d: "2024-02-30" })).ok).toBe(true);
+    expect(s.validate(Doc.of({ d: "2024-02-30" })).ok).toBe(false);
     expect(() => materialize(buildNode({ d: "2024-02-30" }), s)).toThrow(ParseError);
   });
 });
 
-describe("gap: matchesKind accepts hour 24 as time", () => {
-  it("accepts 24:00 / 24:00:00 (Python: false, via time.fromisoformat)", () => {
-    expect(matchesKind("24:00", "time")).toBe(true);
-    expect(matchesKind("24:00:00", "time")).toBe(true);
-    // The OML tokenizer, which shares the documented spelling, rejects it.
+describe("fixed (issue #50): hour 24 is not a valid time", () => {
+  it("rejects 24:00 / 24:00:00, matching Python's time.fromisoformat", () => {
+    expect(matchesKind("24:00", "time")).toBe(false);
+    expect(matchesKind("24:00:00", "time")).toBe(false);
+    // The OML tokenizer, which shares the documented spelling, rejected it all
+    // along -- that disagreement between the two layers was the gap.
     expect(() => readOml("a: 24:00")).toThrow();
   });
 });
 
-describe("gap: writeOml erases a UTC offset (issue #26 fixed only for TOML)", () => {
-  it("rewrites an offset datetime as an offset-less one", () => {
-    // Python round-trips `a: 2024-01-01T12:00:00-08:00` verbatim.
-    expect(writeOml(readOml("a: 2024-01-01T12:00:00-08:00"))).toBe("a: 2024-01-01T20:00:00");
-    expect(writeOml(readOml("a: 2024-01-01T12:00:00+00:00"))).toBe("a: 2024-01-01T12:00:00");
+describe("fixed (issue #51): writeOml preserves a UTC offset", () => {
+  it("round-trips an offset datetime verbatim, as Python does", () => {
+    expect(writeOml(readOml("a: 2024-01-01T12:00:00-08:00"))).toBe(
+      "a: 2024-01-01T12:00:00-08:00",
+    );
+    expect(writeOml(readOml("a: 2024-01-01T12:00:00+00:00"))).toBe(
+      "a: 2024-01-01T12:00:00+00:00",
+    );
   });
 
-  it("TOML does preserve local-vs-offset, per issue #26", () => {
+  it("TOML preserves local-vs-offset, per issue #26", () => {
     expect(writeToml(readToml("a = 2024-01-01T12:00:00"))).toBe("a = 2024-01-01T12:00:00.000\n");
     expect(writeToml(readToml("a = 2024-01-01T12:00:00Z"))).toBe("a = 2024-01-01T12:00:00.000Z\n");
   });
 });
 
-describe("gap: an OML TIME literal does not round-trip", () => {
-  it("re-emits a bare time as a quoted string (Python: a: 12:00:00)", () => {
+describe("fixed (issue #52): an OML TIME literal round-trips", () => {
+  it("re-emits a bare time as a TIME token, not a quoted string", () => {
+    // Still a plain string at the Document layer -- JS has no bare time-of-day
+    // type -- but the OML text is now stable across a read/write cycle.
     expect(readOml("a: 12:00")).toEqual([{ label: "a", target: "12:00" }]);
-    expect(writeOml(readOml("a: 12:00"))).toBe('a: "12:00"');
+    expect(writeOml(readOml("a: 12:00"))).toBe("a: 12:00");
+    // Python normalizes the spelling to `a: 12:00:00`, having parsed the token
+    // into a `datetime.time`; this port writes the token text back verbatim,
+    // which is text-stable and not an observable value difference.
   });
 });
 
@@ -158,21 +166,22 @@ describe("divergence: reader strictness JSON/YAML inherit from their parsers", (
   });
 });
 
-describe("gap: deterministic-output ordering differs from Python", () => {
-  it("lint sorts locations by locale, not codepoint", () => {
+describe("fixed (PR #63): deterministic-output ordering matches Python", () => {
+  // These two were still asserting the pre-#63 behavior when #63 landed, which
+  // left master red; updated here rather than left broken, since this branch
+  // has to merge through it. Not part of issues #49-#52.
+  it("lint sorts locations by codepoint, uppercase first", () => {
     const s = parseSchema(
       'record R { "a": string }\nrecord aaa { "b": string }\nrecord B { "c": string }\nroot R',
     );
-    // Python: ["B", "aaa"] (codepoint order -- uppercase first).
-    expect(lint(s).map((f) => f.location)).toEqual(["aaa", "B"]);
+    expect(lint(s).map((f) => f.location)).toEqual(["B", "aaa"]);
   });
 
-  it("prune reorders the surviving environment", () => {
+  it("prune keeps the authored environment order", () => {
     const s = parseSchema(
       'record A { "x": string }\nrecord B { "x": string }\nrecord R { "p": A, "q": B }\nroot R',
     );
-    // Python keeps the authored order: A, B, R.
-    expect([...prune(s).env.keys()]).toEqual(["R", "B", "A"]);
+    expect([...prune(s).env.keys()]).toEqual(["A", "B", "R"]);
     expect(toOsd(prune(s), { indent: null }).trim()).toContain("record R {");
   });
 });
