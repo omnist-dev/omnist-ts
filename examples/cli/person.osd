@@ -1,0 +1,3 @@
+record Person { "name": string, "age" [0,1]: integer }
+record Root   { "person": Person }
+root Root
