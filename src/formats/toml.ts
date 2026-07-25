@@ -142,7 +142,20 @@ function convertTomlDates(value: unknown): unknown {
   }
   if (Array.isArray(value)) return value.map(convertTomlDates);
   if (isPlainObject(value)) {
-    const out: Record<string, unknown> = {};
+    // Security (issue #32 follow-up): `value` here is smol-toml's own
+    // parsed table, which smol-toml itself builds with a null prototype --
+    // so a TOML `[__proto__]` table is a genuine own "__proto__" data
+    // property on `value`, not the accessor. Copying it into a plain {}
+    // via out[k] = v re-triggers the exact bug grouped() was hardened
+    // against (see document.ts's issue #32 comment): out[k] = v for
+    // k === "__proto__" invokes Object.prototype's [[Set]] accessor and
+    // reassigns out's own prototype instead of creating an own property,
+    // silently corrupting the result -- which is what previously made
+    // readToml throw a spurious DocumentError on a `[__proto__]` table
+    // (the corrupted root object failed buildNode's isPlainObject check
+    // further downstream). Object.create(null) makes every key, including
+    // "__proto__", an ordinary own property.
+    const out: Record<string, unknown> = Object.create(null) as Record<string, unknown>;
     for (const [k, v] of Object.entries(value)) out[k] = convertTomlDates(v);
     return out;
   }
@@ -252,7 +265,18 @@ function toTomlValue(value: unknown, depth: number): unknown {
   }
   if (isPlainRecord(value)) {
     checkWriteDepth(depth);
-    const out: Record<string, unknown> = {};
+    // Security (issue #32 follow-up): `value` here can be grouped()'s own
+    // Object.create(null) output (already safe against a "__proto__"
+    // label), but this loop then re-copies it into a plain {} via
+    // out[k] = v, re-triggering the same bug at every nested table, not
+    // just the document root -- grouped() only protects its own top-level
+    // build. See document.ts's issue #32 comment for the full mechanism:
+    // out[k] = v for k === "__proto__" invokes Object.prototype's [[Set]]
+    // accessor and reassigns out's own prototype to v instead of storing
+    // it, silently dropping the __proto__-labeled data from TOML output.
+    // Object.create(null) makes every key, including "__proto__", an
+    // ordinary own property.
+    const out: Record<string, unknown> = Object.create(null) as Record<string, unknown>;
     for (const [k, v] of Object.entries(value)) out[k] = toTomlValue(v, depth + 1);
     return out;
   }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { doc } from "../../src/document.js";
+import { doc, Doc } from "../../src/document.js";
 import { ParseError, WriteError } from "../../src/errors.js";
 import { WriteReport } from "../../src/report.js";
 import { readToml, writeToml, checkToml } from "../../src/formats/toml.js";
@@ -183,5 +183,64 @@ describe("schema-directed reads", () => {
     const s = parseSchema('record R { "d": date }\nroot R');
     const node = readToml('d = "2024-01-01"', { schema: s });
     expect(node).toEqual([{ label: "d", target: new Date(Date.UTC(2024, 0, 1)) }]);
+  });
+});
+
+// Issue #32 follow-up: independent review found toTomlValue (used by
+// writeToml) and convertTomlDates (used by readToml) have the identical
+// unsafe-object-building shape that grouped() was hardened against above --
+// see document.test.ts's issue #32 comment block for the full mechanism
+// (a plain {} has Object.prototype in its chain, so out[k] = v for
+// k === "__proto__" reassigns out's own prototype instead of creating an
+// own property). toTomlValue re-copies grouped()'s already-safe
+// Object.create(null) output into a plain {}, silently re-introducing the
+// bug for any *nested* table (not just the document root). convertTomlDates
+// walks smol-toml's own parsed value (which itself uses null-prototype
+// tables, so a TOML `[__proto__]` table is a genuine own "__proto__" data
+// property there) and has the same plain-{} bug on the read path, which is
+// why reading a `[__proto__]` TOML table throws a spurious DocumentError
+// downstream in buildNode rather than round-tripping the table.
+import { readJson } from "../../src/formats/json.js";
+
+describe("toTomlValue is hardened against __proto__/constructor labels (issue #32 follow-up)", () => {
+  it("a nested __proto__-labeled table is not silently dropped when writing TOML", () => {
+    const node = readJson('{"outer":{"__proto__":{"polluted":true},"kept":2}}');
+    const text = writeToml(node);
+    // Before the fix: toTomlValue's `out` for the *nested* "outer" table is
+    // a plain {}, so out["__proto__"] = {polluted:true} reassigns outer's
+    // prototype instead of storing it, and stringifyToml silently emits
+    // only "kept" -- the __proto__-labeled data vanishes without error or
+    // warning.
+    expect(text).toContain("polluted");
+    const roundTripped = readToml(text);
+    // TOML has no guaranteed key order for a round-tripped table, so
+    // compare the grouped (JSON-shaped) projection instead of the raw
+    // edge list, which is order-sensitive.
+    expect(new Doc(roundTripped).toGrouped()).toEqual(
+      JSON.parse('{"outer":{"__proto__":{"polluted":true},"kept":2}}'),
+    );
+  });
+
+  it("does not pollute the global Object.prototype when writing", () => {
+    const node = readJson('{"outer":{"__proto__":{"polluted":true},"kept":2}}');
+    writeToml(node);
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+  });
+});
+
+describe("convertTomlDates is hardened against __proto__/constructor labels (issue #32 follow-up)", () => {
+  it("a [__proto__] TOML table round-trips as ordinary data instead of throwing", () => {
+    // Before the fix: this throws DocumentError("$: Object is not a
+    // Document value") from buildNode, because convertTomlDates's plain-{}
+    // `out` for the document root has its own prototype reassigned to
+    // {polluted:true} while copying smol-toml's parsed value, so the
+    // result fails buildNode's isPlainObject check entirely.
+    const node = readToml("[__proto__]\npolluted = true\n");
+    expect(node).toEqual(doc(JSON.parse('{"__proto__":{"polluted":true}}')).toData());
+  });
+
+  it("does not pollute the global Object.prototype when reading", () => {
+    readToml("[__proto__]\npolluted = true\n");
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
   });
 });
