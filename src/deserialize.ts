@@ -230,12 +230,18 @@ function materializeTemporal(
   if (!matchesKind(value, kind)) return NO_CONVERSION;
   if (kind === "time") return value; // stays a plain string at this layer
   const converted = kind === "date" ? parseDateToken(value) : parseDatetimeToken(value);
-  /* v8 ignore start -- unreachable via the public surface: `matchesKind`
-   * (schema.ts) already ran the same shape check `parseDateToken`/
-   * `parseDatetimeToken` (temporal.ts) do -- both are built from the same
-   * documented hyphenated/colon spelling -- so having passed the guard
-   * above, the parse below cannot fail. Kept as a defensive backstop
-   * matching this function's total-return contract. */
+  /* v8 ignore start -- unreachable via the public surface, and as of issue
+   * #49 that is actually true: `matchesKind` (schema.ts) is now *defined* in
+   * terms of `parseDateToken`/`parseDatetimeToken`, so the guard above and the
+   * parse below run the identical shape, range and calendar checks and cannot
+   * disagree. Before #49, `matchesKind` shape-checked and then deferred to
+   * `Date.parse`, which rolls a day overflow forward instead of failing -- so
+   * `"2024-02-30"` passed the guard and failed here, making this branch live
+   * and this pragma a false claim (that was #49's second symptom: `validate`
+   * and `materialize` disagreed, breaking the invariant this file's header
+   * states). `test/deserialize.test.ts` pins the agreement directly so the
+   * claim stays checked rather than merely asserted. Kept as a defensive
+   * backstop matching this function's total-return contract. */
   if (converted === null) return NO_CONVERSION;
   /* v8 ignore stop */
   return converted;
