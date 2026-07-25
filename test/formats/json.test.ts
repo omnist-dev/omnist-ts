@@ -244,3 +244,19 @@ describe("readJson/writeJson: __proto__ label round-trips safely (issue #32)", (
     expect(writeJson(node)).toBe('{" ": {"__proto__": {}}}');
   });
 });
+
+describe("checkWriteDepth is a real, reachable guard (issue #37)", () => {
+  it("writeJson rejects a hand-built Node deeper than MAX_DEPTH", () => {
+    // writeJson takes a raw Node (a publicly exported type), so a caller
+    // can hand-build one deeper than buildNode() would ever allow --
+    // this is not a dormant defensive backstop, it is a live guard. See
+    // src/document.ts's Doc.add()/Doc.set() fix (issue #37) for the
+    // related bug where this was previously reachable via the public
+    // mutation API too.
+    let node: Node = 1;
+    for (let i = 0; i < 250; i++) {
+      node = [{ label: "a", target: node }];
+    }
+    expect(() => writeJson(node)).toThrow(/nesting exceeds the maximum depth \(200\)/);
+  });
+});

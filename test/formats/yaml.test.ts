@@ -144,3 +144,13 @@ describe("empty and top-level scalar", () => {
     expect(writeYaml(node)).toBe("{}\n");
   });
 });
+
+describe("checkWriteDepth is a real, reachable guard (issue #37)", () => {
+  it("writeYaml rejects a hand-built Node deeper than MAX_DEPTH", () => {
+    let node: import("../../src/document.js").Node = 1;
+    for (let i = 0; i < 250; i++) {
+      node = [{ label: "a", target: node }];
+    }
+    expect(() => writeYaml(node)).toThrow(/nesting exceeds the maximum depth \(200\)/);
+  });
+});

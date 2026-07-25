@@ -430,3 +430,14 @@ describe("isoOf / xmlText branch coverage", () => {
     expect(out).toContain("<f>false</f>");
   });
 });
+
+describe("checkWriteDepth is a real, reachable guard (issue #37)", () => {
+  it("writeXml rejects a hand-built Node deeper than MAX_DEPTH", () => {
+    let inner: import("../../src/document.js").Node = 1;
+    for (let i = 0; i < 250; i++) {
+      inner = [{ label: "a", target: inner }];
+    }
+    const node: import("../../src/document.js").Node = [{ label: "root", target: inner }];
+    expect(() => writeXml(node)).toThrow(/nesting exceeds the maximum depth \(200\)/);
+  });
+});

@@ -189,10 +189,20 @@ function typeName(v: unknown): string {
 export class Doc {
   private _node: Node;
   readonly path: string;
+  // The depth of this cursor's own node relative to the document root
+  // (root is depth 0). Threaded through child()/edges() as cursors
+  // descend, and into buildNode() from add()/set() so a splice is
+  // rejected when the cursor's depth plus the new subtree's depth would
+  // exceed MAX_DEPTH -- see issue #37: add()/set() used to call
+  // buildNode() with no depth argument, restarting the MAX_DEPTH counter
+  // at 0 on every mutation instead of accounting for how deep the cursor
+  // already is.
+  private readonly depth: number;
 
-  constructor(node: Node, path = "$") {
+  constructor(node: Node, path = "$", depth = 0) {
     this._node = node;
     this.path = path;
+    this.depth = depth;
   }
 
   /** Build a `Doc` from a plain JS value. */
@@ -223,7 +233,7 @@ export class Doc {
       const i = counts.get(label) ?? 0;
       counts.set(label, i + 1);
       const cp = i === 0 ? `${this.path}.${label}` : `${this.path}.${label}[${i}]`;
-      out.push([label, new Doc(target, cp)]);
+      out.push([label, new Doc(target, cp, this.depth + 1)]);
     }
     return out;
   }
@@ -284,7 +294,9 @@ export class Doc {
    */
   add(label: string, value: unknown): Doc {
     this.requireInternal("add");
-    const node = buildNode(value, `${this.path}.${label}`);
+    // The new edge's target sits one level deeper than this cursor, so
+    // seed buildNode with the cursor's own depth (not 0) -- see issue #37.
+    const node = buildNode(value, `${this.path}.${label}`, this.depth + 1);
     (this._node as Edge[]).push({ label, target: node });
     return this;
   }
@@ -305,7 +317,10 @@ export class Doc {
    */
   set(label: string, value: unknown): Doc {
     this.requireInternal("set");
-    const node = buildNode(value, `${this.path}.${label}`);
+    // Same reasoning as add(): seed buildNode with the cursor's own depth
+    // so a splice is checked against where it is actually attached, not
+    // restarted at 0 -- see issue #37.
+    const node = buildNode(value, `${this.path}.${label}`, this.depth + 1);
     let first = -1;
     const kept: Edge[] = [];
     for (const e of this._node as Edge[]) {
@@ -429,9 +444,18 @@ export function grouped(node: Node, depth = 0): unknown {
   return out;
 }
 
-function nodeEquals(a: Node, b: Node): boolean {
+function nodeEquals(a: Node, b: Node, depth = 0): boolean {
   if (Array.isArray(a) !== Array.isArray(b)) return false;
   if (Array.isArray(a) && Array.isArray(b)) {
+    // Defense in depth (issue #37): buildNode()/add()/set() should never
+    // let a Doc's node exceed MAX_DEPTH now, but this function backs the
+    // public equals() and must not let a raw RangeError (stack overflow)
+    // escape in place of the library's own DocumentError contract if that
+    // invariant is ever violated again (e.g. a Doc constructed directly
+    // from a raw node, bypassing the public mutation API).
+    if (depth > MAX_DEPTH) {
+      throw new DocumentError(`nesting exceeds the maximum depth (${MAX_DEPTH})`);
+    }
     if (a.length !== b.length) return false;
     for (let i = 0; i < a.length; i++) {
       // Index is in-bounds for both (same length, loop bound by `a.length`);
@@ -441,7 +465,7 @@ function nodeEquals(a: Node, b: Node): boolean {
       // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
       const eb = b[i]!;
       if (ea.label !== eb.label) return false;
-      if (!nodeEquals(ea.target, eb.target)) return false;
+      if (!nodeEquals(ea.target, eb.target, depth + 1)) return false;
     }
     return true;
   }
@@ -458,5 +482,22 @@ function reprNode(node: Node): string {
   // Date.prototype.toJSON() (-> the ISO string) before either its default
   // serialization or a replacer function ever sees the value, so a `Date`
   // scalar renders as its ISO string for free.
+  //
+  // JSON.stringify recurses internally and would otherwise surface a raw
+  // RangeError (stack overflow) instead of the library's own DocumentError
+  // on an over-deep node. checkReprDepth() walks the tree first, purely to
+  // enforce the same MAX_DEPTH guard the rest of the codebase relies on --
+  // defense in depth (issue #37), same reasoning as nodeEquals() above.
+  checkReprDepth(node);
   return JSON.stringify(node);
+}
+
+function checkReprDepth(node: Node, depth = 0): void {
+  if (!Array.isArray(node)) return;
+  if (depth > MAX_DEPTH) {
+    throw new DocumentError(`nesting exceeds the maximum depth (${MAX_DEPTH})`);
+  }
+  for (const { target } of node) {
+    checkReprDepth(target, depth + 1);
+  }
 }

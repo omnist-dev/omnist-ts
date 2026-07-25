@@ -41,14 +41,15 @@ import type { Schema } from "../schema.js";
 const MAX_DEPTH = 200;
 
 function checkWriteDepth(depth: number): void {
-  /* v8 ignore start -- unreachable via the public API: buildNode
-   * (document.ts) already rejects a node deeper than MAX_DEPTH at
-   * construction time, so no node this writer ever sees can exceed it
-   * here. Kept as a defensive backstop, same convention as json.ts. */
+  // NOT unreachable (issue #37): writeToml takes a raw `Node`, a publicly
+  // exported type -- a caller can hand-build one (or splice a subtree in
+  // via Doc.add()/Doc.set()) that exceeds MAX_DEPTH without ever going
+  // through buildNode()'s own guard. This branch is a real, exercised
+  // backstop, not a dormant one; see test/formats/toml.test.ts's
+  // depth-guard test.
   if (depth > MAX_DEPTH) {
     throw new WriteError("nesting exceeds the maximum depth (" + String(MAX_DEPTH) + ")");
   }
-  /* v8 ignore stop */
 }
 
 // ---------------------------------------------------------------------------
