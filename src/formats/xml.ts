@@ -68,6 +68,12 @@ const XML_NAME = /^[A-Za-z_][A-Za-z0-9_.-]*$/;
 // port's codepoint-range convention for _XML_ILLEGAL_RANGES.
 // eslint-disable-next-line no-control-regex
 const XML_ILLEGAL_CHAR = new RegExp("[\\x00-\\x08\\x0B\\x0C\\x0E-\\x1F\\uD800-\\uDFFF\\uFFFE\\uFFFF]");
+// g-flagged twin of XML_ILLEGAL_CHAR, derived from .source so the two can
+// never drift. .replace() needs the g flag to substitute every match, not
+// just the first; kept separate from XML_ILLEGAL_CHAR (used with .test() in
+// scanXmlNode) because a g-flagged regex used with .test() carries a
+// stateful lastIndex that would silently skip matches across repeated calls.
+const XML_ILLEGAL_CHAR_G = new RegExp(XML_ILLEGAL_CHAR.source, "g");
 
 const PARSER = new XMLParser({
   preserveOrder: true,
@@ -365,7 +371,7 @@ function xmlText(v: Scalar): string {
 }
 
 function xmlSanitize(text: string): string {
-  return text.replace(XML_ILLEGAL_CHAR, "�");
+  return text.replace(XML_ILLEGAL_CHAR_G, "�");
 }
 
 function escapeXmlText(text: string): string {
