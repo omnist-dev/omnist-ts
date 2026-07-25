@@ -51,14 +51,16 @@
  *   as `schema.ts`'s `matchesKind` already enforces for `validate` -- this
  *   module reuses `matchesKind` itself as the shape check, so `validate`
  *   and `materialize` can never disagree on whether a given string
- *   upgrades. A real `Date` *object*, however, satisfies whichever of
- *   `date`/`datetime` the field declares unconditionally: `document.ts`'s
- *   file-top comment documents that the Document layer has no distinct
- *   date/datetime object types to tell them apart (tracked as omnist-ts
- *   issue #14), so unlike Python (where a `datetime.datetime` object never
- *   satisfies a `date` schema field), this port cannot detect that case --
- *   it is a known, accepted limitation, not something this module attempts
- *   to work around.
+ *   upgrades. `parseDateToken`/`parseDatetimeToken` also tag the `Date`
+ *   they return with the kind that was actually read (issue #14's fix), so
+ *   a `Date` produced *by this module* now satisfies only the kind it was
+ *   materialized as when later re-validated against a different schema --
+ *   matching Python's `isinstance`-based exclusion for that case. A real
+ *   `Date` object handed to `materialize` from *outside* any schema-
+ *   directed parse (untagged -- see `temporal.ts`'s file-top comment)
+ *   still satisfies whichever of `date`/`datetime` the field declares:
+ *   there is no signal to draw a kind from in that case, so it remains
+ *   ambiguous by necessity, not something this module can resolve.
  * - a `time` field accepts a plain string in the documented spelling as-is
  *   (there is nothing further to convert it to at the Document layer).
  *
@@ -206,12 +208,21 @@ function materializeTemporal(
   value: Exclude<Scalar, null>,
   kind: Extract<ScalarKind, "date" | "time" | "datetime">,
 ): Scalar | typeof NO_CONVERSION {
-  // A real `Date` object satisfies whichever of date/datetime the field
-  // declares unconditionally -- see file-top comment on the known,
-  // accepted `document.ts` object-form ambiguity (issue #14). `time` never
-  // produces a `Date` (there is no bare time-of-day type), so this branch
-  // is unreachable for `kind === "time"`.
-  if (value instanceof Date) return value;
+  // A real `Date` object is checked the same way the string branch below
+  // is: via `matchesKind`, so a `Date` tagged by `parseDateToken`/
+  // `parseDatetimeToken` (issue #14's fix) with a kind that disagrees with
+  // this field's declared `kind` is rejected here -- at materialize time --
+  // rather than silently passed through and only failing later on
+  // re-validation. That mirrors the string branch's own comment: `validate`
+  // and `materialize` can never disagree. An untagged `Date` (never
+  // produced by a schema-directed parse -- e.g. constructed directly by
+  // application code) has no tag to disagree with, so `matchesKind` still
+  // accepts it for either `date` or `datetime`, preserving the pre-#14
+  // permissive behavior for that one case -- ambiguous by necessity, see
+  // `temporal.ts`'s file-top comment; this is a documented residual
+  // limitation, not a gap. `time` never produces a `Date` (there is no bare
+  // time-of-day type), so this branch is unreachable for `kind === "time"`.
+  if (value instanceof Date) return matchesKind(value, kind) ? value : NO_CONVERSION;
   if (typeof value !== "string") return NO_CONVERSION;
   // The exact same shape check `Schema.validate` uses (`matchesKind`), so
   // `validate` and `materialize` can never disagree on whether a string

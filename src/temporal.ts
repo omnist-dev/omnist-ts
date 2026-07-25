@@ -11,6 +11,38 @@
  * Calendar-validated (rejects e.g. day 30 in February) and UTC-based (no
  * host-timezone dependence), matching `src/document.ts`'s file-top comment
  * on the `date`/`datetime` -> `Date` mapping this port uses.
+ *
+ * ## Date-kind tagging (issue #14)
+ *
+ * `document.ts` maps both `date` and `datetime` onto the single native
+ * `Date` type, so a bare `Date` value carries no signal of which kind it
+ * was meant to be. `parseDateToken`/`parseDatetimeToken` are the two (and
+ * only) places in this port that construct a `Date` from text whose kind
+ * *is* known -- the caller (`oml.ts`'s tokenizer, or `deserialize.ts`'s
+ * `materialize`) already knows whether it read a DATE or a DATETIME token.
+ * Each records that kind, out-of-band, in `DATE_KIND` (a `WeakMap` keyed
+ * by object identity, so it never touches the `Date` instance itself --
+ * no risk of collision with `Date`'s own properties, and it works even for
+ * a frozen `Date`). `schema.ts`'s `matchesKind` consults `dateKind()` to
+ * resolve the date-vs-datetime ambiguity for any `Date` that passed through
+ * one of these two functions.
+ *
+ * This is deliberately narrow: a `Date` constructed any other way (e.g.
+ * `new Date()` directly, by application code, never touching this module)
+ * is untagged and stays ambiguous -- `matchesKind` still accepts it for
+ * either kind, exactly as before. That's not a gap this module tries to
+ * close; there is no signal to draw a kind from in that case. What this
+ * *does* close is the concrete, reported gap (issue #14): a `Date` that
+ * came from a schema-directed read (`readOml`'s DATE/DATETIME tokens, or
+ * `materialize` upgrading an ISO string) now carries the kind that read
+ * established, so it validates correctly against a *different* schema that
+ * disagrees on `date` vs `datetime` for the same label -- matching
+ * upstream Python's `isinstance`-based mutual exclusion for that case,
+ * which is the only case Python's real `datetime.date`/`datetime.datetime`
+ * classes could ever observe in the first place (a `date`/`datetime` value
+ * only ever originates from a parse or a schema-directed construction in
+ * Python too; there's no "bare, unattributed" `date` object floating
+ * around outside one).
  */
 
 function daysInMonth(y: number, m: number): number {
@@ -21,12 +53,31 @@ const DATE_TOKEN_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
 const TIME_TOKEN_RE =
   /^(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,6}))?)?(?:([+-])(\d{2}):(\d{2}))?$/;
 
+/** The date-vs-datetime kind a `Date` was constructed as, when known. See
+ * the file-top comment ("Date-kind tagging"). */
+export type DateKind = "date" | "datetime";
+
+const DATE_KIND = new WeakMap<Date, DateKind>();
+
+function tagDateKind(d: Date, kind: DateKind): Date {
+  DATE_KIND.set(d, kind);
+  return d;
+}
+
+/** The kind a `Date` was tagged with by `parseDateToken`/`parseDatetimeToken`,
+ * or `undefined` if it was never tagged (e.g. constructed directly, outside
+ * any schema-directed read). Exported for `schema.ts`'s `matchesKind`. */
+export function dateKind(d: Date): DateKind | undefined {
+  return DATE_KIND.get(d);
+}
+
 /** Parse a `YYYY-MM-DD` date token into a UTC-midnight `Date`, or `null` if
  * the calendar date is out of range (e.g. month 13, or day 30 in a
  * 28/29/30-day month). Callers are expected to have already shape-checked
  * `text` (e.g. via `schema.ts`'s `matchesKind`/`isIsoDateString`, or the
  * OML tokenizer's `DATE_SRC` lexical rule) -- this only re-validates the
- * calendar, not the string shape. */
+ * calendar, not the string shape. The returned `Date` is tagged `"date"`
+ * (see the file-top comment). */
 export function parseDateToken(text: string): Date | null {
   const m = DATE_TOKEN_RE.exec(text);
   /* v8 ignore start -- unreachable via either caller: `oml.ts`'s tokenizer
@@ -42,7 +93,7 @@ export function parseDateToken(text: string): Date | null {
   const d = Number(m[3]);
   if (mo < 1 || mo > 12) return null;
   if (d < 1 || d > daysInMonth(y, mo)) return null;
-  return new Date(Date.UTC(y, mo - 1, d));
+  return tagDateKind(new Date(Date.UTC(y, mo - 1, d)), "date");
 }
 
 interface TimeParts {
@@ -87,7 +138,8 @@ export function parseTimeToken(text: string): TimeParts | null {
 }
 
 /** Parse a `YYYY-MM-DDTHH:MM[:SS[.ffffff]][+-HH:MM]` datetime token into a
- * `Date` at the parsed instant, or `null` if either half is out of range. */
+ * `Date` at the parsed instant, or `null` if either half is out of range.
+ * The returned `Date` is tagged `"datetime"` (see the file-top comment). */
 export function parseDatetimeToken(text: string): Date | null {
   const tIdx = text.indexOf("T");
   /* v8 ignore start -- unreachable via either caller: `oml.ts`'s tokenizer
@@ -108,5 +160,5 @@ export function parseDatetimeToken(text: string): Date | null {
   if (time.offsetMin !== null) {
     epoch -= time.offsetMin * 60000;
   }
-  return new Date(epoch);
+  return tagDateKind(new Date(epoch), "datetime");
 }
