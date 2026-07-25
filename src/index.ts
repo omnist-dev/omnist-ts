@@ -56,6 +56,14 @@ export {
 } from "./oml.js";
 
 export {
+  readXml,
+  writeXml,
+  checkXml,
+  type ReadXmlOptions,
+  type WriteXmlOptions,
+} from "./formats/xml.js";
+
+export {
   readToml,
   writeToml,
   checkToml,
@@ -83,6 +91,7 @@ import type { WriteReport as _WriteReport } from "./report.js";
 import { registerFormat as _registerFormat } from "./registry.js";
 import { readJson as _readJson, writeJson as _writeJson, checkJson as _checkJson } from "./formats/json.js";
 import { readOml as _readOml, writeOml as _writeOml, checkOml as _checkOml } from "./oml.js";
+import { readXml as _readXml, writeXml as _writeXml, checkXml as _checkXml } from "./formats/xml.js";
 import { readToml as _readToml, writeToml as _writeToml, checkToml as _checkToml } from "./formats/toml.js";
 import { readYaml as _readYaml, writeYaml as _writeYaml, checkYaml as _checkYaml } from "./formats/yaml.js";
 
@@ -98,6 +107,13 @@ _registerFormat({
   read: _readOml,
   write: _writeOml as (node: unknown, opts?: unknown) => string,
   check: _checkOml as unknown as (node: unknown) => _WriteReport,
+});
+
+_registerFormat({
+  name: "xml",
+  read: _readXml,
+  write: _writeXml as (node: unknown, opts?: unknown) => string,
+  check: _checkXml as (node: unknown) => _WriteReport,
 });
 
 _registerFormat({
