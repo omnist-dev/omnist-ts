@@ -1,0 +1,156 @@
+/**
+ * YAML codec over the canonical Document (edge-list) model. Ported from the
+ * YAML section of omnist/formats.py.
+ *
+ * YAML goes through the same JSON-shaped grouping (grouped()) as JSON --
+ * same-label edges collapse into an array, a single occurrence stays bare
+ * (the schema-less count-1 fallback -- see docs/design/model.md section
+ * 9(1) and src/formats/json.ts's file-top comment).
+ *
+ * Uses the `yaml` npm package (an optionalDependency for consumers, a
+ * devDependency here for testing). Both reading and writing use the
+ * `"yaml-1.1"` schema rather than the package's default (`"core"`, YAML
+ * 1.2) -- that is the schema whose implicit-scalar resolution matches
+ * PyYAML's own `safe_load`/`safe_dump`, which is what the Python port's
+ * documented behavior (docs/formats/yaml.md) is pinned to:
+ *
+ * - an unquoted ISO-8601-looking scalar resolves to a native date/datetime
+ *   (Document's `Date`), with no schema needed -- unlike JSON, whose
+ *   dates always arrive as plain strings;
+ * - a bare `on`/`off`/`yes`/`no` scalar (as a value or a mapping key)
+ *   resolves to a boolean -- the YAML 1.1 boolean-coercion quirk the docs
+ *   call out (see docs/examples/github-actions.md's `on:` workflow key);
+ * - a bare time-of-day (`12:00:00`) resolves to YAML's sexagesimal integer
+ *   scalar (`43200`), not a time value -- there is no standalone
+ *   "time of day" type in YAML's core schema, so this is the underlying
+ *   library's own resolver, not something omnist imposes.
+ *
+ * Writing a `Date` leaf hands it to the `yaml` package directly (rather
+ * than pre-stringifying, the way json.ts's writer does for its ISO-string
+ * fallback) -- YAML has a native date/datetime type, so the library's own
+ * midnight-vs-full-instant formatting applies, matching PyYAML's
+ * `yaml.dump` of a real `datetime.date`/`datetime.datetime` object. Unlike
+ * JSON, no `float.special` substitution is needed either: YAML's `.nan`/
+ * `.inf`/`-.inf` scalars round-trip NaN/Infinity/-Infinity natively.
+ *
+ * Document's `time` scalar-kind has no distinct representation at this
+ * layer -- src/document.ts's file-top comment: a `time` value is just a
+ * plain `string`, indistinguishable from any other string without a
+ * schema. So, unlike Python's `check_yaml` (which flags a `datetime.time`
+ * leaf as `temporal.stringified`), that adjustment code has nothing to
+ * fire on here: there is no way to construct a Document leaf this port
+ * would recognize as "a time, not a string" in the first place.
+ */
+
+import YAML from "yaml";
+import { buildNode, grouped, type Node, type Scalar } from "../document.js";
+import { ParseError, WriteError } from "../errors.js";
+import { finishWrite, WriteReport } from "../report.js";
+import { materialize } from "../deserialize.js";
+import type { Schema } from "../schema.js";
+
+// Matches src/document.ts's own MAX_DEPTH (locally redefined here, same as
+// src/formats/json.ts's own copy of the same guard constant -- see that
+// file for this convention's precedent in this port).
+const MAX_DEPTH = 200;
+
+function checkWriteDepth(depth: number): void {
+  /* v8 ignore start -- unreachable via the public API: buildNode
+   * (document.ts) already rejects a node deeper than MAX_DEPTH at
+   * construction time, so no node this writer ever sees can exceed it
+   * here. Kept as a defensive backstop, same convention as json.ts's own
+   * copy of this guard. */
+  if (depth > MAX_DEPTH) {
+    throw new WriteError("nesting exceeds the maximum depth (" + String(MAX_DEPTH) + ")");
+  }
+  /* v8 ignore stop */
+}
+
+/** Yield [path, label, value] for every edge (a leaf value, or undefined
+ * for a container), so scanYaml can flag a NEL character in either
+ * position -- mirrors formats.py's _scan_yaml_labels. */
+function* labeledEdges(
+  node: Node,
+  path = "$",
+  depth = 0,
+): Generator<[string, string, Scalar | undefined]> {
+  if (Array.isArray(node)) {
+    checkWriteDepth(depth);
+    const counts = new Map<string, number>();
+    for (const { label, target } of node) {
+      const i = counts.get(label) ?? 0;
+      counts.set(label, i + 1);
+      const p = i === 0 ? path + "." + label : path + "." + label + "[" + String(i) + "]";
+      yield [p, label, Array.isArray(target) ? undefined : target];
+      yield* labeledEdges(target, p, depth + 1);
+    }
+  }
+}
+
+/** Options accepted by readYaml. */
+export interface ReadYamlOptions {
+  schema?: Schema;
+}
+
+/** Parse YAML text into a Document node. */
+export function readYaml(text: string, opts: ReadYamlOptions = {}): Node {
+  let parsed: unknown;
+  try {
+    parsed = YAML.parse(text, { schema: "yaml-1.1" });
+  } catch (exc) {
+    // YAML.parse always throws a YAMLError (an Error instance) on malformed
+    // input, never a bare value, so the non-Error branch below is a
+    // defensive fallback that's never actually reached.
+    /* v8 ignore next */
+    const message = exc instanceof Error ? exc.message : String(exc);
+    throw new ParseError("invalid YAML: " + message);
+  }
+  const node = buildNode(parsed);
+  if (opts.schema === undefined) return node;
+  return materialize(node, opts.schema);
+}
+
+/** Options accepted by writeYaml. */
+export interface WriteYamlOptions {
+  strict?: boolean;
+  report?: WriteReport;
+}
+
+/** Write a Document node as YAML text. */
+export function writeYaml(node: Node, opts: WriteYamlOptions = {}): string {
+  const { strict = false, report } = opts;
+  const rep = scanYaml(node);
+  const text = YAML.stringify(grouped(node), {
+    schema: "yaml-1.1",
+    sortMapEntries: false,
+  }) as string;
+  return finishWrite(text, rep, report === undefined ? { strict } : { strict, report });
+}
+
+/** Report what writing YAML would adjust, without producing output. */
+export function checkYaml(node: Node): WriteReport {
+  return scanYaml(node);
+}
+
+function scanYaml(node: Node): WriteReport {
+  const rep = new WriteReport();
+  for (const [path, label, value] of labeledEdges(node)) {
+    if (label.includes("\x85")) {
+      rep.add(
+        path,
+        "string.line-break-char",
+        "label contains U+0085 (NEL); written double-quoted to round-trip correctly",
+        "warning",
+      );
+    }
+    if (typeof value === "string" && value.includes("\x85")) {
+      rep.add(
+        path,
+        "string.line-break-char",
+        "value contains U+0085 (NEL); written double-quoted to round-trip correctly",
+        "warning",
+      );
+    }
+  }
+  return rep;
+}
