@@ -453,13 +453,13 @@ readOml("b: [1, 2, 3,]")   // [{ label: "b", target: 1 }, { label: "b", target: 
 `writeOml(node, { arrays: true })` is the write-side inverse -- see
 [Writing](#writing) above.
 
-## Known limitation: writeOml has no depth guard (issue #70)
+## The depth guard
 
 Nesting depth (the number of `{` a value may be wrapped in) is capped at
-200 **on read**, matching the Document model's own bound (`MAX_DEPTH` in
-`src/oml.ts`, and the same constant `src/document.ts`/`src/schema.ts`
-each keep their own copy of). 200 levels of `{` parses; 201 raises
-`ParseError` naming the limit:
+200 on **both read and write**, matching the Document model's own bound
+(`MAX_DEPTH` in `src/oml.ts`, and the same constant `src/document.ts`/
+`src/schema.ts` each keep their own copy of). 200 levels of `{` parses or
+writes; 201 raises an error naming the limit:
 
 ```
 readOml(200-levels-deep-source)    // parses fine
@@ -472,20 +472,23 @@ or exhausting the call stack, not a data-modeling constraint -- see
 [Numeric edge cases](#numeric-edge-cases) above for the matching integer
 digit cap.
 
-`writeOml` does not have the equivalent guard. Issue #37 gave
-`writeJson`/`writeYaml`/`writeToml`/`writeXml` their own
-`checkWriteDepth` call so that a hand-constructed `Node`/`Edge` (bypassing
+`writeOml` carries the equivalent guard too, matching the
+`checkWriteDepth` call issue #37 gave `writeJson`/`writeYaml`/`writeToml`/
+`writeXml` so that a hand-constructed `Node`/`Edge` (bypassing
 `buildNode`'s construction-time check, since both are exported public
 types) can't smuggle an over-deep structure past the writer and crash it
 with a raw `RangeError` (stack overflow) instead of the library's own
-error type. `writeOml` was apparently missed from that fix and, as of
-this writing, still has no check: a `Node` assembled programmatically
-that nests past 200 levels writes successfully with no error, and one
-deep enough would let a raw `RangeError` escape. In practice this only
-matters for a `Node` assembled programmatically -- `buildNode` and every
-reader in this port cap out at 200 the same way `readOml` does, so this
-gap isn't reachable through the normal read -> transform -> write path.
-Tracked in [issue #70](https://github.com/omnist-dev/omnist-ts/issues/70).
+error type. `writeOml` was initially missed from that fix; a `Node`
+assembled programmatically that nested past 200 levels would write
+successfully with no error, letting a raw `RangeError` escape. Closed in
+[issue #70](https://github.com/omnist-dev/omnist-ts/issues/70) -- both
+directions now raise `WriteError`/`ParseError` naming the limit instead
+of an uncaught stack overflow:
+
+```
+writeOml(201-levels-deep-hand-built-node)    // WriteError: nesting exceeds the maximum depth (200)
+```
+<!-- verified-by: test/oml.test.ts "writeOml rejects a hand-built Node deeper than MAX_DEPTH, in pretty mode" -->
 
 ## Not yet implemented
 
