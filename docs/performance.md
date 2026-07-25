@@ -28,14 +28,37 @@ The same shape Python's write-up uses: an array of three-field records
 | XML write / read | ~101ms / ~477ms |
 | OML write / read | ~94ms / ~616ms |
 
-YAML read is the clear outlier here -- roughly 3x OML's read time and over
-25x JSON's, on the same document. That's consistent across repeated runs,
-not noise; it looks like a real property of the `yaml` package's parser
-on a document this wide (100k flow-style entries), not a bug in this
-port's YAML adapter, but it's worth knowing about if YAML is your
-hot-path format. See
-[omnist-ts#43](https://github.com/omnist-dev/omnist-ts/issues/43) for the
-follow-up.
+YAML read (and, to a lesser extent, write) is the clear outlier here --
+roughly 3x OML's read time and over 25x JSON's, on the same document.
+[omnist-ts#43](https://github.com/omnist-dev/omnist-ts/issues/43) profiled
+this directly (`YAML.parse`/`YAML.stringify` timed in isolation from this
+port's own wrapper code) rather than guessing, and confirmed it's an
+inherent property of the `yaml` npm package's parser/serializer, not a
+bug in this port's `src/formats/yaml.ts`:
+
+- Splitting `readYaml` into its two steps shows `YAML.parse` alone taking
+  ~2100ms of the ~2190ms total read -- this port's own `buildNode()` step
+  (the same function every other codec's reader calls) took ~60ms, in
+  line with JSON's whole read time. The wrapper is not the bottleneck;
+  well over 90% of the time is inside the `yaml` package itself.
+- The same split on the write side: `grouped()` (this port's own
+  pre-processing, shared with JSON) took ~14ms of the ~900ms total write;
+  `YAML.stringify` alone took ~800ms.
+- Timing `YAML.parse` at 5k/10k/20k/40k records showed a constant
+  ~78-82us/record, i.e. linear scaling with document size, not quadratic
+  -- ruling out an accidentally-pessimal usage pattern (no O(n^2) blowup
+  to fix).
+- Switching from the `"yaml-1.1"` schema (required for PyYAML-compatible
+  parsing, see `src/formats/yaml.ts`'s file-top comment) to the package's
+  default `"core"` schema shaved only ~15% off parse time (~2105ms to
+  ~1752ms) -- the schema choice isn't the driver either.
+
+Conclusion: YAML's grammar is substantially more complex than JSON's
+(block/flow styles, anchors/aliases, multiple scalar-resolution schemas,
+implicit typing), and the `yaml` package's parser pays for that
+complexity per node. That cost is real but not a regression to chase --
+there was no fix to make here. If YAML is your hot-path format on large
+documents, prefer JSON or OML.
 
 OML read is meaningfully faster than a prior audit measured pre-#35: that
 issue's tokenizer-dispatch fix roughly halved OML read time on a
