@@ -289,3 +289,55 @@ describe("Doc: export depth guard (bypassing buildNode)", () => {
     expect((d.toGrouped() as Record<string, unknown>)["a"]).not.toBeNull();
   });
 });
+
+// Issue #32: a document edge labeled __proto__ (or constructor/prototype)
+// is user-controlled data -- readJson/readYaml/readToml all happily parse
+// such a label out of untrusted input via buildNode's Object.entries walk.
+// grouped() (used by every writer that groups same-label edges into a
+// JSON-shaped object: writeJson, writeToml, writeYaml) built its output
+// with a plain object literal and assigned out[label] = value. When label
+// is the string "__proto__", that bracket assignment does not create an
+// own property -- it invokes Object.prototype's [[Set]] accessor for
+// "__proto__" and reassigns the built object's own prototype to value.
+// This is prototype confusion/corruption of the returned object (not
+// global Object.prototype pollution: the accessor only ever changes the
+// prototype of the specific object being built, it never mutates
+// Object.prototype itself), but it silently corrupts the document's data
+// and breaks every downstream isPlainObject/isPlainRecord check, which is
+// a real, exploitable-from-untrusted-input security bug.
+describe("Doc: grouped() is hardened against __proto__/constructor labels (issue #32)", () => {
+  it("a __proto__ edge becomes a real own property, not the object's prototype", () => {
+    const node: Node = [{ label: "__proto__", target: [{ label: "polluted", target: true }] }];
+    const d = new Doc(node);
+    const grouped = d.toGrouped() as Record<string, unknown>;
+
+    // grouped() builds with Object.create(null) precisely so a "__proto__"
+    // label can never be mistaken for the accessor -- isPlainObject/
+    // isPlainRecord elsewhere in this codebase already treat a null
+    // prototype as "plain", so this is not a behavior change for any
+    // consumer, just a safe representation for a dangerous key.
+    expect(Object.getPrototypeOf(grouped)).toBe(null);
+    // The __proto__ label's value must be readable back as an own property.
+    expect(Object.prototype.hasOwnProperty.call(grouped, "__proto__")).toBe(true);
+    expect(grouped["__proto__"]).toEqual({ polluted: true });
+  });
+
+  it("does not pollute the global Object.prototype", () => {
+    const node: Node = [{ label: "__proto__", target: [{ label: "polluted", target: true }] }];
+    const d = new Doc(node);
+    d.toGrouped();
+    expect((({} as Record<string, unknown>)).polluted).toBeUndefined();
+  });
+
+  it("constructor and prototype labels round-trip as ordinary own properties", () => {
+    const node: Node = [
+      { label: "constructor", target: "x" },
+      { label: "prototype", target: "y" },
+    ];
+    const d = new Doc(node);
+    const grouped = d.toGrouped() as Record<string, unknown>;
+    expect(Object.getPrototypeOf(grouped)).toBe(null);
+    expect(grouped.constructor).toBe("x");
+    expect(grouped.prototype).toBe("y");
+  });
+});

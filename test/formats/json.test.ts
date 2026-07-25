@@ -190,3 +190,39 @@ describe("remaining serialize branches", () => {
   });
 
 });
+
+// Issue #32 (security regression): a JSON document with a "__proto__" key
+// is untrusted input reaching readJson/writeJson via document.ts's
+// grouped(). Before the fix, writeJson(readJson(...)) on such input threw
+// "cannot serialize Object" -- a denial-of-service crash -- because
+// grouped() corrupted the built object's own prototype instead of storing
+// "__proto__" as a normal data key. This proves the full read/write round
+// trip is safe end-to-end, and that global Object.prototype is never
+// touched.
+describe("readJson/writeJson: __proto__ label round-trips safely (issue #32)", () => {
+  it("round-trips a top-level __proto__ key without throwing or corrupting data", () => {
+    const malicious = '{"__proto__": {"polluted": true}, "safe": 1}';
+    const node = readJson(malicious);
+    const text = writeJson(node);
+    const reparsed = JSON.parse(text);
+    expect(Object.prototype.hasOwnProperty.call(reparsed, "__proto__")).toBe(true);
+    expect((reparsed as Record<string, unknown>)["__proto__"]).toEqual({ polluted: true });
+    expect((reparsed as Record<string, unknown>).safe).toBe(1);
+  });
+
+  it("never pollutes the global Object.prototype", () => {
+    const malicious = '{"__proto__": {"polluted": true}}';
+    const node = readJson(malicious);
+    writeJson(node);
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+    expect(Object.getPrototypeOf({})).toBe(Object.prototype);
+  });
+
+  it("constructor/prototype keys also round-trip as ordinary data", () => {
+    const malicious = '{"constructor": {"prototype": {"polluted": true}}}';
+    const node = readJson(malicious);
+    const text = writeJson(node);
+    expect(JSON.parse(text)).toEqual({ constructor: { prototype: { polluted: true } } });
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+  });
+});

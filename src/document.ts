@@ -393,7 +393,23 @@ export function grouped(node: Node, depth = 0): unknown {
   for (const { label } of node) {
     counts.set(label, (counts.get(label) ?? 0) + 1);
   }
-  const out: Record<string, unknown> = {};
+  // Security (issue #32): `label` is untrusted document data (it can come
+  // straight from a parsed JSON/YAML/TOML key). A plain {} has
+  // Object.prototype in its chain, so out[label] = value for
+  // label === "__proto__" would not create an own property -- it would
+  // invoke Object.prototype's [[Set]] accessor and reassign out's own
+  // prototype to value, silently corrupting the object being built (and,
+  // since isPlainObject/isPlainRecord require the exact Object.prototype
+  // or null, breaking every downstream check that consumes this output).
+  // Building with Object.create(null) instead means every key --
+  // including "__proto__", "constructor", and "prototype" -- is stored as
+  // an ordinary own property. This does not itself protect against
+  // pollution of the *global* Object.prototype (that would require a
+  // nested assignment like obj.__proto__.x = y, which this function never
+  // does -- see the security regression tests in document.test.ts for
+  // confirmation that global Object.prototype is never touched either
+  // way).
+  const out: Record<string, unknown> = Object.create(null) as Record<string, unknown>;
   for (const { label, target } of node) {
     const g = grouped(target, depth + 1);
     // `label` was seen while populating `counts` above (same node, same
