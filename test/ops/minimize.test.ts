@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
+import fc from "fast-check";
 import { parseSchema } from "../../src/osd.js";
-import { Schema } from "../../src/schema.js";
+import { Schema, t, ref, record, field, ANY, type Field, type FieldType } from "../../src/schema.js";
 import { equivalenceClasses, normalize } from "../../src/ops/minimize.js";
 import { isEmpty } from "../../src/ops/prune.js";
 import { compatibleWith, equivalent } from "../../src/ops/subschema.js";
@@ -179,5 +180,105 @@ describe("compatibleWith / equivalent cross-check against isomorphic", () => {
     expect(compatibleWith(a, b)).toBe(true);
     expect(compatibleWith(b, a)).toBe(true);
     expect(isomorphic(normalize(a), normalize(b))).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Property-based strengthening (issue #10): the hand-constructed pairs above
+// pin specific known-tricky shapes; this section adds fast-check generators
+// so the Theorem 4 cross-check (equivalent === isomorphic(normalize,
+// normalize)) and normalize's own properties are also checked over randomly
+// generated schemas, not just examples chosen by a human -- matching
+// upstream `tests/test_fuzz.py`'s `schemas()`/`test_equivalent_agrees_with_
+// normalize_and_isomorphic` and friends. See
+// `docs/design/ts-implementation-notes.md` §3 for the Hypothesis ->
+// fast-check strategy mapping.
+// ---------------------------------------------------------------------------
+
+const RECORD_NAMES = ["A", "B", "C"] as const;
+
+// [1,1] and [0,undefined-as-null] etc: both mandatory and optional
+// cardinalities must appear with real probability -- an all-optional
+// generator could never produce a mandatory ref cycle (an unsatisfiable,
+// empty-language schema), exactly the shape that most stresses `isEmpty`/
+// `normalize`/`isomorphic` together.
+const cardinalities: fc.Arbitrary<[number, number | null]> = fc.constantFrom(
+  [1, 1],
+  [0, 1],
+  [1, null],
+  [0, null],
+);
+
+const nonAnyFieldTypes: fc.Arbitrary<FieldType> = fc.oneof(
+  fc.constant(t.string),
+  fc.constant(t.integer),
+  fc.constantFrom(...RECORD_NAMES.map((n) => ref(n))),
+);
+
+// Spec any-type-spec.md Sec.5.2: a generated field's type is `any` with
+// probability ~0.15, matching upstream's fuzz generator.
+const ANY_FIELD_PROBABILITY = 0.15;
+const fieldTypes: fc.Arbitrary<FieldType> = fc
+  .double({ min: 0, max: 1, noNaN: true })
+  .chain((p) => (p < ANY_FIELD_PROBABILITY ? fc.constant(ANY) : nonAnyFieldTypes));
+
+const fieldsArb: fc.Arbitrary<Field[]> = fc
+  .array(
+    fc.tuple(fc.integer({ min: 0, max: 1 }), fieldTypes, cardinalities),
+    { minLength: 0, maxLength: 2 },
+  )
+  .map((rows) => rows.map(([i, ftype, [lo, hi]], idx) => field(`f${idx}${i}`, ftype, lo, hi)));
+
+const schemasArb: fc.Arbitrary<Schema> = fc
+  .tuple(fieldsArb, fieldsArb, fieldsArb, fc.constantFrom(...RECORD_NAMES))
+  .map(([fa, fb, fc_, rootName]) => {
+    const env = {
+      A: record(...fa),
+      B: record(...fb),
+      C: record(...fc_),
+    };
+    return new Schema(ref(rootName), env);
+  });
+
+describe("property-based: equivalent/isomorphic Theorem-4 cross-check", () => {
+  it("agrees for arbitrary random schema pairs", () => {
+    fc.assert(
+      fc.property(schemasArb, schemasArb, (s, t2) => {
+        expect(equivalent(s, t2)).toBe(isomorphic(normalize(s), normalize(t2)));
+      }),
+      { numRuns: 150 },
+    );
+  });
+
+  it("normalize never changes a schema's language", () => {
+    fc.assert(
+      fc.property(schemasArb, (s) => {
+        expect(equivalent(normalize(s), s)).toBe(true);
+      }),
+      { numRuns: 150 },
+    );
+  });
+
+  it("normalize is idempotent", () => {
+    fc.assert(
+      fc.property(schemasArb, (s) => {
+        const once = normalize(s);
+        const twice = normalize(once);
+        expect([...once.env.keys()].sort()).toEqual([...twice.env.keys()].sort());
+        expect(once.root.name).toBe(twice.root.name);
+      }),
+      { numRuns: 150 },
+    );
+  });
+
+  it("an unsatisfiable schema is vacuously compatibleWith anything", () => {
+    fc.assert(
+      fc.property(schemasArb, schemasArb, (s, t2) => {
+        if (isEmpty(s)) {
+          expect(compatibleWith(s, t2)).toBe(true);
+        }
+      }),
+      { numRuns: 150 },
+    );
   });
 });

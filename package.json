@@ -43,7 +43,8 @@
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "oracle": "tsx tools/semantic_oracle.ts"
   },
   "peerDependenciesMeta": {
     "yaml": {
@@ -70,6 +71,8 @@
     "fast-xml-parser": "^4.5.7",
     "typescript": "^5.6.0",
     "typescript-eslint": "^8.0.0",
-    "vitest": "^2.0.0"
+    "vitest": "^2.0.0",
+    "tsx": "^4.19.0",
+    "@types/node": "^20.14.0"
   }
 }
