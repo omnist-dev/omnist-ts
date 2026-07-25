@@ -79,6 +79,7 @@ export default defineConfig({
         text: "Project",
         items: [
           { text: "Testing", link: "/testing" },
+          { text: "Performance", link: "/performance" },
           { text: "Repo layout", link: "/layout" },
         ],
       },
