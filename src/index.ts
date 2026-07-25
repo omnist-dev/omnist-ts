@@ -58,6 +58,13 @@ export {
   valueKind,
   validationResultToString,
   SCALAR_KINDS,
+  STRING,
+  INTEGER,
+  NUMBER,
+  BOOLEAN,
+  DATE,
+  TIME,
+  DATETIME,
   type ScalarKind,
   type FieldType,
   type ScalarType,
@@ -80,6 +87,8 @@ export {
 export { materialize } from "./deserialize.js";
 
 export { lint, type LintFinding } from "./ops/lint.js";
+export { satisfiableSet } from "./ops/prune.js";
+export { equivalenceClasses } from "./ops/minimize.js";
 
 
 export {
