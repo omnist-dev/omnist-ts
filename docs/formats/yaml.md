@@ -17,6 +17,51 @@ writeYaml(node);
 ```
 <!-- doc-illustrative -->
 
+This module is pinned to the "yaml-1.1" schema (chosen for date/bool-
+coercion parity with PyYAML's safe_load/safe_dump -- see
+src/formats/yaml.ts's file-top comment), which brings YAML 1.1's own
+resolution quirks along with it: yes/no/on/off (any case) resolve
+to booleans, not strings, and .inf/-.inf/.nan resolve to the
+corresponding non-finite number, matching PyYAML rather than the
+stricter YAML 1.2 core schema. None of that is adjustment-report
+territory -- it's read-side resolution, not a write-side lossy
+substitution -- but it's the reason a YAML document authored for a
+YAML-1.2 tool can read back differently here.
+
+## Adjustment codes
+
+`writeYaml`/`checkYaml` can report one adjustment code -- the full set
+YAML's codec can ever emit (`test/fuzz.test.ts` asserts this against
+`ALLOWED_CODES.yaml`):
+
+| code | severity | trigger |
+|---|---|---|
+| `string.line-break-char` | warning | a label or string value containing U+0085 (NEL) -- forced to a double-quoted scalar so it round-trips correctly |
+
+U+0085 is one of the line-break characters YAML's block-scalar folding
+treats specially; left unquoted, a value containing it can be re-folded
+on read in a way that doesn't reproduce the original text byte-for-byte.
+`writeYaml` sidesteps that by writing any string containing it (label or
+value) as an explicitly double-quoted scalar instead of a plain or
+block one.
+
+```ts
+import { buildNode } from "@omnist-dev/omnist";
+import { checkYaml, writeYaml } from "@omnist-dev/omnist";
+
+const node = buildNode({ note: "line1line2" });
+checkYaml(node).adjustments;
+// [{ path: "$.note", code: "string.line-break-char",
+//    message: "value contains U+0085 (NEL); written double-quoted to round-trip correctly",
+//    severity: "warning" }]
+writeYaml(node);
+// 'note: "line1line2"\n' -- double-quoted, not the plain/block form writeYaml uses otherwise
+```
+<!-- doc-illustrative -->
+
+The same code fires for a *label* containing U+0085 (message text reads
+"label contains U+0085 ..." instead of "value contains ..."), since a
+YAML mapping key is scanned the same way a scalar value is.
 
 ## Known limitation: a label literally `"<<"` (issue #46)
 
