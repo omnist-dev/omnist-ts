@@ -1140,3 +1140,26 @@ describe("issue #52: a TIME literal round-trips as a TIME token", () => {
     }
   });
 });
+
+describe("checkWriteDepth is a real, reachable guard (issue #70)", () => {
+  it("writeOml rejects a hand-built Node deeper than MAX_DEPTH, in pretty mode", () => {
+    // writeOml takes a raw Node (a publicly exported type), so a caller
+    // can hand-build one deeper than buildNode() would ever allow -- same
+    // gap issue #37 fixed for writeJson/writeYaml/writeToml/writeXml, but
+    // apparently missed for writeOml. See src/formats/json.ts's own
+    // checkWriteDepth and test/formats/json.test.ts's matching test.
+    let node: Node = 1;
+    for (let i = 0; i < 250; i++) {
+      node = [{ label: "a", target: node }];
+    }
+    expect(() => writeOml(node)).toThrow(/nesting exceeds the maximum depth \(200\)/);
+  });
+
+  it("writeOml rejects a hand-built Node deeper than MAX_DEPTH, in compact mode", () => {
+    let node: Node = 1;
+    for (let i = 0; i < 250; i++) {
+      node = [{ label: "a", target: node }];
+    }
+    expect(() => writeOml(node, { indent: null })).toThrow(/nesting exceeds the maximum depth \(200\)/);
+  });
+});
