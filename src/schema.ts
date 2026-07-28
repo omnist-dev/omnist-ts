@@ -136,9 +136,14 @@ export const DATETIME: ScalarType = t.datetime;
 
 /** A copy of `scalar` that also accepts `null` (the `?` form). Raises if
  * given `any` -- `any` already includes `null`, so `any?` is redundant. */
-export function nullable(scalarType: ScalarType | AnyFieldType): ScalarType {
+export function nullable(scalarType: ScalarType | AnyFieldType | RefType): ScalarType {
   if (scalarType.tag === "any") {
     throw new SchemaError("any already includes null; 'any?' is redundant");
+  }
+  if (scalarType.tag === "ref") {
+    throw new SchemaError(
+      "nullable() cannot be applied to a Ref; use cardinality [0,1] for an optional record",
+    );
   }
   return scalarType.nullable ? scalarType : { ...scalarType, nullable: true };
 }
