@@ -427,6 +427,14 @@ describe("reserved words and labels", () => {
     expect(readOml('a: "NaN"')).toEqual([e("a", "NaN")]);
   });
 
+  it.each(["INF", "Inf", "-INF", "-Inf"])(
+    "capitalized %s is a bare ident, not the keyword",
+    (spelling) => {
+      expect(() => readOml(`a: ${spelling}`)).toThrow(ParseError);
+      expect(readOml(`a: "${spelling}"`)).toEqual([e("a", spelling)]);
+    },
+  );
+
   it("a label cannot start with a digit unless quoted", () => {
     expect(() => readOml("123: 1")).toThrow(ParseError);
     expect(readOml('"123": 1')).toEqual([e("123", 1)]);
