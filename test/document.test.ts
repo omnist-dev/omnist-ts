@@ -160,6 +160,25 @@ describe("Doc: robustness (guards)", () => {
     );
   });
 
+  // issue #77: MAX_NODES is the third safety limit alongside MAX_DEPTH and
+  // MAX_INT_DIGITS (docs/02-document-model.md section 2.4) -- a document
+  // can be shallow (well under MAX_DEPTH) yet still unbounded in total
+  // node count, e.g. one label repeated an arbitrary number of times.
+  function repeatedLeafDoc(k: number): unknown {
+    return { x: Array.from({ length: k }, (_, i) => i) };
+  }
+
+  it("a document at exactly MAX_NODES (1,000,000) nodes constructs successfully", () => {
+    // root object node (1) + k leaf elements under repeated label "x".
+    const value = repeatedLeafDoc(999_999);
+    expect(() => doc(value)).not.toThrow();
+  });
+
+  it("a document one node over MAX_NODES throws", () => {
+    const value = repeatedLeafDoc(1_000_000);
+    expect(() => doc(value)).toThrow(/node count exceeds the maximum \(1000000\)/);
+  });
+
   it("raises on an unsupported value type (non-object)", () => {
     expect(() => doc({ a: (): void => undefined })).toThrow(
       /is not a Document value/,

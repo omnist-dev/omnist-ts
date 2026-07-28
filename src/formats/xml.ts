@@ -57,6 +57,12 @@ import type { Schema } from "../schema.js";
 
 const MAX_DEPTH = 200;
 
+// Matches src/document.ts's own MAX_NODES (locally redefined here, same
+// convention as this file's own MAX_DEPTH copy) -- see issue #77. xmlToNode
+// builds its edge tree directly rather than going through buildNode(), so
+// it needs its own running counter, threaded like `depth` is.
+const MAX_NODES = 1_000_000;
+
 const PARSER_MAX_NESTED_TAGS = 100000;
 
 const XML_NAME = /^[A-Za-z_][A-Za-z0-9_.-]*$/;
@@ -139,14 +145,26 @@ export function readXml(text: string, opts: ReadXmlOptions = {}): Node {
   /* v8 ignore stop */
   const root = roots[0] as XmlEntry;
   const tag = Object.keys(root)[0] as string;
-  const node: Node = [{ label: local(tag), target: xmlToNode(root[tag] as XmlEntry[], "$", 0) }];
+  const nodeCounter = { count: 0 };
+  const node: Node = [
+    { label: local(tag), target: xmlToNode(root[tag] as XmlEntry[], "$", 0, nodeCounter) },
+  ];
   if (opts.schema === undefined) return node;
   return materialize(node, opts.schema) as Node;
 }
 
-function xmlToNode(entries: XmlEntry[], path: string, depth: number): Node {
+function xmlToNode(
+  entries: XmlEntry[],
+  path: string,
+  depth: number,
+  counter: { count: number },
+): Node {
   if (depth > MAX_DEPTH) {
     throw new DocumentError(path + ": nesting exceeds the maximum depth (" + String(MAX_DEPTH) + ")");
+  }
+  counter.count++;
+  if (counter.count > MAX_NODES) {
+    throw new DocumentError(path + ": node count exceeds the maximum (" + String(MAX_NODES) + ")");
   }
   const elementEntries = entries.filter((e) => !("#text" in e));
   if (elementEntries.length === 0) {
@@ -180,7 +198,10 @@ function xmlToNode(entries: XmlEntry[], path: string, depth: number): Node {
     const childTag = Object.keys(entry)[0] as string;
     const childLabel = local(childTag);
     lastElementLabel = childLabel;
-    out.push({ label: childLabel, target: xmlToNode(entry[childTag] as XmlEntry[], path + "." + childLabel, depth + 1) });
+    out.push({
+      label: childLabel,
+      target: xmlToNode(entry[childTag] as XmlEntry[], path + "." + childLabel, depth + 1, counter),
+    });
   }
   if (ownText.trim() !== "") {
     throw new ParseError(path + ": mixed content (text alongside child elements) is outside the data-XML profile");
