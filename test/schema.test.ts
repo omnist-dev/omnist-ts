@@ -52,6 +52,11 @@ describe("builders: t namespace and field types", () => {
     expect(() => nullable(t.any)).toThrow(/any already includes null/);
   });
 
+  it("nullable(ref(...)) raises: nullable cannot apply to a Ref", () => {
+    expect(() => nullable(ref("X"))).toThrow(SchemaError);
+    expect(() => nullable(ref("X"))).toThrow(/cannot be applied to a Ref/);
+  });
+
   it("ref() builds a RefType", () => {
     expect(ref("R")).toEqual({ tag: "ref", name: "R" });
   });
