@@ -6,6 +6,42 @@ the first documented release of the TypeScript port; the public API
 mirrors the upstream Python package's `__all__` (camelCase names of the
 same functions).
 
+## [v0.0.5-alpha] -- spec-conformance audit fixes
+
+A spec-vs-implementation verification pass against `omnist-spec` found
+five gaps, all confirmed real and fixed:
+
+- **Unbounded node-count DoS** (issue #77): no `MAX_NODES` limit existed
+  anywhere, despite the spec requiring one alongside the existing
+  `MAX_DEPTH`/`MAX_INT_DIGITS` guards. A shallow document (depth 1) with
+  an arbitrary number of repeated same-label edges built without
+  complaint. Added `MAX_NODES = 1,000,000` (the spec's reference
+  default), threaded through `buildNode()` for JSON/YAML/TOML and as
+  local counters in XML/OML's direct tree-construction paths -- the
+  security-relevant fix in this batch.
+- **S-3: reserved record names accepted by the builder API** (issue
+  #75): `schema()` silently accepted a record named after a scalar
+  keyword (`string`, `integer`, etc.) or `any`, producing a permanently
+  unreferenceable record. Already enforced correctly in the OSD text
+  parser; now enforced in the builder API too.
+- **S-7: `nullable(ref(...))` silently succeeded** (issue #76): returned
+  a malformed `{tag: "ref", ..., nullable: true}` object instead of
+  throwing. Now throws `SchemaError`, matching the OSD grammar's
+  existing rejection of `?` after a reference type.
+- **S-2: `field()` didn't validate integer cardinality bounds** (issue
+  #78): `field("x", t.string, 1.5, 2.5)` built without error. Now
+  validates `min`/`max` are integers via the builder API, the same way
+  OSD parsing already guarantees by construction.
+- **Test coverage gap: capitalized `INF`/`-INF`** (issue #74): the
+  existing `NaN`-is-not-the-keyword test had no `INF`/`-INF`
+  counterpart. Verified the behavior was already correct and added the
+  missing coverage.
+
+**Process:** every fix independently reviewed by a separate agent that
+reproduced red/green itself; full suite (919 tests, 100% coverage),
+`tsc --noEmit`, `eslint`, and the doc-example gate all verified clean
+before this release.
+
 ## [v0.0.4-alpha] -- OML write-side depth guard, docs completeness
 
 - **`writeOml` had no depth guard** (issue #70): every other codec's
