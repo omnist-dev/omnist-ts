@@ -53,6 +53,7 @@ export const SCALAR_KINDS = [
 export type ScalarKind = (typeof SCALAR_KINDS)[number];
 
 const SCALAR_KIND_SET: ReadonlySet<string> = new Set(SCALAR_KINDS);
+const RESERVED_RECORD_NAMES: ReadonlySet<string> = new Set<string>([...SCALAR_KINDS, "any"]);
 
 /** A field's type: exactly one of a scalar, a ref, or `any` -- never a
  * combination. See `docs/design/ts-implementation-notes.md` §1 for why this
@@ -445,6 +446,16 @@ export class Schema {
 
   private checkRefs(): void {
     for (const [name, rec] of this.env) {
+      if (RESERVED_RECORD_NAMES.has(name)) {
+        if (name === "any") {
+          throw new SchemaError(`'any' is a reserved type name and cannot be used as a record name`);
+        }
+        throw new SchemaError(
+          `${JSON.stringify(name)} is a reserved scalar name; a record cannot be ` +
+            "defined with this name, or it could never be referenced " +
+            "(a bare name in a type position always means the builtin scalar)",
+        );
+      }
       if (rec === null || typeof rec !== "object" || !Array.isArray(rec.fields)) {
         throw new SchemaError(`environment entry ${JSON.stringify(name)} must be a Record, got ${JSON.stringify(rec)}`);
       }
