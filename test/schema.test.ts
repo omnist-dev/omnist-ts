@@ -100,6 +100,36 @@ describe("Schema construction errors", () => {
     expect(() => schema(ref("Ghost"), {})).toThrow(/unknown type "Ghost"/);
   });
 
+  it("a record named after a scalar keyword is rejected (S-3)", () => {
+    expect(() =>
+      schema("Root", {
+        Root: record(field("x", ref("string"))),
+        string: record(field("y", t.integer)),
+      }),
+    ).toThrow(SchemaError);
+    expect(() =>
+      schema("Root", {
+        Root: record(field("x", ref("string"))),
+        string: record(field("y", t.integer)),
+      }),
+    ).toThrow(/reserved scalar name/);
+  });
+
+  it("a record named \"any\" is rejected (S-3)", () => {
+    expect(() =>
+      schema("Root", {
+        Root: record(field("x", t.any)),
+        any: record(field("y", t.integer)),
+      }),
+    ).toThrow(SchemaError);
+    expect(() =>
+      schema("Root", {
+        Root: record(field("x", t.any)),
+        any: record(field("y", t.integer)),
+      }),
+    ).toThrow(/reserved type name/);
+  });
+
   it("the Schema class accepts a Map directly, and defaults env to empty", () => {
     const s1 = new Schema(ref("R"), new Map([["R", record(field("a", t.integer))]]));
     expect(s1.validate(doc({ a: 1 })).ok).toBe(true);
