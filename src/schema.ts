@@ -179,7 +179,12 @@ export function field(
       `field ${JSON.stringify(label)} type must be a Ref, Scalar, or t.any, got ${JSON.stringify(type)}`,
     );
   }
-  if (min < 0 || (max !== null && max < min)) {
+  if (
+    min < 0 ||
+    (max !== null && max < min) ||
+    !Number.isInteger(min) ||
+    (max !== null && !Number.isInteger(max))
+  ) {
     throw new SchemaError(
       `field ${JSON.stringify(label)} has an invalid cardinality [${min},${max ?? ""}]`,
     );
