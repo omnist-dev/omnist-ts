@@ -91,6 +91,12 @@ import {
 // shared guard constant" convention in this port).
 const MAX_DEPTH = 200;
 const MAX_INT_DIGITS = 4300;
+// Matches src/document.ts's own MAX_NODES (locally redefined here, same
+// convention as this file's own MAX_DEPTH/MAX_INT_DIGITS copies) -- see
+// issue #77. The Parser builds its edge tree directly rather than going
+// through buildNode(), so it keeps its own running counter (`nodeCount`
+// below) across the whole parse.
+const MAX_NODES = 1_000_000;
 
 // ---------------------------------------------------------------------------
 // Tokenizer
@@ -540,10 +546,23 @@ class Parser {
   private kind: TokKind;
   private start: number;
   private end: number;
+  // Total node count across this Parser instance's whole parse (one
+  // instance per readOml() call) -- see MAX_NODES above.
+  private nodeCount = 0;
 
   constructor(scanner: Scanner) {
     this.sc = scanner;
     [this.kind, this.start, this.end] = scanner.next();
+  }
+
+  /** Count one more node (an internal edge-list node or a scalar leaf) and
+   * throw once the running total exceeds MAX_NODES -- mirrors the bare
+   * ParseError depth check in parseValue() below. */
+  private countNode(): void {
+    this.nodeCount++;
+    if (this.nodeCount > MAX_NODES) {
+      throw new ParseError(`node count exceeds the maximum (${MAX_NODES})`);
+    }
   }
 
   private advance(): Tok {
@@ -565,6 +584,7 @@ class Parser {
     this.skipSep();
     let node: Node;
     if (this.kind === "EOF") {
+      this.countNode();
       node = [];
     } else if (this.kind === "LBRACE") {
       node = this.parseValue(0);
@@ -607,6 +627,7 @@ class Parser {
   }
 
   private parseNodeEdges(depth: number): Edge[] {
+    this.countNode();
     const edges: Edge[] = [];
     this.skipSep();
     while (this.kind !== "RBRACE" && this.kind !== "EOF") {
@@ -745,6 +766,7 @@ class Parser {
   }
 
   private parseScalar(): Scalar {
+    this.countNode();
     const [kind, start, end] = this.advance();
     switch (kind) {
       case "STRING":

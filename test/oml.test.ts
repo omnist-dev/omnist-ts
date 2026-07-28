@@ -1142,6 +1142,25 @@ describe("issue #52: a TIME literal round-trips as a TIME token", () => {
 });
 
 describe("checkWriteDepth is a real, reachable guard (issue #70)", () => {
+  // issue #77: MAX_NODES boundary, mirroring the MAX_DEPTH boundary tests
+  // above -- a shallow-but-wide document (one label repeated many times)
+  // must still be rejected once its total node count exceeds the limit.
+  it("readOml accepts a document at exactly MAX_NODES (1,000,000) nodes", () => {
+    const k = 999_999;
+    const parts: string[] = [];
+    for (let i = 0; i < k; i++) parts.push(String(i));
+    const text = `x: [${parts.join(",")}]`;
+    expect(() => readOml(text)).not.toThrow();
+  });
+
+  it("readOml rejects a document one node over MAX_NODES", () => {
+    const k = 1_000_000;
+    const parts: string[] = [];
+    for (let i = 0; i < k; i++) parts.push(String(i));
+    const text = `x: [${parts.join(",")}]`;
+    expect(() => readOml(text)).toThrow(/node count exceeds the maximum \(1000000\)/);
+  });
+
   it("writeOml rejects a hand-built Node deeper than MAX_DEPTH, in pretty mode", () => {
     // writeOml takes a raw Node (a publicly exported type), so a caller
     // can hand-build one deeper than buildNode() would ever allow -- same

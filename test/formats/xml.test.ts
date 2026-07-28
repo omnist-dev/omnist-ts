@@ -154,6 +154,28 @@ describe("readXml", () => {
     });
   });
 
+  // issue #77: MAX_NODES boundary, mirroring the depth-guard tests below --
+  // a shallow-but-wide document (many sibling elements, not deep nesting)
+  // must still be rejected once its total node count exceeds the limit.
+  describe("node-count guard", () => {
+    it("parses at the MAX_NODES (1,000,000) boundary", () => {
+      const k = 999_999;
+      const parts: string[] = [];
+      for (let i = 0; i < k; i++) parts.push("<x>" + String(i) + "</x>");
+      const s = "<root>" + parts.join("") + "</root>";
+      expect(() => readXml(s)).not.toThrow();
+    });
+
+    it("raises DocumentError one node past the boundary", () => {
+      const k = 1_000_000;
+      const parts: string[] = [];
+      for (let i = 0; i < k; i++) parts.push("<x>" + String(i) + "</x>");
+      const s = "<root>" + parts.join("") + "</root>";
+      expect(() => readXml(s)).toThrow(DocumentError);
+      expect(() => readXml(s)).toThrow(/node count exceeds the maximum \(1000000\)/);
+    });
+  });
+
   describe("depth guard", () => {
     it("parses at the 200-level depth boundary", () => {
       let s = "<v>1</v>";

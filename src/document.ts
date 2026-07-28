@@ -49,6 +49,28 @@ const MAX_DEPTH = 200;
 // precision converting to `number`), so this guard is dormant for `number`
 // input but kept for parity/documentation with the Python cap it mirrors.
 const MAX_INT_DIGITS = 4300;
+// Total node count across a single buildNode() call -- the spec's third
+// safety limit alongside MAX_DEPTH and MAX_INT_DIGITS (docs/02-document-model.md
+// section 2.4): a document can be shallow (well under MAX_DEPTH) yet still
+// unbounded in total size, e.g. one label repeated an arbitrary number of
+// times. 1,000,000 is the reference default the Python port uses. See
+// issue #77.
+const MAX_NODES = 1_000_000;
+
+/** Mutable counter threaded through a single buildNode() call tree so every
+ * node built anywhere in the recursion shares one running total (mirrors
+ * how `depth` is threaded, but depth resets per-branch while node count
+ * must accumulate across the whole call). */
+interface NodeCounter {
+  count: number;
+}
+
+function countNode(counter: NodeCounter, path: string): void {
+  counter.count++;
+  if (counter.count > MAX_NODES) {
+    throw new DocumentError(`${path}: node count exceeds the maximum (${MAX_NODES})`);
+  }
+}
 
 /** A leaf value. See the file-top comment for the scalar-kind mapping. */
 export type Scalar = string | number | boolean | Date | null;
@@ -119,10 +141,12 @@ export function buildNode(
   path = "$",
   depth = 0,
   seen: ReadonlySet<unknown> = new Set(),
+  counter: NodeCounter = { count: 0 },
 ): Node {
   if (depth > MAX_DEPTH) {
     throw new DocumentError(`${path}: nesting exceeds the maximum depth (${MAX_DEPTH})`);
   }
+  countNode(counter, path);
   if (Array.isArray(value)) {
     throw new DocumentError(
       `${path}: a bare array has no labeled-edge form ` +
@@ -144,7 +168,7 @@ export function buildNode(
         throw new DocumentError(`${path}: object key ${String(k)} is not a string`);
       }
       const kp = join(path, k);
-      for (const child of children(v, kp, depth + 1, nextSeen)) {
+      for (const child of children(v, kp, depth + 1, nextSeen, counter)) {
         edges.push({ label: k, target: child });
       }
     }
@@ -162,6 +186,7 @@ function* children(
   path: string,
   depth: number,
   seen: ReadonlySet<unknown>,
+  counter: NodeCounter,
 ): Generator<Node> {
   if (Array.isArray(v)) {
     for (let i = 0; i < v.length; i++) {
@@ -169,10 +194,10 @@ function* children(
       if (Array.isArray(item)) {
         throw new DocumentError(`${path}[${i}]: an array of arrays has no labeled-edge form`);
       }
-      yield buildNode(item, `${path}[${i}]`, depth + 1, seen);
+      yield buildNode(item, `${path}[${i}]`, depth + 1, seen, counter);
     }
   } else {
-    yield buildNode(v, path, depth, seen);
+    yield buildNode(v, path, depth, seen, counter);
   }
 }
 
