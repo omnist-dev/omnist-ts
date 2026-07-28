@@ -76,6 +76,13 @@ describe("Field / Record construction errors", () => {
     expect(() => field("x", t.string, -1, null)).toThrow(/invalid cardinality \[-1,\]/);
   });
 
+  it("field() requires min and max to be integers", () => {
+    expect(() => field("x", t.string, 1.5, 2)).toThrow(/invalid cardinality/);
+    expect(() => field("x", t.string, 1, 2.5)).toThrow(/invalid cardinality/);
+    expect(() => field("x", t.string, 1)).not.toThrow();
+    expect(() => field("x", t.string, 1, null)).not.toThrow();
+  });
+
   it("field() cardinality_str renders the common shapes", () => {
     expect(cardinalityStr(field("x", t.string, 1, 1))).toBe("exactly 1");
     expect(cardinalityStr(field("x", t.string, 0, 1))).toBe("0 or 1");
