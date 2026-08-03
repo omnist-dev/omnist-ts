@@ -38,61 +38,71 @@ mixed content for `readXml` to reject.
 
 ## Scalar coercion
 
-Element text is untyped. `readXml`'s coercion heuristic tries `true`/
-`false` (case-insensitive), then an integer pattern, then a float pattern,
-before falling back to the raw string -- it does **not** attempt any
-date/time coercion, since a date string is indistinguishable from any
-other string by spelling alone without a declared scalar to check it
-against:
+Element text is untyped: XML has no native typed literals, unlike
+YAML/TOML (which have real typed scalar syntax). On a **schema-less**
+read, `readXml` never coerces text by shape -- every element's text
+becomes a `string` scalar unconditionally, exactly like JSON/OML's own
+schema-less behavior (issue #88; matches the Python port's own breaking
+fix in `omnist#288`, v0.8.0):
 
 ```ts
 import { readXml } from "@omnist-dev/omnist";
 
 readXml("<r><n>30</n><f>3.5</f><ok>true</ok><d>2024-01-01</d></r>");
 // [{ label: "r", target: [
-//   { label: "n", target: 30 },
-//   { label: "f", target: 3.5 },
-//   { label: "ok", target: true },
+//   { label: "n", target: "30" },
+//   { label: "f", target: "3.5" },
+//   { label: "ok", target: "true" },
 //   { label: "d", target: "2024-01-01" },
 // ] }]
 ```
 <!-- doc-illustrative -->
 
-`<n>30</n>` reads as the number `30` and `<ok>true</ok>` as `true`, but
-`<d>2024-01-01</d>` stays the plain string `"2024-01-01"`.
+Every leaf above stays a plain string -- `<n>30</n>` reads as `"30"`, not
+the number `30`; `<ok>true</ok>` reads as `"true"`, not the boolean
+`true`. A string is always a deliberate author choice absent a schema
+override, the same rule every other codec here already follows.
 
-**Deliberate divergence from the Python port** (issue #53). Python's
-`_coerce` (`omnist/formats.py`) tries `int()` then `float()`, which
-additionally accept spellings that are Python numeric-literal syntax
-rather than data-XML syntax: `nan`, `inf`, and `infinity` parse as float
-special values, and `1_0` (the underscore digit-group separator) parses
-as the integer `10`. This port's `coerce` (`src/formats/xml.ts`) does not
-accept any of those four spellings -- they stay strings:
+### Schema-directed reads recover types locally
+
+When `readXml` is given a schema (the `opts.schema` argument), it
+recovers `boolean`/`integer`/`number` from element text *before* handing
+the node to the shared `materialize()` -- guided by what the schema
+declares each field to be, not by guessing from text shape:
 
 ```ts
-import { readXml } from "@omnist-dev/omnist";
+import { readXml, parseSchema } from "@omnist-dev/omnist";
 
-readXml("<r><a>nan</a><b>inf</b><c>infinity</c><d>1_0</d></r>");
+const s = parseSchema('record R { "n": integer, "f": number, "ok": boolean }\nroot R');
+readXml("<r><n>30</n><f>3.5</f><ok>true</ok></r>", { schema: s });
 // [{ label: "r", target: [
-//   { label: "a", target: "nan" },
-//   { label: "b", target: "inf" },
-//   { label: "c", target: "infinity" },
-//   { label: "d", target: "1_0" },
+//   { label: "n", target: 30 },
+//   { label: "f", target: 3.5 },
+//   { label: "ok", target: true },
 // ] }]
 ```
 <!-- doc-illustrative -->
 
-This is kept narrower on purpose, not an oversight: matching Python here
-would let `readXml("<r><a>nan</a></r>")` manufacture a `NaN`/`Infinity`
-value from ordinary-looking element text, and JSON -- one of this port's
-other codecs -- cannot represent either (`writeJson` has no encoding for
-a non-finite number). Accepting Python's literal syntax in a data format
-would also make an XML document read differently depending on which port
-reads it. Because `coerce` never accepts these spellings, `checkXml`
-correspondingly never reports `string.ambiguous` for them either --
-reader and writer agree. See `docs/python-parity.md` for the full
-cross-implementation comparison (tracked as a deliberate divergence, not
-a gap).
+This pretyping step is local to `src/formats/xml.ts` -- it does **not**
+change `materialize()` itself, which keeps rejecting a numeric-looking
+string for every format (JSON/YAML/TOML/OML included) whenever there's no
+XML-specific pretyping step ahead of it: a string is a deliberate author
+choice absent a schema override, never an untyped placeholder, for every
+format except XML, which has no other way to spell a typed literal at
+all. A field declared `string` in the schema is left exactly as read (no
+coercion attempted even if the text looks numeric), and an `any`-typed
+field is likewise passed through untouched.
+
+**Historical divergence, now closed** (issue #53, closed by #88). Before
+#88, this port's schema-less coercion heuristic (a `coerce` function,
+since removed) was narrower than Python's `_coerce`: Python's
+`int()`/`float()` additionally accepted `nan`, `inf`, `infinity`, and
+`1_0` (Python numeric-literal spellings, not data-XML syntax). Since #88
+removes schema-less coercion entirely on this side (matching #288's
+identical move on the Python side), that gap no longer exists -- both
+ports now agree that every one of those spellings stays a plain string on
+a schema-less read. See `docs/python-parity.md` for the full
+cross-implementation comparison.
 
 ```ts
 import { readXml, writeXml, checkXml } from "@omnist-dev/omnist";
@@ -117,14 +127,16 @@ XML 1.0's text range is safely representable). This is the full set
 | `temporal.stringified` | warning | a `Date` leaf -- written as text, reads back as a plain string, not a `Date` |
 | `shape.empty_ambiguous` | warning | an empty internal node (edge list with no edges) -- written as `<tag />`, reads back as the empty-string leaf `""`, not `[]` |
 | `key.sanitized` | warning | a label that isn't a legal XML element name -- written sanitized |
-| `string.ambiguous` | warning | a string leaf whose text happens to coerce to a different type on read (e.g. `"30"`) |
+| `value.stringified` | warning | a non-string scalar leaf (`number`/`boolean`) -- written as text, reads back as a plain string on a schema-less read, not its original type |
 | `string.illegal_xml_char` | error | a string containing a character XML 1.0 cannot represent (a C0 control other than tab/LF/CR) -- replaced with U+FFFD |
 | `string.cr_normalized` | warning | a string containing `\r` -- XML mandates line-ending normalization on parse, so it reads back as `\n` |
 
 (That's seven rows for six *distinct* situations -- `null.omitted` and
 `temporal.stringified` are shared with JSON/TOML's own versions of the
-same codes; `shape.empty_ambiguous`, `key.sanitized`, `string.ambiguous`,
-`string.illegal_xml_char`, and `string.cr_normalized` are XML-only.)
+same codes; `shape.empty_ambiguous`, `key.sanitized`, `value.stringified`,
+`string.illegal_xml_char`, and `string.cr_normalized` are XML-only.
+`value.stringified` replaced the pre-#88 `string.ambiguous` code -- see
+below.)
 
 ### `null.omitted` and `temporal.stringified`
 
@@ -189,25 +201,29 @@ illegal label into a legal element name rather than refusing to write --
 the `path` in the `Adjustment` still carries the *original*, unsanitized
 label, so the report stays keyed to the input, not the sanitized output.
 
-### `string.ambiguous`
+### `value.stringified`
 
 ```ts
 import { buildNode } from "@omnist-dev/omnist";
 import { checkXml } from "@omnist-dev/omnist";
 
-const node = buildNode({ root: { code: "30" } });
+const node = buildNode({ root: { code: 30 } });
 checkXml(node).adjustments;
-// [{ path: "$.root.code", code: "string.ambiguous",
-//    message: 'string "30" looks like another type and reads back as that type', severity: "warning" }]
+// [{ path: "$.root.code", code: "value.stringified",
+//    message: "non-string scalar written as text (reads back as a string)", severity: "warning" }]
 ```
 <!-- doc-illustrative -->
 
-The mirror image of the scalar-coercion section above: a *string* Document
-leaf that happens to spell out something `coerce` would turn into a
-number/boolean on read. Writing it as element text is the only option XML
-has (there's no typed-vs-untyped element distinction in this profile), so
-the string comes back as `30` (a number), not `"30"` -- `string.ambiguous`
-flags that before it happens.
+The mirror image of the scalar-coercion section above: since issue #88, a
+schema-less `readXml` never coerces text back into a number/boolean, so a
+non-string Document leaf (a `number` or `boolean`) written as element text
+is the one XML round-trip that always loses its type -- `30` (a number)
+comes back as `"30"` (a string) on a plain read. `value.stringified` flags
+that before it happens. (Before #88, this was the reverse situation --
+`string.ambiguous` flagged a *string* leaf that happened to look numeric,
+because the old shape-based coercion would have turned it back into a
+number on read. Since coercion is gone, that code no longer applies: a
+string leaf now always round-trips as a string, unconditionally.)
 
 ### `string.illegal_xml_char` and `string.cr_normalized`
 

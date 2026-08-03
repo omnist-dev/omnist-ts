@@ -13,7 +13,7 @@ describe("readXml", () => {
     // almost always opens with this declaration) failed to parse. See
     // examples/sitemap/convert.ts and docs/formats/xml.md.
     const d = readXml('<?xml version="1.0" encoding="UTF-8"?><root><a>1</a></root>');
-    expect(d).toEqual([{ label: "root", target: [{ label: "a", target: 1 }] }]);
+    expect(d).toEqual([{ label: "root", target: [{ label: "a", target: "1" }] }]);
   });
 
   it("parses a document with a leading comment and an XML declaration", () => {
@@ -22,7 +22,7 @@ describe("readXml", () => {
         '<!-- a provenance comment -->' + String.fromCharCode(10) +
         '<root><a>1</a></root>',
     );
-    expect(d).toEqual([{ label: "root", target: [{ label: "a", target: 1 }] }]);
+    expect(d).toEqual([{ label: "root", target: [{ label: "a", target: "1" }] }]);
   });
 
   it("parses a single-rooted document into a single top-level edge", () => {
@@ -41,44 +41,34 @@ describe("readXml", () => {
     expect(d).toEqual([
       { label: "t", target: [
         { label: "m", target: "a" },
-        { label: "x", target: 1 },
+        { label: "x", target: "1" },
         { label: "m", target: "b" },
       ] },
     ]);
   });
 
-  it("coerces empty/bool-ish text; leaves non-coercible text as string", () => {
-    const d = readXml("<r><a></a><b>true</b><c>false</c></r>");
+  it("issue #88: never coerces element text by shape on a schema-less read -- everything stays a string", () => {
+    // #288-equivalent fix. XML has no native typed literals (unlike
+    // YAML/TOML, which have real typed scalar syntax), so a schema-less
+    // readXml must leave numeric-, boolean-, and empty-looking text as a
+    // plain string -- matching JSON/OML's schema-less behavior. See
+    // docs/formats/xml.md ("Scalar coercion").
+    const d = readXml(
+      "<r><a></a><b>true</b><c>false</c><n>30</n><f>3.5</f><d>2024-01-01</d></r>",
+    );
     expect(d).toEqual([
       { label: "r", target: [
         { label: "a", target: "" },
-        { label: "b", target: true },
-        { label: "c", target: false },
-      ] },
-    ]);
-  });
-
-  it("coerces int/float/bool text but not date-shaped text", () => {
-    const d = readXml("<r><n>30</n><f>3.5</f><ok>true</ok><d>2024-01-01</d></r>");
-    expect(d).toEqual([
-      { label: "r", target: [
-        { label: "n", target: 30 },
-        { label: "f", target: 3.5 },
-        { label: "ok", target: true },
+        { label: "b", target: "true" },
+        { label: "c", target: "false" },
+        { label: "n", target: "30" },
+        { label: "f", target: "3.5" },
         { label: "d", target: "2024-01-01" },
       ] },
     ]);
   });
 
-  it("does not coerce Python-literal numeric spellings (issue #53)", () => {
-    // Characterizes a deliberate, documented divergence from Python's
-    // `_coerce` (omnist/formats.py): Python's int()/float() also accept
-    // Python literal syntax -- "nan"/"inf"/"infinity" (float specials) and
-    // "1_0" (underscore digit-group separator) -- which is not data-XML
-    // syntax. This port intentionally does not coerce those spellings, so
-    // it never manufactures a NaN/Infinity value that other codecs (e.g.
-    // JSON) cannot represent. See docs/formats/xml.md and
-    // docs/python-parity.md ("deliberate divergences").
+  it("never coerces Python-literal numeric spellings either (issue #53, now moot without shape coercion)", () => {
     const d = readXml("<r><a>nan</a><b>inf</b><c>infinity</c><d>1_0</d></r>");
     expect(d).toEqual([
       { label: "r", target: [
@@ -204,6 +194,134 @@ describe("readXml", () => {
       const node = readXml("<r><n>1</n></r>", { schema: s });
       expect(node).toEqual([{ label: "r", target: [{ label: "n", target: 1 }] }]);
     });
+
+    it("issue #88: recovers boolean/integer/number from element text per the schema, not by shape", async () => {
+      // #288-equivalent: XML has no typed literals, so the schema-directed
+      // path has to locally recover types from text before materialize()
+      // sees it -- materialize() itself always rejects a numeric-looking
+      // string (see the "does not touch materialize()" test below).
+      const { parseSchema } = await import("../../src/osd.js");
+      const s = parseSchema(
+        'record Inner { "i": integer, "f": number, "b": boolean, "s": string }\n' +
+          'record R { "r": Inner }\nroot R',
+      );
+      const node = readXml("<r><i>30</i><f>3.5</f><b>true</b><s>hello</s></r>", { schema: s });
+      expect(node).toEqual([
+        { label: "r", target: [
+          { label: "i", target: 30 },
+          { label: "f", target: 3.5 },
+          { label: "b", target: true },
+          { label: "s", target: "hello" },
+        ] },
+      ]);
+    });
+
+    it("recovers a false boolean too, and leaves non-boolean-looking text alone for a boolean field", async () => {
+      const { parseSchema } = await import("../../src/osd.js");
+      const s = parseSchema('record R { "b": boolean }\nroot R');
+      expect(readXml("<b>false</b>", { schema: s })).toEqual([{ label: "b", target: false }]);
+      expect(() => readXml("<b>maybe</b>", { schema: s })).toThrow();
+    });
+
+    it("leaves text alone when the schema declares the field 'string' (no coercion even if text is numeric-looking)", async () => {
+      const { parseSchema } = await import("../../src/osd.js");
+      const s = parseSchema('record R { "n": string }\nroot R');
+      const node = readXml("<n>30</n>", { schema: s });
+      expect(node).toEqual([{ label: "n", target: "30" }]);
+    });
+
+    it("passes non-coercible text through untouched for a typed field, letting materialize() report the mismatch", async () => {
+      const { parseSchema } = await import("../../src/osd.js");
+      const s = parseSchema('record R { "n": integer }\nroot R');
+      expect(() => readXml("<n>not-a-number</n>", { schema: s })).toThrow();
+    });
+
+    it("does not coerce inside an 'any'-typed field", async () => {
+      const { parseSchema } = await import("../../src/osd.js");
+      const s = parseSchema('record R { "n": any }\nroot R');
+      const node = readXml("<n>30</n>", { schema: s });
+      expect(node).toEqual([{ label: "n", target: "30" }]);
+    });
+
+    it("xmlPretype branch coverage: an XML element outside the schema's known fields passes through untouched", async () => {
+      // recordField(resolved, label) returns undefined for a label the
+      // record doesn't declare -- xmlPretype leaves that subtree alone
+      // (materialize() itself, not xmlPretype, is what later rejects the
+      // extra field under closed-record semantics).
+      const { parseSchema } = await import("../../src/osd.js");
+      const s = parseSchema('record R { "n": string }\nroot R');
+      expect(() => readXml("<r><n>hi</n><extra>1</extra></r>", { schema: s })).toThrow();
+    });
+
+    it("xmlPretype branch coverage: a record-typed field whose XML element is a leaf (shape mismatch) passes through untouched", async () => {
+      // The schema resolves "r" to a record (Inner), but the actual XML
+      // element has no children -- xmlToNode built a plain string for it,
+      // not an edge list. xmlPretype's `!Array.isArray(node)` guard
+      // returns that string unchanged rather than trying to map over it;
+      // materialize() reports the shape mismatch.
+      const { parseSchema } = await import("../../src/osd.js");
+      const s = parseSchema('record Inner { "x": integer }\nrecord R { "r": Inner }\nroot R');
+      expect(() => readXml("<r>leaf text</r>", { schema: s })).toThrow();
+    });
+
+    it("xmlPretypeScalar branch coverage: a scalar-typed field whose XML element has children (shape mismatch) passes through untouched", async () => {
+      // The schema resolves "n" to a scalar (integer), but the actual XML
+      // element has child elements -- xmlToNode built an edge list for
+      // it, not a string. xmlPretypeScalar's `typeof value !== "string"`
+      // guard returns that edge list unchanged; materialize() reports the
+      // shape mismatch.
+      const { parseSchema } = await import("../../src/osd.js");
+      const s = parseSchema('record R { "n": integer }\nroot R');
+      expect(() => readXml("<n><x>1</x></n>", { schema: s })).toThrow();
+    });
+
+    it("does not touch the shared materialize() function's own numeric-string rejection", async () => {
+      // The fix belongs only in XML's reader: materialize() must keep
+      // rejecting a numeric-looking string for every format when there is
+      // no schema-directed XML pretyping step to have already converted
+      // it (e.g. a value coming from a Doc built by hand, not from XML).
+      const { parseSchema } = await import("../../src/osd.js");
+      const { materialize } = await import("../../src/deserialize.js");
+      const s = parseSchema('record R { "n": integer }\nroot R');
+      // materialize() itself has no XML-specific pretyping -- a bare
+      // numeric-looking string is still rejected for an integer field,
+      // exactly as it is for JSON/YAML/TOML/OML.
+      expect(() => materialize([{ label: "n", target: "30" }], s)).toThrow(ParseError);
+    });
+
+    it("issue #88 follow-up: rejects a leading '+' for integer/number fields, matching Python's JSON-style regex (no leading plus)", async () => {
+      const { parseSchema } = await import("../../src/osd.js");
+      const sInt = parseSchema('record R { "n": integer }\nroot R');
+      const sNum = parseSchema('record R { "n": number }\nroot R');
+      expect(() => readXml("<n>+5</n>", { schema: sInt })).toThrow();
+      expect(() => readXml("<n>+5</n>", { schema: sNum })).toThrow();
+    });
+
+    it("issue #88 follow-up: rejects a leading zero for integer/number fields, matching Python's JSON-style regex (no leading zeros except bare 0)", async () => {
+      const { parseSchema } = await import("../../src/osd.js");
+      const sInt = parseSchema('record R { "n": integer }\nroot R');
+      const sNum = parseSchema('record R { "n": number }\nroot R');
+      expect(() => readXml("<n>007</n>", { schema: sInt })).toThrow();
+      expect(() => readXml("<n>007</n>", { schema: sNum })).toThrow();
+    });
+
+    it("issue #88 follow-up: rejects a bare leading '.' for number fields, matching Python's JSON-style regex", async () => {
+      const { parseSchema } = await import("../../src/osd.js");
+      const s = parseSchema('record R { "n": number }\nroot R');
+      expect(() => readXml("<n>.5</n>", { schema: s })).toThrow();
+    });
+
+    it("issue #88 follow-up: still accepts JSON-number-literal forms (0, -0, 0.5, -0.5, 1e10, -1.5e-3)", async () => {
+      const { parseSchema } = await import("../../src/osd.js");
+      const sInt = parseSchema('record R { "n": integer }\nroot R');
+      const sNum = parseSchema('record R { "n": number }\nroot R');
+      expect(readXml("<n>0</n>", { schema: sInt })).toEqual([{ label: "n", target: 0 }]);
+      expect(readXml("<n>-0</n>", { schema: sInt })).toEqual([{ label: "n", target: -0 }]);
+      expect(readXml("<n>0.5</n>", { schema: sNum })).toEqual([{ label: "n", target: 0.5 }]);
+      expect(readXml("<n>-0.5</n>", { schema: sNum })).toEqual([{ label: "n", target: -0.5 }]);
+      expect(readXml("<n>1e10</n>", { schema: sNum })).toEqual([{ label: "n", target: 1e10 }]);
+      expect(readXml("<n>-1.5e-3</n>", { schema: sNum })).toEqual([{ label: "n", target: -1.5e-3 }]);
+    });
   });
 
   describe("XXE / entity-expansion safety (security-critical)", () => {
@@ -264,8 +382,8 @@ describe("readXml", () => {
         {
           label: "root",
           target: [
-            { label: "__proto__", target: [{ label: "polluted", target: true }] },
-            { label: "kept", target: 1 },
+            { label: "__proto__", target: [{ label: "polluted", target: "true" }] },
+            { label: "kept", target: "1" },
           ],
         },
       ]);
@@ -289,7 +407,7 @@ describe("readXml", () => {
 
     it("__proto__ as the document (root) element itself also reads back correctly", () => {
       const node = readXml("<__proto__><a>1</a></__proto__>");
-      expect(node).toEqual([{ label: "__proto__", target: [{ label: "a", target: 1 }] }]);
+      expect(node).toEqual([{ label: "__proto__", target: [{ label: "a", target: "1" }] }]);
     });
 
     it("leaves constructor/prototype element labels untouched (fast-xml-parser does not alias those)", () => {
@@ -298,8 +416,8 @@ describe("readXml", () => {
         {
           label: "root",
           target: [
-            { label: "constructor", target: [{ label: "x", target: 1 }] },
-            { label: "prototype", target: [{ label: "y", target: 2 }] },
+            { label: "constructor", target: [{ label: "x", target: "1" }] },
+            { label: "prototype", target: [{ label: "y", target: "2" }] },
           ],
         },
       ]);
@@ -384,10 +502,23 @@ describe("checkXml", () => {
     expect(codes.has("temporal.stringified")).toBe(true);
   });
 
-  it("reports string.ambiguous for a numeric-looking string leaf", () => {
+  it("issue #88: a numeric-looking string leaf is no longer flagged -- it round-trips as a string", () => {
     const node = [{ label: "a", target: "30" }];
     const rep = checkXml(node);
-    expect(rep.adjustments.map((a) => a.code)).toEqual(["string.ambiguous"]);
+    expect(rep.adjustments.map((a) => a.code)).toEqual([]);
+    expect(readXml(writeXml(node))).toEqual(node);
+  });
+
+  it("reports value.stringified for a non-string scalar leaf (number/boolean read back as text)", () => {
+    const numberNode = [{ label: "a", target: 30 }];
+    const numRep = checkXml(numberNode);
+    expect(numRep.adjustments.map((a) => a.code)).toEqual(["value.stringified"]);
+    expect(readXml(writeXml(numberNode))).toEqual([{ label: "a", target: "30" }]);
+
+    const boolNode = [{ label: "a", target: true }];
+    const boolRep = checkXml(boolNode);
+    expect(boolRep.adjustments.map((a) => a.code)).toEqual(["value.stringified"]);
+    expect(readXml(writeXml(boolNode))).toEqual([{ label: "a", target: "true" }]);
   });
 
   it("reports shape.empty_ambiguous for an empty internal node", () => {
@@ -451,7 +582,7 @@ describe("strict/report integration", () => {
     const node = doc({ r: { a: 1, b: null } }).toData();
     const rep = new WriteReport();
     expect(() => writeXml(node, { strict: true, report: rep })).toThrow(WriteError);
-    expect(rep.adjustments.map((a) => a.code)).toEqual(["null.omitted"]);
+    expect(rep.adjustments.map((a) => a.code)).toEqual(["value.stringified", "null.omitted"]);
   });
 });
 

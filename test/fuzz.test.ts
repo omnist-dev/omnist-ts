@@ -253,7 +253,7 @@ const ALLOWED_CODES: Record<string, ReadonlySet<string>> = {
   xml: new Set([
     "null.omitted",
     "temporal.stringified",
-    "string.ambiguous",
+    "value.stringified",
     "key.sanitized",
     "shape.empty_ambiguous",
   ]),
