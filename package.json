@@ -48,6 +48,7 @@
     "bench": "tsx tools/bench.ts",
     "conformance:self-test": "tsx tools/conformance/selfTest.ts",
     "conformance:runner": "tsx tools/conformance/runner.ts",
+    "conformance:vectors": "tsx tools/conformance/vectorRunner.ts",
     "docs:dev": "vitepress dev docs",
     "docs:build": "vitepress build docs",
     "docs:preview": "vitepress preview docs"
