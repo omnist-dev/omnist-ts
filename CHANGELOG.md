@@ -6,6 +6,56 @@ the first documented release of the TypeScript port; the public API
 mirrors the upstream Python package's `__all__` (camelCase names of the
 same functions).
 
+## [v0.1.0-alpha] -- own conformance harness against omnist-spec
+
+The first minor-version milestone: this port now has its own
+conformance-test harness against `omnist-spec` -- own referee, own
+runners, consuming `omnist-spec`'s fixtures via a pinned git submodule,
+never depending on the Python reference implementation. Full report at
+issue [#85](https://github.com/omnist-dev/omnist-ts/issues/85).
+
+**Two independent tracks**, both CI-gated on every push/PR:
+- The OML/OSD fixture harness (`tools/conformance/runner.ts`):
+  **19 passed, 0 failed, 0 skipped**.
+- The JSON-vector suite (`tools/conformance/vectorRunner.ts`, 139
+  vectors): **103 passed, 0 failed, 36 skipped**. Every skip cites an
+  explicit reason -- a numbered divergence-ledger entry (`D-6`, the
+  Document model's integer/number kind collapse), "not yet
+  implemented" (this port's safety limits are compile-time constants),
+  or a structured-diagnostics gap on syntax-level parse failures.
+
+**Correctness fixes found and independently reviewed along the way:**
+- `recordEquals` compared a record's fields positionally instead of as
+  an unordered, label-keyed set (issue #86) -- found by the referee's
+  own self-test, before any real fixture ran.
+- `readXml` coerced element text to numbers/booleans on schema-less
+  reads (issue #88), the same bug class the Python reference fixed as a
+  breaking change in `omnist#288`. Took two review rounds: the first
+  fix's new schema-directed type-recovery path used regexes broader
+  than Python's reference (accepted `+5`/`007`/`.5`); the second
+  tightened them to exact parity with Python's `_XML_INT_RE`/
+  `_XML_NUM_RE`.
+- `readYaml` mishandled boolean-resolved mapping keys (issue #89): a
+  `yaml-1.1` alias set broader than the reference implementation's
+  (matched bare `y`/`n`, not just `on`/`off`/`yes`/`no`/`true`/`false`),
+  plus silent stringification of a boolean-resolved key instead of
+  rejecting the document.
+
+No vector or spec defects were found in this pass -- all three original
+failures were genuine implementation bugs.
+
+**Docs:** the conformance harness is now documented on the public site
+(`docs/testing.md`), not just internally
+(`tools/conformance/README.md`). The omnist logo was also added to the
+docs site, copied verbatim from `omnist-spec`.
+
+**Process:** every fix independently reviewed by a separate agent that
+reproduced red/green itself and, for the CI gating logic itself, a
+reviewer who genuinely broke a fixture to confirm the fail path
+actually triggers rather than trusting the code. Full suite (1074+
+tests), 100% coverage, `tsc --noEmit`/`eslint`/doc-example-gate all
+clean.
+
 ## [v0.0.5-alpha] -- spec-conformance audit fixes
 
 A spec-vs-implementation verification pass against `omnist-spec` found

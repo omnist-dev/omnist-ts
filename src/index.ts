@@ -181,4 +181,4 @@ _registerFormat({
   check: _checkYaml as (node: unknown) => _WriteReport,
 });
 
-export const VERSION = "0.0.5-alpha";
+export const VERSION = "0.1.0-alpha";
