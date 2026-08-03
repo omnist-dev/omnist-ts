@@ -33,6 +33,21 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
 
+  conformance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run conformance:self-test
+      - run: npm run conformance:runner
+      - run: npm run conformance:vectors
+
   docs-examples:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
