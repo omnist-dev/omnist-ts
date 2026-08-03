@@ -19,7 +19,27 @@
  *   dates always arrive as plain strings;
  * - a bare `on`/`off`/`yes`/`no` scalar (as a value or a mapping key)
  *   resolves to a boolean -- the YAML 1.1 boolean-coercion quirk the docs
- *   call out (see docs/examples/github-actions.md's `on:` workflow key);
+ *   call out (see docs/examples/github-actions.md's `on:` workflow key).
+ *   Narrowed to match the reference implementation's own resolver
+ *   (PyYAML's default `SafeLoader`), which only treats the full-word
+ *   aliases -- `on`/`off`/`yes`/`no`/`true`/`false` and their case
+ *   variants -- as booleans, NOT the bare single-letter `y`/`Y`/`n`/`N`
+ *   that full YAML 1.1 also allows (issue #89's vector 1: `n: 12:00:00`
+ *   must keep the plain string label `"n"`, not resolve it to `false`).
+ *   `customBoolTags` below narrows the package's default yaml-1.1 bool
+ *   tag regexes to this reference-matching set, for both read and write.
+ * - when a *mapping key* resolves (under yaml-1.1's implicit-scalar
+ *   rules) to anything other than a string -- a boolean via the alias
+ *   set above, `null` via `~`/`null`, a number, etc. -- the document is
+ *   rejected outright rather than silently stringified to a label
+ *   (issue #89's vector 2, the "Norway problem": `on:\n  push: true\n`
+ *   must throw, not quietly become the label `"true"`). This falls out
+ *   of parsing with `mapAsMap: true` (which preserves each key's
+ *   resolved type instead of coercing it to a string the way a plain JS
+ *   object's keys always are) and reusing `buildNode`'s existing
+ *   non-string-key rejection (`DocumentError`, src/document.ts) --  the
+ *   same path JSON's reader would hit for a non-string key, since a Map
+ *   with a non-string key is already a case `buildNode` rejects.
  * - a bare time-of-day (`12:00:00`) resolves to YAML's sexagesimal integer
  *   scalar (`43200`), not a time value -- there is no standalone
  *   "time of day" type in YAML's core schema, so this is the underlying
@@ -128,6 +148,43 @@ function checkYamlIntegerDigits(text: string): void {
   }
 }
 
+/**
+ * Narrow the `yaml` package's default `"yaml-1.1"` boolean tag to match
+ * the reference implementation's own resolver (PyYAML's `SafeLoader`),
+ * which only recognizes the full-word aliases -- `on`/`off`/`yes`/`no`/
+ * `true`/`false` and their case variants -- not the bare `y`/`Y`/`n`/`N`
+ * that full YAML 1.1 also treats as boolean (issue #89, vector 1).
+ *
+ * `customTags` (a `yaml` package option) is called with the schema's
+ * default tag list; every tag is passed through unchanged except the two
+ * `tag:yaml.org,2002:bool` tags (identified by `identify`, the same way
+ * the package itself tells them apart), whose `test` regex is replaced.
+ * Everything else about the tag (its `resolve`/`stringify`, its `tag`
+ * name) is preserved by spreading the original.
+ */
+function customBoolTags(tags: YAML.Tags): YAML.Tags {
+  return tags.map((tag) => {
+    // A Tags entry is either a preset tag name (string, left untouched --
+    // yaml-1.1's preset already includes bool by name, so this branch
+    // does run in practice) or a full tag object; only the latter can be
+    // yaml-1.1's bool tag pair.
+    if (typeof tag === "string" || tag.tag !== "tag:yaml.org,2002:bool") {
+      return tag;
+    }
+    // Only ScalarTag ever carries this tag name -- the cast reflects
+    // that, since CollectionTag never uses this tag name in practice.
+    const boolTag = tag as YAML.ScalarTag;
+    // Both of yaml-1.1's bool tags define identify() (that's how the
+    // package itself tells its own trueTag/falseTag apart); the
+    // assertion documents that this narrowing only ever runs against
+    // those two, never a hand-rolled tag missing identify().
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+    return boolTag.identify!(true)
+      ? { ...boolTag, test: /^(?:[Yy]es|YES|[Tt]rue|TRUE|[Oo]n|ON)$/ }
+      : { ...boolTag, test: /^(?:[Nn]o|NO|[Ff]alse|FALSE|[Oo]ff|OFF)$/ };
+  });
+}
+
 function checkWriteDepth(depth: number): void {
   // NOT unreachable (issue #37): writeYaml takes a raw `Node`, a publicly
   // exported type -- a caller can hand-build one (or splice a subtree in
@@ -171,7 +228,14 @@ export function readYaml(text: string, opts: ReadYamlOptions = {}): Node {
   checkYamlIntegerDigits(text);
   let parsed: unknown;
   try {
-    parsed = YAML.parse(text, { schema: "yaml-1.1" });
+    // mapAsMap preserves each mapping key's own resolved type (so a key
+    // that resolves to a boolean under yaml-1.1's implicit-scalar rules
+    // arrives as a JS `Map` with an actual `boolean` key) instead of
+    // coercing every key to a string the way parsing to a plain JS
+    // object always would -- see the file-top comment's second bullet
+    // and issue #89's vector 2. buildNode (src/document.ts) already
+    // rejects a Map with a non-string key with a DocumentError.
+    parsed = YAML.parse(text, { schema: "yaml-1.1", mapAsMap: true, customTags: customBoolTags });
   } catch (exc) {
     // YAML.parse always throws a YAMLError (an Error instance) on malformed
     // input, never a bare value, so the non-Error branch below is a
@@ -198,6 +262,7 @@ export function writeYaml(node: Node, opts: WriteYamlOptions = {}): string {
   const text = YAML.stringify(grouped(node), {
     schema: "yaml-1.1",
     sortMapEntries: false,
+    customTags: customBoolTags,
   }) as string;
   return finishWrite(text, rep, report === undefined ? { strict } : { strict, report });
 }

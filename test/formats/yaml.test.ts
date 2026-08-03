@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { doc } from "../../src/document.js";
-import { ParseError, WriteError } from "../../src/errors.js";
+import { ParseError, WriteError, DocumentError } from "../../src/errors.js";
 import { WriteReport } from "../../src/report.js";
 import { readYaml, writeYaml, checkYaml } from "../../src/formats/yaml.js";
 
@@ -51,6 +51,17 @@ describe("readYaml", () => {
   it("YAML 1.1 boolean coercion turns a bare on/off/yes/no scalar into a boolean", () => {
     const node = readYaml("a: on\nb: off\nc: yes\nd: no\n");
     expect(node).toEqual(doc({ a: true, b: false, c: true, d: false }).toData());
+  });
+
+  it("issue #89 vector 1: a bare 'n' key is not a boolean alias, unlike full-word aliases like on/off/yes/no (reference resolver only treats full-word aliases, not bare y/n, as booleans)", () => {
+    const node = readYaml("n: 12:00:00\n");
+    const edges = node as { label: string; target: unknown }[];
+    expect(edges[0]?.label).toBe("n");
+    expect(edges[0]?.target).toBe(43200);
+  });
+
+  it("issue #89 vector 2 (the Norway problem): a bare 'on' key resolves to boolean true and MUST reject the document, not silently coerce to the label \"true\"", () => {
+    expect(() => readYaml("on:\n  push: true\n")).toThrow(DocumentError);
   });
 });
 
