@@ -6,14 +6,20 @@
  *  - `main()` against the real, pinned vendor/omnist-spec/test-suite --
  *    proves the drivers actually run against this repo's real library
  *    code. Skipped (not failed) if the submodule hasn't been checked out.
- *    Asserts the *real* current tally (not an aspirational one): 3 known,
- *    real failures remain as of this writing (formats-xml's element-text
- *    numeric-kind inference, and two formats-yaml YAML-1.1-vs-reference
- *    boolean-resolution sharp edges) -- see the runner's own header
- *    comment and the issue-#85 triage step for the actual bug reports.
+ *    Asserts the *real* current tally (not an aspirational one): as of
+ *    this writing, 0 real failures remain -- the 3 originally found by
+ *    this suite (formats-xml's element-text numeric-kind inference,
+ *    issue #88, and two formats-yaml YAML-1.1-vs-reference
+ *    boolean-resolution sharp edges, issue #89) are fixed. One of the
+ *    two YAML vectors now reports as a SKIP rather than a PASS: fixing
+ *    the boolean-key bug makes it correctly reject the document, but
+ *    the DocumentError raised carries no structured path/code, so it
+ *    falls into the same "syntax-level error carries no structured
+ *    diagnostics" skip category as the oml/osd-grammar vectors.
  *    If this test starts failing because the *tally* changed, that is
- *    good news (a bug got fixed) that requires updating this assertion,
- *    not a regression to chase.
+ *    worth investigating either way (a new bug, or a new fix) that
+ *    requires updating this assertion, not a regression to chase
+ *    blindly.
  *  - `runVector()` against synthetic, in-memory vector objects, to
  *    exercise every pass/fail/skip branch each driver has -- most of
  *    which the real 139 vectors don't hit in combination (e.g. a
@@ -61,9 +67,9 @@ describeIfVendored("main() against the real vendor/omnist-spec/test-suite", () =
   it("reports the real, current pass/fail/skip tally", () => {
     const { result: exitCode, logs, errs } = withCapturedConsole(() => main());
     expect(errs).toEqual([]);
-    expect(exitCode).toBe(1); // nonzero: 3 real, known failures remain (see file header)
+    expect(exitCode).toBe(0); // all real failures fixed (issues #86, #88, #89) -- clean run
     expect(logs.at(-1)).toBe(
-      "\n101 passed, 3 failed, 35 skipped (of 139 vectors) -- " +
+      "\n103 passed, 0 failed, 36 skipped (of 139 vectors) -- " +
         "diagnostics compared in code-agnostic mode (Sec8.5.2 rule 4)",
     );
   });
@@ -71,7 +77,7 @@ describeIfVendored("main() against the real vendor/omnist-spec/test-suite", () =
   it("every skip cites an explicit, reasoned category", () => {
     const { logs } = withCapturedConsole(() => main());
     const skipLines = logs.filter((l) => l.startsWith("[SKIP]"));
-    expect(skipLines.length).toBe(35);
+    expect(skipLines.length).toBe(36);
     for (const line of skipLines) {
       expect(line).toMatch(
         /: (D-6 \(integer\/number kind collapse\)|not yet implemented|syntax-level \w+Error carries no structured path\/code)/,
