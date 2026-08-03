@@ -20,13 +20,22 @@ writeYaml(node);
 This module is pinned to the "yaml-1.1" schema (chosen for date/bool-
 coercion parity with PyYAML's safe_load/safe_dump -- see
 src/formats/yaml.ts's file-top comment), which brings YAML 1.1's own
-resolution quirks along with it: yes/no/on/off (any case) resolve
-to booleans, not strings, and .inf/-.inf/.nan resolve to the
-corresponding non-finite number, matching PyYAML rather than the
-stricter YAML 1.2 core schema. None of that is adjustment-report
-territory -- it's read-side resolution, not a write-side lossy
-substitution -- but it's the reason a YAML document authored for a
-YAML-1.2 tool can read back differently here.
+resolution quirks along with it: yes/no/on/off/true/false (any case)
+resolve to booleans, not strings -- narrowed from full YAML 1.1's
+alias set to match PyYAML's own default resolver, so a bare y/n does
+NOT resolve to a boolean the way yes/no does (issue #89) -- and
+.inf/-.inf/.nan resolve to the corresponding non-finite number,
+matching PyYAML rather than the stricter YAML 1.2 core schema. None of
+that is adjustment-report territory -- it's read-side resolution, not
+a write-side lossy substitution -- but it's the reason a YAML document
+authored for a YAML-1.2 tool can read back differently here.
+
+Because a mapping key is also subject to that same boolean resolution,
+a bare key like on: (the "Norway problem") resolves to boolean true
+before it ever becomes a Document label -- and since a label must be a
+string, readYaml rejects that document with a DocumentError rather
+than silently stringifying the resolved boolean back to the string
+"true".
 
 ## Adjustment codes
 
