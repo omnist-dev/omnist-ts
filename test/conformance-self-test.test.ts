@@ -51,30 +51,21 @@ function withCapturedConsole<T>(fn: () => T): { result: T; logs: string[]; errs:
 const describeIfVendored = existsSync(REAL_FIXTURES_DIR) ? describe : describe.skip;
 
 describeIfVendored("main() against the real vendor/omnist-spec submodule", () => {
-  // KNOWN FAILURE (found by this self-test, not yet fixed or triaged as of
-  // this writing -- see the harness's step-1 report): case
-  // 01-schema-exact-equal-different-field-order fails. omnist-ts's
-  // `schemaEquals`/`recordEquals` (src/schema.ts) compare a record's
-  // `fields` array positionally, so two records that differ only in field
-  // *declaration order* compare unequal in exact mode. Python's reference
-  // implementation (`omnist/schema.py`'s `Record.__eq__`) and this fixture
-  // both treat fields as an unordered set for equality -- declaration
-  // order is documented as not semantically significant (model.md Sec13).
-  // This looks like a genuine omnist-ts bug, not a referee bug: per the
-  // conformance-harness plan this must be triaged/fixed as its own,
-  // separate step rather than silently worked around here. Update this
-  // test (and the exact case count) once that's resolved.
-  it("passes every case except the known field-order exact-equality bug", () => {
+  // This self-test originally found a genuine omnist-ts bug: case
+  // 01-schema-exact-equal-different-field-order failed because
+  // `schemaEquals`/`recordEquals` (src/schema.ts) compared a record's
+  // `fields` array positionally instead of as an unordered, label-keyed
+  // set (declaration order isn't semantically significant per
+  // model.md Sec13, matching Python's `Record.__eq__`). Fixed and
+  // verified in issue #86 / PR #87 -- all 10 cases pass now.
+  it("passes every self-test case", () => {
     const { result: exitCode, logs, errs } = withCapturedConsole(() => main());
     expect(errs).toEqual([]);
-    expect(exitCode).toBe(1);
-    expect(logs[0]).toBe(
-      "[FAIL] 01-schema-exact-equal-different-field-order (edge-case): expected equal, got not-equal",
-    );
-    for (const line of logs.slice(1, -2)) {
+    expect(exitCode).toBe(0);
+    for (const line of logs) {
       if (line.startsWith("[")) expect(line.startsWith("[PASS]")).toBe(true);
     }
-    expect(logs.at(-1)).toBe("\n9/10 self-test cases passed");
+    expect(logs.at(-1)).toBe("\n10/10 self-test cases passed");
   });
 });
 
