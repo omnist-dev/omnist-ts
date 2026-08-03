@@ -264,13 +264,21 @@ function fieldEquals(a: Field, b: Field): boolean {
   );
 }
 
-/** Structural equality for `Record` values: same fields, in the same
- * declared order (order is cosmetic for validation, per model.md §13, but
- * this helper -- like Python's implicit list equality -- is order-sensitive;
- * callers needing an order-independent comparison should sort first). */
+/** Structural equality for `Record` values: same set of fields, keyed by
+ * label -- a record's fields form an unordered set at the model layer
+ * (declaration order isn't semantically significant, per model.md §13).
+ * Comparing label-keyed maps makes this order-independent for free, mirroring
+ * Python's `Record.__eq__` (`omnist/schema.py`), which compares its
+ * label-keyed `_by_label` dicts directly. Duplicate labels are already
+ * rejected by `record()`, so each map here has exactly one entry per
+ * label. */
 export function recordEquals(a: Record, b: Record): boolean {
   if (a.fields.length !== b.fields.length) return false;
-  return a.fields.every((f, i) => fieldEquals(f, b.fields[i] as Field));
+  const bByLabel = new Map(b.fields.map((f) => [f.label, f]));
+  return a.fields.every((f) => {
+    const other = bByLabel.get(f.label);
+    return other !== undefined && fieldEquals(f, other);
+  });
 }
 
 /** Structural equality for `Schema` values: same root and same environment
