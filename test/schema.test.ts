@@ -447,6 +447,36 @@ describe("structural equality helpers (TS has no dunder overloading)", () => {
     expect(recordEquals(r1, r2)).toBe(false);
   });
 
+  it("recordEquals treats field declaration order as insignificant", () => {
+    const r1 = record(field("a", t.string), field("b", t.integer, 0, 1));
+    const r2 = record(field("b", t.integer, 0, 1), field("a", t.string));
+    expect(recordEquals(r1, r2)).toBe(true);
+  });
+
+  it("recordEquals: same labels but a different type on one field are unequal", () => {
+    const r1 = record(field("a", t.string), field("b", t.integer));
+    const r2 = record(field("b", t.string), field("a", t.string));
+    expect(recordEquals(r1, r2)).toBe(false);
+  });
+
+  it("recordEquals: same labels but different cardinality on one field are unequal", () => {
+    const r1 = record(field("a", t.string, 1, 1), field("b", t.integer, 0, 1));
+    const r2 = record(field("b", t.integer, 0, 2), field("a", t.string, 1, 1));
+    expect(recordEquals(r1, r2)).toBe(false);
+  });
+
+  it("recordEquals: same field count and types but different label sets are unequal", () => {
+    const r1 = record(field("a", t.string), field("b", t.string));
+    const r2 = record(field("a", t.string), field("c", t.string));
+    expect(recordEquals(r1, r2)).toBe(false);
+  });
+
+  it("schemaEquals treats field declaration order within a record as insignificant", () => {
+    const s1 = schema("R", { R: record(field("a", t.string), field("b", t.integer, 0, 1)) });
+    const s2 = schema("R", { R: record(field("b", t.integer, 0, 1), field("a", t.string)) });
+    expect(schemaEquals(s1, s2)).toBe(true);
+  });
+
   it("schemaEquals compares root and env", () => {
     const s1 = schema("R", { R: record(field("a", t.string)) });
     const s2 = schema("R", { R: record(field("a", t.string)) });
