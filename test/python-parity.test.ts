@@ -118,10 +118,17 @@ describe("fixed (issue #52): an OML TIME literal round-trips", () => {
   });
 });
 
-describe("gap: XML scalar coercion is narrower than Python int()/float()", () => {
-  it("leaves Python-only numeric spellings as strings, and omits string.ambiguous", () => {
-    for (const s of ["nan", "inf", "1_0", "infinity"]) {
-      // Python read_xml coerces all four (nan/inf to floats, "1_0" to 10).
+describe("fixed (issue #88, matches Python's #288): schema-less XML no longer coerces element text by shape at all", () => {
+  it("leaves every numeric/boolean-looking spelling as a string on a schema-less read, agreeing with Python's post-#288 behavior", () => {
+    // Before #88, this port's readXml coerced "+5"-shaped text to a number
+    // (INT_RE/FLOAT_RE) while deliberately NOT accepting Python's own
+    // int()/float() literal syntax ("nan"/"inf"/"infinity"/"1_0") -- a
+    // documented, narrower-than-Python divergence. #288 (the Python port's
+    // fix) removed shape-based coercion from read_xml's schema-less path
+    // entirely; #88 does the same here, so there is no longer a
+    // numeric-coercion gap to characterize at all -- every one of these
+    // spellings, on both ports, now stays a string absent a schema.
+    for (const s of ["nan", "inf", "1_0", "infinity", "+5", "30"]) {
       expect(readXml("<r><a>" + s + "</a></r>")).toEqual([
         { label: "r", target: [{ label: "a", target: s }] },
       ]);
@@ -129,16 +136,6 @@ describe("gap: XML scalar coercion is narrower than Python int()/float()", () =>
         [],
       );
     }
-    // The spellings both implementations agree on still coerce, and are
-    // still reported.
-    expect(readXml("<r><a>+5</a></r>")).toEqual([
-      { label: "r", target: [{ label: "a", target: 5 }] },
-    ]);
-    expect(
-      checkXml([{ label: "r", target: [{ label: "a", target: "+5" }] }]).adjustments.map(
-        (a) => a.code,
-      ),
-    ).toEqual(["string.ambiguous"]);
   });
 });
 

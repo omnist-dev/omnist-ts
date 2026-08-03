@@ -53,7 +53,7 @@ import { DocumentError, ParseError, WriteError } from "../errors.js";
 import { finishWrite, WriteReport } from "../report.js";
 import { dateKind } from "../temporal.js";
 import { materialize } from "../deserialize.js";
-import type { Schema } from "../schema.js";
+import { recordField, type FieldType, type Schema, type ScalarType } from "../schema.js";
 
 const MAX_DEPTH = 200;
 
@@ -150,7 +150,8 @@ export function readXml(text: string, opts: ReadXmlOptions = {}): Node {
     { label: local(tag), target: xmlToNode(root[tag] as XmlEntry[], "$", 0, nodeCounter) },
   ];
   if (opts.schema === undefined) return node;
-  return materialize(node, opts.schema) as Node;
+  const pretyped = xmlPretype(node, opts.schema, opts.schema.root);
+  return materialize(pretyped, opts.schema) as Node;
 }
 
 function xmlToNode(
@@ -170,7 +171,7 @@ function xmlToNode(
   if (elementEntries.length === 0) {
     /* v8 ignore next */
     const text = entries.map((e) => String(e["#text"] ?? "")).join("");
-    return coerce(text);
+    return text;
   }
   let ownText = "";
   let sawFirstElement = false;
@@ -217,15 +218,46 @@ function xmlToNode(
 const INT_RE = /^[+-]?\d+$/;
 const FLOAT_RE = /^[+-]?(?:\d+\.\d*|\.\d+|\d+)(?:[eE][+-]?\d+)?$/;
 
-function coerce(text: string): Scalar {
-  if (text === "") return "";
-  const low = text.toLowerCase();
-  if (low === "true") return true;
-  if (low === "false") return false;
-  const trimmed = text.trim();
-  if (INT_RE.test(trimmed)) return Number(trimmed);
-  if (FLOAT_RE.test(trimmed)) return Number(trimmed);
-  return text;
+// #288-equivalent fix (issue #88): XML has no native typed literals (unlike
+// YAML/TOML, which have real typed scalar syntax), so a schema-less
+// readXml must leave every element's text as a `string` scalar
+// unconditionally -- matching JSON/OML's schema-less behavior. Shape-based
+// coercion ("30" -> 30, "true" -> true) used to run unconditionally in
+// xmlToNode above; it has been removed from that path.
+//
+// When a schema IS given, though, materialize() (src/deserialize.ts)
+// would otherwise reject every numeric/boolean field pulled from XML,
+// since materialize() deliberately requires a value-exact match (a string
+// is never accepted for an integer/number/boolean field, on any format --
+// that's what lets JSON/YAML/TOML/OML tell "the author wrote a string on
+// purpose" apart from "this format has no typed literals at all"). XML is
+// the one format where every scalar arrives as text with no distinction,
+// so recovering boolean/integer/number from that text -- guided by what
+// the schema *declares* the field to be, not by shape-guessing -- has to
+// happen here, locally, before materialize() ever sees the value. This
+// mirrors Python's `_xml_pretype`/`_xml_pretype_scalar` (omnist/formats.py,
+// v0.8.0) without copying its exact shape.
+function xmlPretype(node: Node, schema: Schema, type: FieldType): Node {
+  const resolved = schema.resolve(type);
+  if ("tag" in resolved && resolved.tag === "any") return node;
+  if ("tag" in resolved && resolved.tag === "scalar") return xmlPretypeScalar(node, resolved);
+  if (!Array.isArray(node)) return node;
+  return node.map(({ label, target }) => {
+    const f = recordField(resolved, label);
+    return { label, target: f ? xmlPretype(target, schema, f.type) : target };
+  });
+}
+
+function xmlPretypeScalar(value: Node, s: ScalarType): Node {
+  // value is always the string xmlToNode produced -- xmlPretype is only
+  // ever called on a freshly-built XML node, never a value from elsewhere.
+  if (typeof value !== "string") return value;
+  if (s.scalarKind === "boolean" && (value === "true" || value === "false")) {
+    return value === "true";
+  }
+  if (s.scalarKind === "integer" && INT_RE.test(value)) return Number(value);
+  if (s.scalarKind === "number" && FLOAT_RE.test(value)) return Number(value);
+  return value;
 }
 
 // fast-xml-parser aliases an element literally named __proto__ to the
@@ -310,11 +342,17 @@ function scanXmlNode(node: Node, path: string, rep: WriteReport, depth: number):
     rep.add(path, "null.omitted", "null written as an empty element", "warning");
   } else if (v instanceof Date) {
     rep.add(path, "temporal.stringified", "temporal value written as text (reads back as a string)", "warning");
-  } else if (typeof v === "string" && typeof coerce(v) !== "string") {
+  } else if (typeof v === "boolean" || typeof v === "number") {
+    // #288-equivalent (issue #88): readXml no longer infers scalar kind
+    // from text shape on a schema-less read, so a non-string scalar
+    // written to XML (XML has no native typed literals -- everything is
+    // text) now reads back as a string, not its original type. Previously
+    // silent (the old shape-based coercion happened to undo this on
+    // read); now reported like every other type-losing write.
     rep.add(
       path,
-      "string.ambiguous",
-      "string " + JSON.stringify(v) + " looks like another type and reads back as that type",
+      "value.stringified",
+      "non-string scalar written as text (reads back as a string)",
       "warning",
     );
   }

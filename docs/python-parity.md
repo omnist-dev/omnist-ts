@@ -94,20 +94,20 @@ scalar collapses and the two OML gaps listed below.
 
 `src/formats/*.ts` against the matching sections of `omnist/formats.py`.
 Both implementations define the same nine adjustment codes and no others:
-`temporal.stringified`, `null.omitted`, `string.ambiguous`,
+`temporal.stringified`, `null.omitted`, `value.stringified`,
 `key.sanitized`, `float.special`, `shape.empty_ambiguous`,
 `string.illegal_xml_char`, `string.cr_normalized`,
 `string.line-break-char`.
 
 A 32-document corpus was run through all five `check*` functions on both
-sides (160 reports), comparing every path, code and severity triple.
-**157 of 160 matched exactly**: same code, same path, same severity, same
-order. Coverage included nulls at the root and nested; dates and
-datetimes; NaN, Infinity and negative Infinity; invalid and leading-digit
-XML names; an empty internal node; eight `string.ambiguous` candidate
-spellings; a C0 control character; CR; U+0085 in both label and value
-position; a BMP noncharacter; repeated labels; and an empty root. The three
-mismatches are the XML coercion gap below.
+sides (160 reports), comparing every path, code and severity triple, prior
+to issue #88's fix (which retired `string.ambiguous` in favor of
+`value.stringified` on this side, matching Python's own `omnist#288`
+rename -- see the closed gap G5 below). Coverage included nulls at the
+root and nested; dates and datetimes; NaN, Infinity and negative Infinity;
+invalid and leading-digit XML names; an empty internal node; a C0 control
+character; CR; U+0085 in both label and value position; a BMP
+noncharacter; repeated labels; and an empty root.
 
 Writer output was compared over an 18-document corpus. Textual differences
 are confined to serializer-library formatting (TOML array style, YAML
@@ -367,26 +367,32 @@ writeOml(readOml("a: 12:00"));   // "a: 12:00"  (Python normalizes: a: 12:00:00)
 ```
 <!-- verified-by: test/python-parity.test.ts -->
 
-### G5. XML scalar coercion is narrower than Python (`src/formats/xml.ts:196`)
+### G5. (closed) XML scalar coercion narrowness -- resolved by issue #88
 
-Tracked as issue [#53](https://github.com/omnist-dev/omnist-ts/issues/53).
+Was tracked as issue [#53](https://github.com/omnist-dev/omnist-ts/issues/53)
+(this port's `coerce` accepted a narrower numeric-spelling set than
+Python's `int()`/`float()`). Superseded, not merely fixed the same way: TS
+issue [#88](https://github.com/omnist-dev/omnist-ts/issues/88) removed
+shape-based text coercion from `readXml`'s schema-less path entirely,
+matching the Python port's own breaking fix in `omnist#288` (v0.8.0). XML
+has no native typed literals (unlike YAML/TOML), so a schema-less read now
+leaves every element's text as a `string` on both sides of the port --
+`"nan"`, `"30"`, `"+5"`, everything. There is no longer a numeric-spelling
+gap to characterize, because neither port coerces by shape at all anymore.
 
-`coerce` uses two numeric regexes; Python `_coerce` uses `int()` and
-`float()`, which additionally accept `nan`, `inf`, `infinity` and
-underscore-separated digits. The same XML therefore reads as a different
-Document. Because reader and writer agree internally, `checkXml` correctly
-omits `string.ambiguous` for those spellings -- which is *why* three of the
-160 report comparisons differ.
-
-The behavior here is arguably the better one (Python leaks
-Python-specific literal syntax into a data format, and can produce a NaN
-that JSON cannot then represent), but it is undocumented on either side of
-the port and needs a decision, not silence.
+Boolean/integer/number recovery still happens on both sides, but only when
+a schema is given, guided by what the schema declares each field to be
+(`_xml_pretype`/`_xml_pretype_scalar` in `omnist/formats.py`; `xmlPretype`/
+`xmlPretypeScalar` in `src/formats/xml.ts`) -- not by guessing from text
+shape. `checkXml` correspondingly no longer reports `string.ambiguous` at
+all (that code was retired); a non-string scalar (`number`/`boolean`)
+written to XML now reports `value.stringified` instead, since it will
+always read back as a string absent a schema.
 
 ```ts
 readXml("<r><a>nan</a></r>");
 // [{label:"r", target:[{label:"a", target:"nan"}]}]
-// Python: [("r", [("a", nan)])] -- a float
+// Python (post-#288): [("r", [("a", "nan")])] -- also a string
 ```
 <!-- verified-by: test/python-parity.test.ts -->
 

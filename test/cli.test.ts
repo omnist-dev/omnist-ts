@@ -141,7 +141,9 @@ describe("convert", () => {
     const p = writeTmp("in.xml", "<root><b>1</b><b>2</b><b>3</b></root>");
     const { code, out } = run(["convert", p, "--from", "xml", "--to", "oml", "--arrays"]);
     expect(code).toBe(0);
-    expect(out).toBe("root: {\n  b: [1, 2, 3]\n}\n");
+    // issue #88: a schema-less XML read no longer coerces numeric-looking
+    // element text to a number -- "1"/"2"/"3" stay strings.
+    expect(out).toBe('root: {\n  b: ["1", "2", "3"]\n}\n');
   });
 
   it("writes to output file", () => {
