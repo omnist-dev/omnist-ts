@@ -19,7 +19,13 @@ export default defineConfig({
     /\/docs\/paper$/,
   ],
 
+  head: [
+    ["link", { rel: "icon", href: "/logo.svg", type: "image/svg+xml" }],
+  ],
+
   themeConfig: {
+    logo: "/logo.svg",
+
     search: {
       provider: "local",
     },
