@@ -396,6 +396,27 @@ readXml("<r><a>nan</a></r>");
 ```
 <!-- verified-by: test/python-parity.test.ts -->
 
+The schema-directed recovery path was checked too, not just the
+schema-less one above: `xmlPretypeScalar`'s `INT_RE`/`FLOAT_RE` now use
+the same JSON-number-literal syntax as Python's `_XML_INT_RE`/
+`_XML_NUM_RE` (`-?(0|[1-9]\d*)` and `-?(0|[1-9]\d*)(\.\d+)?([eE][+-]?\d+)?`)
+-- no leading `+`, no leading zeros except a bare `0`, and no bare leading
+`.`. An earlier draft of the #88 fix used looser regexes here
+(`^[+-]?\d+$` and a pattern allowing `.5`), which would have reintroduced
+the #53 divergence in a narrower, schema-directed form; that has been
+closed by tightening the regexes to match Python's exactly, on both the
+integer and number paths.
+
+```ts
+const s = parseSchema('record R { "n": integer }\nroot R');
+readXml("<n>+5</n>", { schema: s }); // throws -- stays a string, materialize() rejects it
+readXml("<n>007</n>", { schema: s }); // throws -- same
+readXml("<n>0</n>", { schema: s }); // -> 0 -- bare zero is still valid
+// Python: _XML_INT_RE.fullmatch("+5") and .fullmatch("007") are both None,
+// so materialize() rejects the same two inputs there too.
+```
+<!-- verified-by: test/formats/xml.test.ts -->
+
 ### G6. Integer-literal limits diverge, and disagree between codecs
 
 Tracked as issue [#54](https://github.com/omnist-dev/omnist-ts/issues/54).

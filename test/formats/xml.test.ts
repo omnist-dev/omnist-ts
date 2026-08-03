@@ -288,6 +288,40 @@ describe("readXml", () => {
       // exactly as it is for JSON/YAML/TOML/OML.
       expect(() => materialize([{ label: "n", target: "30" }], s)).toThrow(ParseError);
     });
+
+    it("issue #88 follow-up: rejects a leading '+' for integer/number fields, matching Python's JSON-style regex (no leading plus)", async () => {
+      const { parseSchema } = await import("../../src/osd.js");
+      const sInt = parseSchema('record R { "n": integer }\nroot R');
+      const sNum = parseSchema('record R { "n": number }\nroot R');
+      expect(() => readXml("<n>+5</n>", { schema: sInt })).toThrow();
+      expect(() => readXml("<n>+5</n>", { schema: sNum })).toThrow();
+    });
+
+    it("issue #88 follow-up: rejects a leading zero for integer/number fields, matching Python's JSON-style regex (no leading zeros except bare 0)", async () => {
+      const { parseSchema } = await import("../../src/osd.js");
+      const sInt = parseSchema('record R { "n": integer }\nroot R');
+      const sNum = parseSchema('record R { "n": number }\nroot R');
+      expect(() => readXml("<n>007</n>", { schema: sInt })).toThrow();
+      expect(() => readXml("<n>007</n>", { schema: sNum })).toThrow();
+    });
+
+    it("issue #88 follow-up: rejects a bare leading '.' for number fields, matching Python's JSON-style regex", async () => {
+      const { parseSchema } = await import("../../src/osd.js");
+      const s = parseSchema('record R { "n": number }\nroot R');
+      expect(() => readXml("<n>.5</n>", { schema: s })).toThrow();
+    });
+
+    it("issue #88 follow-up: still accepts JSON-number-literal forms (0, -0, 0.5, -0.5, 1e10, -1.5e-3)", async () => {
+      const { parseSchema } = await import("../../src/osd.js");
+      const sInt = parseSchema('record R { "n": integer }\nroot R');
+      const sNum = parseSchema('record R { "n": number }\nroot R');
+      expect(readXml("<n>0</n>", { schema: sInt })).toEqual([{ label: "n", target: 0 }]);
+      expect(readXml("<n>-0</n>", { schema: sInt })).toEqual([{ label: "n", target: -0 }]);
+      expect(readXml("<n>0.5</n>", { schema: sNum })).toEqual([{ label: "n", target: 0.5 }]);
+      expect(readXml("<n>-0.5</n>", { schema: sNum })).toEqual([{ label: "n", target: -0.5 }]);
+      expect(readXml("<n>1e10</n>", { schema: sNum })).toEqual([{ label: "n", target: 1e10 }]);
+      expect(readXml("<n>-1.5e-3</n>", { schema: sNum })).toEqual([{ label: "n", target: -1.5e-3 }]);
+    });
   });
 
   describe("XXE / entity-expansion safety (security-critical)", () => {

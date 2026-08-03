@@ -215,8 +215,13 @@ function xmlToNode(
   return out;
 }
 
-const INT_RE = /^[+-]?\d+$/;
-const FLOAT_RE = /^[+-]?(?:\d+\.\d*|\.\d+|\d+)(?:[eE][+-]?\d+)?$/;
+// JSON-number-literal syntax, matching Python's reference regexes exactly
+// (omnist/formats.py, `_XML_INT_RE`/`_XML_NUM_RE`): no leading `+`, no
+// leading zeros except a bare `0` itself, and (for FLOAT_RE) no bare
+// leading `.` -- e.g. "+5", "007", and ".5" are all rejected here, left as
+// strings, and reported by materialize()'s value-exact check.
+const INT_RE = /^-?(0|[1-9]\d*)$/;
+const FLOAT_RE = /^-?(0|[1-9]\d*)(\.\d+)?([eE][+-]?\d+)?$/;
 
 // #288-equivalent fix (issue #88): XML has no native typed literals (unlike
 // YAML/TOML, which have real typed scalar syntax), so a schema-less
