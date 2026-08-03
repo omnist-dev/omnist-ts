@@ -19,16 +19,17 @@ repo's direct library calls instead of a CLI wrapper or subprocess.
 
 ```
 tools/conformance/
-  referee.ts     structural comparison (Sec4) -- Document via Doc.equals,
-                 Schema via exact/isomorphic modes (schemaEquals / isomorphic())
-  selfTest.ts    runs vendor/omnist-spec's _referee-self-test/ fixtures
+  referee.ts       structural comparison (Sec4) -- Document via Doc.equals,
+                    Schema via exact/isomorphic modes (schemaEquals / isomorphic())
+  selfTest.ts       runs vendor/omnist-spec's _referee-self-test/ fixtures
+  runner.ts         track 1: per-operation OML/OSD fixture runner
+                    (vendor/omnist-spec's conformance/fixtures/)
+  vectorRunner.ts   track 2: JSON-vector runner (vendor/omnist-spec's
+                    test-suite/), dispatch per Sec8.5.3's operation table
 ```
 
-Only the referee and its self-test exist yet (step 1 of the harness's
-7-step build-out, issue #85). The per-operation fixture runner (track 1,
-`conformance/fixtures/`) and the JSON-vector runner (track 2,
-`test-suite/`) are follow-up work and will land in this directory too,
-each with its own `README.md` section, once built.
+All three tracks (referee self-test, fixture runner, vector runner) are
+built (steps 1-3 of the harness's 7-step build-out, issue #85).
 
 ## Fixture sourcing: a pinned git submodule
 
@@ -57,16 +58,71 @@ git add vendor/omnist-spec
 git commit -m "chore: bump vendor/omnist-spec to <new-tag>"
 ```
 
-Run the self-test (and, once they exist, the fixture and vector runners)
-locally before committing the bump -- a fixture-content change is exactly
-the kind of thing this exists to catch.
+Run all three runners locally before committing the bump -- a
+fixture-content change is exactly the kind of thing this exists to catch:
+
+```bash
+npm run conformance:self-test
+npm run conformance:runner
+npm run conformance:vectors
+```
 
 ## Running it
 
 ```bash
-npx tsx tools/conformance/selfTest.ts
-npm run conformance:self-test
+npm run conformance:self-test    # referee self-test, 10 cases
+npm run conformance:runner       # track 1: OML/OSD fixtures, 11 operations
+npm run conformance:vectors      # track 2: JSON-vector suite
 ```
+
+Current real status (re-verify rather than trusting this table -- it's a
+snapshot, not a promise):
+
+| Command                    | Result                                  |
+| --------------------------- | ---------------------------------------- |
+| `conformance:self-test`    | 10/10 passed                            |
+| `conformance:runner`       | 19 passed, 0 failed, 0 skipped (11 ops) |
+| `conformance:vectors`      | 103 passed, 0 failed, 36 skipped (of 139) |
+
+## The skip-citation convention (Sec8.5.5)
+
+Per `omnist-spec`'s `docs/08-conformance-and-errors.md` Sec8.5.5, a
+`[SKIP]` line is never an unexplained gap: it MUST cite either "not yet
+implemented" or a numbered divergence-ledger entry (`docs/09-divergence-ledger.md`,
+Sec9.4) by number. `vectorRunner.ts`'s current skips break down as:
+
+- **`D-6 (integer/number kind collapse)`** -- `omnist-ts`'s `Scalar` union
+  has no `integer`/`number` kind tag independent of a schema (one JS
+  numeric type; `matchesKind` derives the distinction from
+  `Number.isInteger`). This is `omnist-spec`'s Sec9.4 D-6, an open,
+  by-design, TypeScript-only divergence -- not a bug. Only the specific
+  vectors whose outcome depends on this distinction are skipped; the
+  Document-model area otherwise passes in full per Sec9.2's carve-out.
+- **"not yet implemented -- omnist-ts's safety limits are compile-time
+  constants, no runtime configuration surface"** -- vectors that probe
+  runtime-configurable safety limits Python exposes but this repo
+  currently bakes in as constants.
+- **"syntax-level ParseError/SchemaError carries no structured
+  path/code"** -- vectors expecting a structured error path/code that a
+  syntax-level parse/schema error in this repo's error types doesn't
+  carry.
+
+A skip with no reason, or a reason not tied to one of the categories
+above (or a newly added ledger entry), is a reporting bug in the runner,
+not an acceptable result -- see issue #85's step 4 for the triage process
+that produced today's list.
+
+## How this maps to CI
+
+`.github/workflows/test.yml`'s `conformance` job runs all three commands
+above, in order, on every push and pull request to `master` (checkout
+with `submodules: true` so `vendor/omnist-spec` is actually populated).
+Per Sec8.5.5, the job fails the build only when a runner's fail count is
+nonzero -- every one of the three scripts' `main()` returns `1` on
+`failed > 0` and `0` otherwise, including when skips exist, so an
+honestly-cited skip never turns CI red. A fixture directory missing
+(submodule not checked out) returns `2`, which also fails CI, distinctly
+from a real conformance failure.
 
 ## Known issue found by the self-test
 
