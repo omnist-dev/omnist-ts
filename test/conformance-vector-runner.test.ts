@@ -22,7 +22,7 @@
  *    blindly.
  *  - `runVector()` against synthetic, in-memory vector objects, to
  *    exercise every pass/fail/skip branch each driver has -- most of
- *    which the real 139 vectors don't hit in combination (e.g. a
+ *    which the real 146 vectors don't hit in combination (e.g. a
  *    diagnostics-mismatch fail, which no real vector is expected to
  *    produce).
  */
@@ -69,7 +69,7 @@ describeIfVendored("main() against the real vendor/omnist-spec/test-suite", () =
     expect(errs).toEqual([]);
     expect(exitCode).toBe(0); // all real failures fixed (issues #86, #88, #89) -- clean run
     expect(logs.at(-1)).toBe(
-      "\n103 passed, 0 failed, 36 skipped (of 139 vectors) -- " +
+      "\n110 passed, 0 failed, 36 skipped (of 146 vectors) -- " +
         "diagnostics compared in code-agnostic mode (Sec8.5.2 rule 4)",
     );
   });
@@ -85,8 +85,8 @@ describeIfVendored("main() against the real vendor/omnist-spec/test-suite", () =
     }
   });
 
-  it("iterVectors discovers all 139 real vectors", () => {
-    expect(iterVectors(REAL_SUITE_DIR).length).toBe(139);
+  it("iterVectors discovers all 146 real vectors", () => {
+    expect(iterVectors(REAL_SUITE_DIR).length).toBe(146);
   });
 });
 

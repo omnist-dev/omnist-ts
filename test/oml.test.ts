@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import fc from "fast-check";
 import { Doc, type Edge, type Node } from "../src/document.js";
+import { TimeValue } from "../src/temporal.js";
 import { ParseError } from "../src/errors.js";
 import { checkOml, readOml, writeOml } from "../src/oml.js";
 import { parseSchema } from "../src/osd.js";
@@ -45,7 +46,7 @@ describe("scalar round trips", () => {
     ["a: false", [e("a", false)]],
     ["a: null", [e("a", null)]],
     ["a: 2024-01-01", [e("a", new Date(Date.UTC(2024, 0, 1)))]],
-    ["a: 12:30:00", [e("a", "12:30:00")]],
+    ["a: 12:30:00", [e("a", new TimeValue("12:30:00"))]],
     [
       "a: 2024-01-01T12:30:00",
       [e("a", new Date(Date.UTC(2024, 0, 1, 12, 30, 0)))],
@@ -115,16 +116,16 @@ describe("TS-native temporal parsing", () => {
     expect(() => readOml("a: 2024-02-30")).toThrow(/invalid date/);
   });
 
-  it("a TIME token with no seconds reads as a plain string", () => {
-    expect(readOml("a: 12:30")).toEqual([e("a", "12:30")]);
+  it("a TIME token with no seconds reads as a TimeValue (issue #96)", () => {
+    expect(readOml("a: 12:30")).toEqual([e("a", new TimeValue("12:30"))]);
   });
 
-  it("a TIME token with fractional seconds reads as a plain string", () => {
-    expect(readOml("a: 12:30:00.500")).toEqual([e("a", "12:30:00.500")]);
+  it("a TIME token with fractional seconds reads as a TimeValue (issue #96)", () => {
+    expect(readOml("a: 12:30:00.500")).toEqual([e("a", new TimeValue("12:30:00.500"))]);
   });
 
-  it("a TIME token with a UTC offset reads as a plain string", () => {
-    expect(readOml("a: 12:30:00+01:00")).toEqual([e("a", "12:30:00+01:00")]);
+  it("a TIME token with a UTC offset reads as a TimeValue (issue #96)", () => {
+    expect(readOml("a: 12:30:00+01:00")).toEqual([e("a", new TimeValue("12:30:00+01:00"))]);
   });
 
   it("a TIME token with an out-of-range offset is a ParseError", () => {
@@ -556,7 +557,7 @@ const GOLDEN_NODE: Node = [
   e("pos-inf", Infinity),
   e("neg-inf", -Infinity),
   e("d", new Date(Date.UTC(2024, 5, 1))),
-  e("t", "09:30:00"),
+  e("t", new TimeValue("09:30:00")),
   e("dt", new Date(Date.UTC(2024, 5, 1, 9, 30, 0))),
   e("flags", [e("on", true), e("off", false), e("nothing", null)]),
   e("nested", [e("a", [e("b", [e("c", "deep")])])]),
@@ -1107,12 +1108,12 @@ describe("issue #51: writeOml preserves a datetime's UTC offset", () => {
 });
 
 describe("issue #52: a TIME literal round-trips as a TIME token", () => {
-  // `time` is a plain string at the Document layer (no bare time-of-day type in
-  // JS), and the writer used to quote every string -- so `a: 12:00` came back
-  // out as `a: "12:00"`, which a subsequent OML reader (or Python) sees as a
-  // string, not a time. OML is the one supported format with a native TIME
-  // token, so this was the one place the port discarded information the format
-  // itself can carry.
+  // `time` is a plain string at the Document layer (no bare time-of-day type
+  // in JS), and the writer used to quote every string -- so `a: 12:00` came
+  // back out as `a: "12:00"`, which a subsequent OML reader (or Python) sees
+  // as a string, not a time. OML is the one supported format with a native
+  // TIME token, so this was the one place the port discarded information the
+  // format itself can carry.
   it.each(["a: 12:00", "a: 12:00:00", "a: 23:59:59.500", "a: 12:00+05:30", "a: 00:00"])(
     "round-trips %s as text",
     (src) => {
@@ -1120,19 +1121,11 @@ describe("issue #52: a TIME literal round-trips as a TIME token", () => {
     },
   );
 
-  it("still reads a TIME token as a plain string at the Document layer", () => {
-    expect(readOml("a: 12:00")).toEqual([e("a", "12:00")]);
-  });
-
-  it("a time-shaped string is written as a TIME token, and reads back identically", () => {
-    // The documented cost of this fix: the Document model cannot tell a string
-    // that came from a TIME token from an ordinary string of that exact shape,
-    // so an ordinary string is promoted to a TIME token on write. The value
-    // round-trip is unaffected -- reading a TIME token yields the same string
-    // back -- so `readOml(writeOml(n))` still equals `n`.
-    const edges: Edge[] = [{ label: "a", target: "12:00" }];
-    expect(writeOml(edges, { indent: null })).toBe("a: 12:00");
-    expect(readOml(writeOml(edges))).toEqual(edges);
+  it("reads a TIME token as a TimeValue at the Document layer (issue #96)", () => {
+    // Superseded by issue #96: a genuinely time-kinded value is now a
+    // `TimeValue` wrapper, not a plain string -- see the issue #96 describe
+    // block below for the full provenance-tracking behavior this replaced.
+    expect(readOml("a: 12:00")).toEqual([e("a", new TimeValue("12:00"))]);
   });
 
   it("round-trips docs/formats/oml.md's TIME-token example verbatim", () => {
@@ -1146,6 +1139,36 @@ describe("issue #52: a TIME literal round-trips as a TIME token", () => {
       expect(written).toBe(`a: ${JSON.stringify(s)}`);
       expect(readOml(written)).toEqual([e("a", s)]);
     }
+  });
+});
+
+describe("issue #96: a plain string never shape-guesses as a genuine TIME value", () => {
+  // The bug this replaces: issue #52's fix made *any* time-shaped plain
+  // string write bare, indistinguishable from a genuinely time-kinded value,
+  // so a plain string got silently promoted to a real TIME literal on the
+  // next OML read. Confirmed live against the freshly-bumped
+  // vendor/omnist-spec@v0.2.0-alpha vectors
+  // (formats-oml/basic/time-shaped-string-stays-quoted-on-write and its
+  // formats-oml/basic/genuine-time-writes-bare sibling), which require a
+  // `kind: "string"` input holding "12:00:00" to write quoted, and a
+  // `kind: "time"` input holding the *identical* text to write bare -- only
+  // real provenance tracking (a `TimeValue` wrapper, mirroring
+  // omnist-rs#99/PR#100's `RawNode::TemporalLeaf`) can satisfy both.
+  it("a plain string that happens to be time-shaped stays quoted on write", () => {
+    const written = writeOml([{ label: "t", target: "12:00:00" }], { indent: null });
+    expect(written).toBe('t: "12:00:00"');
+  });
+
+  it("a genuinely time-kinded value (read via OML's own TIME token) writes bare", () => {
+    const node = readOml("t: 12:00:00");
+    expect(node).toEqual([e("t", new TimeValue("12:00:00"))]);
+    expect(writeOml(node, { indent: null })).toBe("t: 12:00:00");
+  });
+
+  it("readOml(writeOml(n)) is stable for a genuine TIME value read back a second time", () => {
+    const first = readOml("t: 12:00:00");
+    const second = readOml(writeOml(first));
+    expect(second).toEqual(first);
   });
 });
 

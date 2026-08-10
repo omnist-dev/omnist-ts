@@ -212,3 +212,37 @@ export function parseDatetimeToken(text: string): Date | null {
   if (time.offsetMin !== null) DATETIME_OFFSET.set(out, time.offsetMin);
   return out;
 }
+
+/**
+ * Provenance wrapper for a genuinely 	ime-kinded value (issue #96, same
+ * fix shape as omnist-rs#99/PR#100's RawNode::TemporalLeaf). date/
+ * datetime get identity for free from Date being a real object, tagged
+ * via the WeakMaps above; a bare JS string primitive has no identity to
+ * key a WeakMap on, so 	ime -- which has no native JS temporal type at
+ * all -- needs its own wrapper instead. The wrapper's own type *is* the
+ * tag: a 	ime-kinded value's canonical in-memory representation is a
+ * TimeValue instance, never a bare string, from the moment it is
+ * genuinely known to be time-kinded (src/oml.ts's TIME token grammar, or
+ * src/deserialize.ts's schema-directed materialize upgrade -- the two
+ * real construction points, mirroring Rust's).
+ *
+ * Transparent everywhere except src/oml.ts's writer (which is the one
+ * place the tag must be *visible*, to decide bare-vs-quoted output): it
+ * unwraps to its .text string in Document equality (document.ts's
+ * 
+odeEquals), schema validation (schema.ts's matchesKind), and every
+ * other format's writer (JSON/YAML/TOML/XML have no native time syntax, so
+ * they always emit plain text regardless of provenance).
+ */
+export class TimeValue {
+  constructor(public readonly text: string) {}
+  toString(): string {
+    return this.text;
+  }
+  // So an incidental JSON.stringify() (e.g. document.ts's debug `reprNode`,
+  // which already relies on the equivalent Date.prototype.toJSON() built-in)
+  // renders a TimeValue as its plain text, not `{"text":"..."}`.
+  toJSON(): string {
+    return this.text;
+  }
+}

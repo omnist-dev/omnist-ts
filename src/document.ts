@@ -31,17 +31,26 @@
  *
  * `date` and `datetime` both map onto the native `Date` object. JS has no
  * bare time-of-day type (no `date`-less "just a clock time" builtin), so a
- * `time` scalar is represented the same way the Python port accepts an
- * ISO-8601 string for it: as a plain `string` (e.g. `"12:00:00"`). This
- * means the Document layer alone cannot distinguish a `time`-shaped string
- * from an ordinary string -- that distinction, like `integer` vs `number`,
- * is drawn by the Schema layer (issue #3) when it knows a field's declared
- * kind. Document-level equality and structural checks therefore treat any
- * string as an ordinary string; only the Schema layer's `time` kind gives
- * such a string its meaning.
+ * genuinely `time`-kinded value is represented by `TimeValue`
+ * (`src/temporal.ts`), a minimal wrapper around the ISO-8601 text (e.g.
+ * `"12:00:00"`) that gives it the same kind of real object identity `Date`
+ * already has for `date`/`datetime` (issue #96). A *plain* `string`, even
+ * one shaped exactly like a valid time, is never treated as time-kinded --
+ * that would make it indistinguishable from a genuinely time-kinded value
+ * on write, which was the bug: `src/oml.ts`'s writer used to shape-guess a
+ * plain string's kind from its content, silently promoting a plain string
+ * to a real TIME literal.
+ *
+ * `TimeValue`'s tag is transparent everywhere except `src/oml.ts`'s writer
+ * (the one place it must decide bare-vs-quoted output): `nodeEquals` below
+ * unwraps it before comparing, so a `TimeValue` compares equal to an
+ * identical plain string, and every other format's writer (JSON/YAML/TOML/
+ * XML, none of which has native time-literal syntax) unwraps it to plain
+ * text on write, same as `date`/`datetime`'s `Date` mapping already does.
  */
 
 import { DocumentError } from "./errors.js";
+import { TimeValue } from "./temporal.js";
 
 const MAX_DEPTH = 200;
 // Matches CPython's default sys.get_int_max_str_digits(); JS numbers can't
@@ -73,7 +82,7 @@ function countNode(counter: NodeCounter, path: string): void {
 }
 
 /** A leaf value. See the file-top comment for the scalar-kind mapping. */
-export type Scalar = string | number | boolean | Date | null;
+export type Scalar = string | number | boolean | Date | TimeValue | null;
 
 /** A single labeled edge: `(label, target)` in the Python source's terms. */
 export interface Edge {
@@ -96,7 +105,8 @@ function isScalar(v: unknown): v is Scalar {
     typeof v === "string" ||
     typeof v === "number" ||
     typeof v === "boolean" ||
-    v instanceof Date
+    v instanceof Date ||
+    v instanceof TimeValue
   );
 }
 
@@ -424,6 +434,29 @@ function copyNode(node: Node, depth = 0): Node {
   return node;
 }
 
+/**
+ * Replace every `TimeValue` leaf in a Node tree with its plain `.text`
+ * string (issue #96). JSON/YAML/TOML have no native time-literal syntax
+ * (unlike `Date`, which each of those writers/libraries handles itself),
+ * so each of those three writers runs its Node through this first --
+ * mirroring how `time` values already round-trip as plain strings through
+ * those formats, regardless of provenance. OML's own writer (`src/oml.ts`)
+ * deliberately does NOT call this: it is the one place the tag must stay
+ * visible, to decide bare-vs-quoted output.
+ */
+export function unwrapTimeValues(node: Node, depth = 0): Node {
+  if (Array.isArray(node)) {
+    if (depth > MAX_DEPTH) {
+      throw new DocumentError(`nesting exceeds the maximum depth (${MAX_DEPTH})`);
+    }
+    return node.map(({ label, target }) => ({
+      label,
+      target: unwrapTimeValues(target, depth + 1),
+    }));
+  }
+  return node instanceof TimeValue ? node.text : node;
+}
+
 export function grouped(node: Node, depth = 0): unknown {
   if (!Array.isArray(node)) return node;
   if (depth > MAX_DEPTH) {
@@ -499,7 +532,13 @@ function nodeEquals(a: Node, b: Node, depth = 0): boolean {
   if (sa instanceof Date || sb instanceof Date) {
     return sa instanceof Date && sb instanceof Date && sa.getTime() === sb.getTime();
   }
-  return sa === sb;
+  // A `TimeValue`'s tag is invisible to Document equality (issue #96, same
+  // reasoning as omnist-rs#99/PR#100's manual PartialEq): it compares equal
+  // to an equivalent plain string, so a schema-materialized time value and
+  // its pre-materialize string form are the same Document.
+  const ua = sa instanceof TimeValue ? sa.text : sa;
+  const ub = sb instanceof TimeValue ? sb.text : sb;
+  return ua === ub;
 }
 
 function reprNode(node: Node): string {

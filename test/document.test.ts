@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { doc, buildNode, Doc, type Node } from "../src/document.js";
+import { doc, buildNode, Doc, unwrapTimeValues, type Node } from "../src/document.js";
 import { DocumentError } from "../src/errors.js";
+import { TimeValue } from "../src/temporal.js";
 
 // Ported from upstream omnist's tests/test_canonical.py::TestDocument,
 // tests/test_canonical.py::TestDocumentRobustness (Doc-focused subset),
@@ -453,5 +454,53 @@ describe("Doc: equals/toString depth guard (issue #37)", () => {
     const d2 = new Doc(deepNode(190));
     expect(d1.equals(d2)).toBe(true);
     expect(() => d1.toString()).not.toThrow();
+  });
+});
+
+describe("issue #96: TimeValue's tag is invisible to Document equality", () => {
+  it("a TimeValue equals an identical plain string", () => {
+    const a = new Doc([{ label: "t", target: new TimeValue("12:00:00") }]);
+    const b = doc({ t: "12:00:00" });
+    expect(a.equals(b)).toBe(true);
+  });
+
+  it("two TimeValues with the same text are equal", () => {
+    const a = new Doc([{ label: "t", target: new TimeValue("12:00:00") }]);
+    const b = new Doc([{ label: "t", target: new TimeValue("12:00:00") }]);
+    expect(a.equals(b)).toBe(true);
+  });
+
+  it("a TimeValue does not equal a different string", () => {
+    const a = new Doc([{ label: "t", target: new TimeValue("12:00:00") }]);
+    const b = doc({ t: "13:00:00" });
+    expect(a.equals(b)).toBe(false);
+  });
+});
+
+describe("issue #96: unwrapTimeValues has its own MAX_DEPTH guard", () => {
+  it("rejects a node deeper than MAX_DEPTH", () => {
+    let node: Node = new TimeValue("12:00:00");
+    for (let i = 0; i < 5001; i++) {
+      node = [{ label: "a", target: node }];
+    }
+    expect(() => unwrapTimeValues(node)).toThrow(DocumentError);
+    expect(() => unwrapTimeValues(node)).toThrow(/nesting exceeds the maximum depth/);
+  });
+
+  it("unwraps a TimeValue leaf to its plain text at any depth within the limit", () => {
+    const node: Node = [{ label: "a", target: new TimeValue("12:00:00") }];
+    expect(unwrapTimeValues(node)).toEqual([{ label: "a", target: "12:00:00" }]);
+  });
+});
+
+describe("issue #96: TimeValue's toString/toJSON stay text-transparent", () => {
+  it("String(timeValue) uses toString()", () => {
+    expect(String(new TimeValue("12:00:00"))).toBe("12:00:00");
+  });
+
+  it("Doc.toString()'s debug repr renders a TimeValue leaf as plain text via toJSON()", () => {
+    const d = new Doc([{ label: "t", target: new TimeValue("12:00:00") }]);
+    expect(d.toString()).toContain('"12:00:00"');
+    expect(d.toString()).not.toContain("text");
   });
 });

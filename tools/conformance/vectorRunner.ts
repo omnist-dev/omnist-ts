@@ -106,7 +106,7 @@ import { lint as opsLint } from "../../src/ops/lint.js";
 import { infer, inferWithReport } from "../../src/infer.js";
 import { getFormat } from "../../src/registry.js";
 import { WriteReport } from "../../src/report.js";
-import { parseDateToken, parseDatetimeToken } from "../../src/temporal.js";
+import { parseDateToken, parseDatetimeToken, TimeValue } from "../../src/temporal.js";
 
 import { compareSchema } from "./referee.js";
 
@@ -179,11 +179,10 @@ function decodeScalar(kind: string | null, value: JsonValue): Scalar {
       return d;
     }
     case "time":
-      // A `time` scalar has no native JS representation and stays a plain
-      // string at the Document layer (src/document.ts's file-top comment,
-      // src/oml.ts's file-top comment "The TIME token and time-shaped
-      // strings") -- there is nothing to convert it to.
-      return value as string;
+      // A `time` scalar has no native JS representation; a genuinely
+      // time-kinded value is a `TimeValue` wrapper (issue #96), not a plain
+      // string -- see src/temporal.ts's TimeValue doc comment.
+      return new TimeValue(value as string);
     case "datetime": {
       const d = parseDatetimeToken(value as string);
       if (d === null) throw new Error(`invalid datetime literal ${JSON.stringify(value)}`);

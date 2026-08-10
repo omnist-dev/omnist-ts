@@ -80,7 +80,7 @@ There's no type annotation -- the literal's shape says what it is:
 | `3.14` / `1e10` / `nan` / `inf` / `-inf` | number | `number` |
 | `true` / `false` | boolean | `boolean` |
 | `2024-01-01` | date | `Date` |
-| `12:30:00` | time | `string` |
+| `12:30:00` | time | `TimeValue` |
 | `2024-01-01T12:30:00` | datetime | `Date` |
 | `null` | null | `null` |
 
@@ -91,10 +91,12 @@ needs a schema to read as the "right" type -- see
 [Reading without a schema](#reading) below.
 
 `date` and `datetime` both map onto the same native `Date` (JS has no
-bare-date type distinct from a timestamp); see [Temporal
-values](#temporal-values) for how `writeOml` decides which of the two
-shapes to write back, and for the UTC-offset and `TIME`-token behavior
-that's specific to this port.
+bare-date type distinct from a timestamp); `time` maps onto `TimeValue`
+(`src/temporal.ts`), a minimal wrapper that gives a genuinely time-kinded
+value the same kind of real object identity `Date` already has. See
+[Temporal values](#temporal-values) for how `writeOml` decides which of
+the two `date`/`datetime` shapes to write back, and for the UTC-offset,
+`TIME`-token, and `TimeValue` behavior that's specific to this port.
 
 ## Reading
 
@@ -244,37 +246,43 @@ never collapsed to `DATE`, since the offset tag is itself proof a
 round-trip-safe (`readOml(writeOml(node))` compares equal), just not
 always token-kind-identical to the source.
 
-**A time-shaped string is written as a `TIME` token.** `time` has no
-native JS type, so the Document model represents it as a plain string
-(see the scalar table above). Nothing distinguishes a string that came
-from a `TIME` token from an ordinary string of the same text -- a string
-is a primitive, so there is no identity to hang an out-of-band tag on,
-which is how the `date`-vs-`datetime` and local-vs-offset ambiguities
-above are resolved instead. `writeOml` resolves *this* ambiguity in favor
-of the token: any string that is a valid TIME literal (`isTimeLiteral` in
-`src/oml.ts`: both shape *and* range, via `parseTimeToken`) is written
-bare.
+**A genuinely time-kinded value writes as a `TIME` token; a plain string
+never does, no matter its shape (issue #96).** `time` has no native JS
+type, so a genuinely time-kinded value is a `TimeValue` (`src/temporal.ts`)
+-- a minimal wrapper around the ISO-8601 text, constructed at the two
+places a value is genuinely known to be time-kinded: `readOml`'s own
+`TIME` token grammar, and a schema-directed `materialize` upgrade of a
+`time` field. `writeOml` writes a `TimeValue` bare and a plain string
+always quoted, regardless of whether that string happens to look like a
+valid time:
 
 ```
 a: 12:00
 b: "24:00"
-c: "noon"
+c: "12:00"
 ```
-<!-- verified-by: test/oml.test.ts "issue #52: a TIME literal round-trips as a TIME token" -->
+<!-- verified-by: test/oml.test.ts "issue #96: a plain string never shape-guesses as a genuine TIME value" -->
 
-So `a: 12:00` survives a read/write round trip as a `TIME` token, and the
-trade-off is that an ordinary string `"12:00"` is promoted to one on
-write:
+`a` is a `TIME` token on read, so it round-trips bare. `b` stays quoted
+both because `24:00` is shaped like a time but is not one (hour must be
+0-23, matching the Python implementation) *and*, independent of that,
+because a plain string never writes bare regardless of shape. `c` is the
+case this fixed: before issue #96, a plain string holding valid
+time-shaped text (`"12:00"`) was promoted to a bare `TIME` token on write
+-- indistinguishable from a genuine one on the next read. Now it stays
+quoted, matching a plain string of any other shape:
 
 ```
-writeOml(buildNode({ a: "12:00" }));   // 'a: 12:00' -- not 'a: "12:00"'
+writeOml(buildNode({ a: "12:00" }));   // 'a: "12:00"' -- a plain string
+                                        // always stays quoted
 ```
 <!-- doc-illustrative -->
 
-The Document-level round trip is exact either way, since reading a `TIME`
-token yields that same string back; only the token kind seen by a *later*
-reader changes. `b` stays quoted because `24:00` is shaped like a time but
-is not one (hour must be 0-23, matching the Python implementation).
+`TimeValue`'s tag is transparent everywhere except this writer: it
+compares equal to an identical plain string in Document equality, and the
+other three non-OML formats (JSON/YAML/TOML/XML, none of which has native
+time-literal syntax) unwrap it to plain text on write, the same as
+`date`/`datetime`'s `Date` mapping already does.
 
 ## Numeric edge cases
 

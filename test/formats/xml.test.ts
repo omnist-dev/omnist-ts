@@ -3,6 +3,7 @@ import { doc } from "../../src/document.js";
 import { DocumentError, ParseError, WriteError } from "../../src/errors.js";
 import { WriteReport } from "../../src/report.js";
 import { readXml, writeXml, checkXml } from "../../src/formats/xml.js";
+import { TimeValue } from "../../src/temporal.js";
 
 describe("readXml", () => {
   it("parses a document with a standard XML declaration prologue", () => {
@@ -612,5 +613,12 @@ describe("checkWriteDepth is a real, reachable guard (issue #37)", () => {
     }
     const node: import("../../src/document.js").Node = [{ label: "root", target: inner }];
     expect(() => writeXml(node)).toThrow(/nesting exceeds the maximum depth \(200\)/);
+  });
+});
+
+describe("issue #96: a TimeValue writes as plain text (XML has no native time syntax)", () => {
+  it("writeXml unwraps a TimeValue leaf to its plain text", () => {
+    const text = writeXml([{ label: "t", target: new TimeValue("12:00:00") }]);
+    expect(text).toContain("<t>12:00:00</t>");
   });
 });

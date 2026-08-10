@@ -82,7 +82,7 @@ import {
   type ScalarType,
   type Schema,
 } from "./schema.js";
-import { parseDateToken, parseDatetimeToken } from "./temporal.js";
+import { parseDateToken, parseDatetimeToken, TimeValue } from "./temporal.js";
 
 /** A copy of `node` with leaf values upgraded to match `schema`, guaranteed
  * to conform to it -- raises {@link ParseError} (with every problem found,
@@ -223,12 +223,18 @@ function materializeTemporal(
   // limitation, not a gap. `time` never produces a `Date` (there is no bare
   // time-of-day type), so this branch is unreachable for `kind === "time"`.
   if (value instanceof Date) return matchesKind(value, kind) ? value : NO_CONVERSION;
+  // An already-materialized `TimeValue` (issue #96) passes through
+  // unchanged on a second materialize(), the same way an already-tagged
+  // `Date` does just above -- `matchesKind`'s `time` branch already
+  // unwraps a `TimeValue` to check its text, so this stays consistent with
+  // `validate`.
+  if (value instanceof TimeValue) return matchesKind(value, kind) ? value : NO_CONVERSION;
   if (typeof value !== "string") return NO_CONVERSION;
   // The exact same shape check `Schema.validate` uses (`matchesKind`), so
   // `validate` and `materialize` can never disagree on whether a string
   // upgrades -- see file-top comment.
   if (!matchesKind(value, kind)) return NO_CONVERSION;
-  if (kind === "time") return value; // stays a plain string at this layer
+  if (kind === "time") return new TimeValue(value); // issue #96: tagged, not a plain string
   const converted = kind === "date" ? parseDateToken(value) : parseDatetimeToken(value);
   /* v8 ignore start -- unreachable via the public surface, and as of issue
    * #49 that is actually true: `matchesKind` (schema.ts) is now *defined* in

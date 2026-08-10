@@ -216,18 +216,22 @@ One knock-on not previously written down: `valueKind` returns `"datetime"`
 even for a `date`-tagged `Date`, where Python returns `"date"`. This affects
 only the type name inside a `type-mismatch` message, never a verdict.
 
-### 3. `time` is a plain string
+### 3. `time` is a `TimeValue` wrapper, not a bare JS primitive
 
-JS has no bare time-of-day type, so a `time` scalar is an ordinary string at
-the Document layer. Python holds a real `datetime.time`.
+JS has no bare time-of-day type, so a genuinely `time`-kinded scalar is a
+`TimeValue` (`src/temporal.ts`, issue #96) -- a minimal wrapper around the
+ISO-8601 text, giving it the same kind of real object identity `Date`
+already has for `date`/`datetime`. Python holds a real `datetime.time`.
 
-Consequences: `readToml` of a TOML time literal yields a string, and writing
-it back produces a quoted TOML string rather than a time literal; and the
-`temporal.stringified` code for a `time` leaf has
-nothing to fire on here, because there is no Document value this port would
-recognize as a time rather than a string. Both are accepted lossiness. The
-OML case is *not* accepted lossiness and is filed as a gap below, because
-OML has a native TIME token.
+Consequences: `readToml` of a TOML time literal yields a plain string (TOML
+has no native time type to construct a `TimeValue` from on a schema-less
+read), and writing it back produces a quoted TOML string rather than a time
+literal; and the `temporal.stringified` code for a `time` leaf only fires
+for a value that is genuinely a `TimeValue` (e.g. via a schema-directed
+`materialize`), not for a plain string that merely looks time-shaped. Both
+are accepted lossiness. The OML case (a genuinely time-kinded value writing
+as a bare `TIME` token, a plain string always writing quoted regardless of
+shape) is covered below.
 
 ### 4. TOML local versus offset datetime (issue #26)
 
@@ -346,26 +350,48 @@ writeOml(readOml("a: 2024-01-01T12:00:00-08:00"));
 ```
 <!-- verified-by: test/python-parity.test.ts -->
 
-### G4. An OML TIME literal did not round-trip -- **fixed**
+### G4. An OML TIME literal did not round-trip -- **fixed, refined by #96**
 
 Issue [#52](https://github.com/omnist-dev/omnist-ts/issues/52), fixed in
 [#65](https://github.com/omnist-dev/omnist-ts/pull/65).
 
-Because `time` is a plain string here, an OML TIME token read as a string and
-was re-emitted *quoted*. Unlike JSON or XML, OML has a native TIME token, so
-this was the one format where the port discarded information the format itself
-can carry.
-
-`writeOml` now emits a bare TIME token for any string that is a valid TIME
-literal (shape *and* range). The cost, since a primitive string has no identity
-to tag: an ordinary string of that shape is promoted to a TIME token on write.
-That does not affect the Document-level round trip, whereas the old behavior
-broke the OML text round trip. See [formats/oml.md](formats/oml.md).
+Because `time` was a plain string at the time, an OML TIME token read as a
+string and was re-emitted *quoted*. Unlike JSON or XML, OML has a native
+TIME token, so this was the one format where the port discarded information
+the format itself can carry. `writeOml`'s original fix emitted a bare TIME
+token for any string that was a valid TIME literal (shape *and* range) --
+which traded away exactly the ambiguity issue #96 (below) later closed with
+real provenance tracking; the round-trip property this section documents
+still holds:
 
 ```ts
 writeOml(readOml("a: 12:00"));   // "a: 12:00"  (Python normalizes: a: 12:00:00)
 ```
 <!-- verified-by: test/python-parity.test.ts -->
+
+### G6. A plain time-shaped string was promoted to a genuine TIME value on write -- **fixed**
+
+Issue [#96](https://github.com/omnist-dev/omnist-ts/issues/96).
+
+G4's fix (above) traded away more than intended: because a primitive string
+has no identity to tag, *any* string shaped like a valid TIME literal wrote
+bare, indistinguishable from a genuinely time-kinded value -- so a plain
+string got silently promoted to a real TIME literal on the next OML read.
+Fixed the same way `omnist-rs` fixed the identical bug class
+([omnist-rs#99](https://github.com/omnist-dev/omnist-rs/issues/99)/PR#100):
+a `TimeValue` wrapper (`src/temporal.ts`) gives a genuinely time-kinded
+value real object identity, constructed only at the two places a value is
+genuinely known to be time-kinded (`readOml`'s TIME token grammar, and a
+schema-directed `materialize` upgrade). A plain string now always writes
+quoted, regardless of shape:
+
+```ts
+writeOml(buildNode({ a: "12:00" }));   // 'a: "12:00"' -- stays a string
+```
+<!-- doc-illustrative -->
+
+See [formats/oml.md](formats/oml.md#temporal-values) for the full
+mechanism.
 
 ### G5. (closed) XML scalar coercion narrowness -- resolved by issue #88
 

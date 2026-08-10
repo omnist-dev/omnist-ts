@@ -20,6 +20,7 @@ import {
   valueKind,
   validationResultToString,
 } from "../src/schema.js";
+import { TimeValue } from "../src/temporal.js";
 
 // Ported from upstream omnist's tests/test_canonical.py: TestValidation,
 // TestTemporalBoundary, TestSchemaModelDunders, TestMatchesKindAndValueKind,
@@ -593,5 +594,16 @@ describe("issue #50: hour 24 is not a valid time", () => {
     // one spelling per instant, and the two layers agree with each other.
     expect(matchesKind("12:00+05:60", "time")).toBe(false);
     expect(matchesKind("12:00+05:59", "time")).toBe(true);
+  });
+});
+
+describe("issue #96: valueKind reports a TimeValue as \"time\", not \"string\"", () => {
+  it("a TimeValue mismatched against a non-time field reports its real kind in the error", () => {
+    const s = parseSchema('record R { "n": number }\nroot R');
+    const result = s.validate(new Doc([{ label: "n", target: new TimeValue("12:00:00") }]));
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(JSON.stringify(result.errors)).toContain("time");
+    }
   });
 });

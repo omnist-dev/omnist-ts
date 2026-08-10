@@ -14,6 +14,7 @@
  */
 
 import { buildNode, grouped, type Node, type Scalar } from "../document.js";
+import { TimeValue } from "../temporal.js";
 import { ParseError, WriteError } from "../errors.js";
 import { finishWrite, WriteReport } from "../report.js";
 import { dateKind } from "../temporal.js";
@@ -238,6 +239,9 @@ function serialize(value: unknown, indent: number | null, level: number): string
     return String(value);
   }
   if (value instanceof Date) return JSON.stringify(isoOf(value));
+  // No native JSON time syntax (issue #96): a genuinely time-kinded value
+  // still writes as its plain text, same as a plain string would.
+  if (value instanceof TimeValue) return JSON.stringify(value.text);
   if (Array.isArray(value)) return serializeArray(value, indent, level);
   if (isPlainRecord(value)) return serializeObject(value, indent, level);
   throw new TypeError("cannot serialize " + typeName(value));
