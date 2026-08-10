@@ -64,6 +64,20 @@ const MAX_DEPTH = 200;
 // it needs its own running counter, threaded like `depth` is.
 const MAX_NODES = 1_000_000;
 
+// Matches src/document.ts's own MAX_INT_DIGITS (locally redefined here,
+// same convention as this file's own MAX_DEPTH/MAX_NODES copies -- see
+// json.ts's/toml.ts's identical constant for this port's precedent). PR
+// #99's schema-directed integer path (xmlPretypeScalar, below) switched
+// from Number(value) to BigInt(value) to fix issue #98's precision loss --
+// but xmlToNode never goes through document.ts's buildNode()/
+// checkIntDigits (see this file's top comment), so nothing else on this
+// route ever caps digit count. BigInt(text) does work proportional to the
+// digit count, so an uncapped, attacker-controlled digit string is exactly
+// the superlinear cost MAX_INT_DIGITS exists to prevent -- this check has
+// to run on the raw text, before BigInt() ever sees it, matching
+// json.ts's/toml.ts's checkJsonIntegerDigits/checkTomlIntegerDigits.
+const MAX_INT_DIGITS = 4300;
+
 const PARSER_MAX_NESTED_TAGS = 100000;
 
 const XML_NAME = /^[A-Za-z_][A-Za-z0-9_.-]*$/;
@@ -261,7 +275,25 @@ function xmlPretypeScalar(value: Node, s: ScalarType): Node {
   if (s.scalarKind === "boolean" && (value === "true" || value === "false")) {
     return value === "true";
   }
-  if (s.scalarKind === "integer" && INT_RE.test(value)) return BigInt(value);
+  if (s.scalarKind === "integer" && INT_RE.test(value)) {
+    // Digit-count cap before BigInt() ever runs (issue #98 follow-up):
+    // BigInt(text) is superlinear in digit count, and unlike JSON/TOML's
+    // text-scanning checks, INT_RE has already confirmed `value` is
+    // nothing but an optional leading '-' plus digits, so a plain
+    // length check (minus the sign) is exact here -- no comment/string
+    // skipping needed, this is already an isolated element-text scalar.
+    const digits = value.startsWith("-") ? value.length - 1 : value.length;
+    if (digits > MAX_INT_DIGITS) {
+      throw new ParseError(
+        "invalid XML: integer literal has more than " +
+          String(MAX_INT_DIGITS) +
+          " digits, exceeding the digit limit (security: unbounded-digit " +
+          "int-to-str conversion is superlinear); matches this port's " +
+          "digit cap elsewhere (src/document.ts's MAX_INT_DIGITS)",
+      );
+    }
+    return BigInt(value);
+  }
   if (s.scalarKind === "number" && FLOAT_RE.test(value)) return Number(value);
   return value;
 }
