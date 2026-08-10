@@ -30,6 +30,7 @@
 
 import { parse as parseToml, stringify as stringifyToml, TomlDate, type TomlError } from "smol-toml";
 import { buildNode, grouped, type Node } from "../document.js";
+import { TimeValue } from "../temporal.js";
 import { ParseError, WriteError } from "../errors.js";
 import { finishWrite, WriteReport } from "../report.js";
 import { parseDateToken, parseDatetimeToken, dateKind } from "../temporal.js";
@@ -259,6 +260,9 @@ function toTomlDate(d: Date): TomlDate {
  * json.ts's serializer would instead stringify a Date. */
 function toTomlValue(value: unknown, depth: number): unknown {
   if (value instanceof Date) return toTomlDate(value);
+  // No native TOML time-literal syntax (issue #96): a genuinely time-kinded
+  // value still writes as its plain text, same as a plain string would.
+  if (value instanceof TimeValue) return value.text;
   if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return value;
   if (Array.isArray(value)) {
     checkWriteDepth(depth);

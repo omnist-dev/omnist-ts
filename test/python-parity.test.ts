@@ -32,7 +32,7 @@ import {
 } from "../src/index.js";
 import { lint } from "../src/ops/lint.js";
 import { prune } from "../src/ops/prune.js";
-import { parseDateToken } from "../src/temporal.js";
+import { parseDateToken, TimeValue } from "../src/temporal.js";
 
 describe("depth boundary (report: Confirmed identical -- Document model)", () => {
   const nestJson = (n: number): string => {
@@ -108,9 +108,12 @@ describe("fixed (issue #51): writeOml preserves a UTC offset", () => {
 
 describe("fixed (issue #52): an OML TIME literal round-trips", () => {
   it("re-emits a bare time as a TIME token, not a quoted string", () => {
-    // Still a plain string at the Document layer -- JS has no bare time-of-day
-    // type -- but the OML text is now stable across a read/write cycle.
-    expect(readOml("a: 12:00")).toEqual([{ label: "a", target: "12:00" }]);
+    // A genuinely time-kinded value is a `TimeValue` wrapper at the Document
+    // layer (issue #96), not a plain string -- JS has no bare time-of-day
+    // type, so `TimeValue` gives it the same kind of real identity `Date`
+    // already has for date/datetime. The OML text is stable across a
+    // read/write cycle either way.
+    expect(readOml("a: 12:00")).toEqual([{ label: "a", target: new TimeValue("12:00") }]);
     expect(writeOml(readOml("a: 12:00"))).toBe("a: 12:00");
     // Python normalizes the spelling to `a: 12:00:00`, having parsed the token
     // into a `datetime.time`; this port writes the token text back verbatim,

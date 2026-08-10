@@ -83,6 +83,7 @@ import {
   parseDateToken,
   parseDatetimeToken,
   parseTimeToken,
+  TimeValue,
 } from "./temporal.js";
 
 // Matches src/document.ts's own MAX_DEPTH and MAX_INT_DIGITS constants
@@ -178,10 +179,6 @@ const DATE_SRC = String.raw`\d{4}-\d{2}-\d{2}`;
 const TIME_BODY_SRC = String.raw`\d{2}:\d{2}(?::\d{2}(?:\.\d{1,6})?)?(?:[+-]\d{2}:\d{2})?`;
 const DATETIME_SRC = `${DATE_SRC}T${TIME_BODY_SRC}`;
 
-// The TIME token's shape, anchored, for the writer's `isTimeLiteral` check
-// (issue #52). Built from the same `TIME_BODY_SRC` the tokenizer uses, so the
-// reader and the writer cannot disagree about what a TIME literal looks like.
-const TIME_ONLY_RE = new RegExp(`^(?:${TIME_BODY_SRC})$`);
 
 // One compiled alternation, tried in the exact priority order the grammar
 // (docs/design/oml-grammar.md §1) specifies -- see that file and
@@ -806,9 +803,12 @@ class Parser {
         if (parseTimeToken(text) === null) {
           throw this.sc.errorAt(end, `invalid time ${JSON.stringify(text)}`);
         }
-        // Document-model mapping: `time` has no native JS type, so it is a
-        // plain string (see file-top comment and src/document.ts).
-        return text;
+        // Document-model mapping: `time` has no native JS type, so a
+        // genuinely time-kinded value is a `TimeValue` wrapper around the
+        // text (issue #96) -- not a plain string, which would be
+        // indistinguishable from a plain string that merely looks
+        // time-shaped. See src/temporal.ts's TimeValue doc comment.
+        return new TimeValue(text);
       }
       case "DATETIME": {
         const text = this.sc.s.slice(start, end);
@@ -1069,15 +1069,6 @@ function writeTimePart(v: Date): string {
   return `${pad2(v.getUTCHours())}:${pad2(v.getUTCMinutes())}:${pad2(v.getUTCSeconds())}${frac}`;
 }
 
-/** Whether a string is a valid OML TIME literal, and can therefore be written
- * back as a bare TIME token rather than a quoted string (issue #52). Both
- * halves are required: `TIME_ONLY_RE` is the token's shape and
- * `parseTimeToken` its range/component check, so `"24:00"` -- shaped like a
- * time but not one -- stays quoted. See the file-top comment. */
-function isTimeLiteral(s: string): boolean {
-  return TIME_ONLY_RE.test(s) && parseTimeToken(s) !== null;
-}
-
 function writeScalar(v: Scalar): string {
   if (v === null) return "null";
   if (typeof v === "boolean") return v ? "true" : "false";
@@ -1087,7 +1078,11 @@ function writeScalar(v: Scalar): string {
     return String(v);
   }
   if (v instanceof Date) return writeDate(v);
-  if (typeof v === "string") return isTimeLiteral(v) ? v : writeString(v);
+  // A genuinely time-kinded value carries its own provenance tag (issue
+  // #96) and always writes bare; a plain string -- even one shaped exactly
+  // like a TIME literal -- always writes quoted. No shape-guessing.
+  if (v instanceof TimeValue) return v.text;
+  if (typeof v === "string") return writeString(v);
   throw new TypeError(`${typeName(v)} has no OML scalar form`);
 }
 

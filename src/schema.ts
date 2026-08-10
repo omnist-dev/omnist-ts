@@ -30,6 +30,7 @@ import {
   parseDateToken,
   parseDatetimeToken,
   parseTimeToken,
+  TimeValue,
 } from "./temporal.js";
 import { compatibleWith as opsCompatibleWith, equivalent as opsEquivalent } from "./ops/subschema.js";
 import { normalize as opsNormalize } from "./ops/minimize.js";
@@ -336,7 +337,8 @@ function isIsoDateString(v: unknown): boolean {
 }
 
 function isIsoTimeString(v: unknown): boolean {
-  return typeof v === "string" && TIME_RE.test(v) && parseTimeToken(v) !== null;
+  const s = v instanceof TimeValue ? v.text : v;
+  return typeof s === "string" && TIME_RE.test(s) && parseTimeToken(s) !== null;
 }
 
 function isIsoDatetimeString(v: unknown): boolean {
@@ -419,6 +421,7 @@ export function valueKind(v: unknown): ScalarKind {
   if (typeof v === "boolean") return "boolean";
   if (typeof v === "number") return Number.isInteger(v) ? "integer" : "number";
   if (v instanceof Date) return "datetime";
+  if (v instanceof TimeValue) return "time";
   return "string";
 }
 

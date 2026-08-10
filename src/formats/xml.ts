@@ -49,6 +49,7 @@
 
 import { XMLParser, XMLValidator } from "fast-xml-parser";
 import type { Edge, Node, Scalar } from "../document.js";
+import { TimeValue } from "../temporal.js";
 import { DocumentError, ParseError, WriteError } from "../errors.js";
 import { finishWrite, WriteReport } from "../report.js";
 import { dateKind } from "../temporal.js";
@@ -345,7 +346,7 @@ function scanXmlNode(node: Node, path: string, rep: WriteReport, depth: number):
   const v = node;
   if (v === null) {
     rep.add(path, "null.omitted", "null written as an empty element", "warning");
-  } else if (v instanceof Date) {
+  } else if (v instanceof Date || v instanceof TimeValue) {
     rep.add(path, "temporal.stringified", "temporal value written as text (reads back as a string)", "warning");
   } else if (typeof v === "boolean" || typeof v === "number") {
     // #288-equivalent (issue #88): readXml no longer infers scalar kind
@@ -361,8 +362,9 @@ function scanXmlNode(node: Node, path: string, rep: WriteReport, depth: number):
       "warning",
     );
   }
-  if (typeof v === "string") {
-    if (XML_ILLEGAL_CHAR.test(v)) {
+  const vText = v instanceof TimeValue ? v.text : v;
+  if (typeof vText === "string") {
+    if (XML_ILLEGAL_CHAR.test(vText)) {
       rep.add(
         path,
         "string.illegal_xml_char",
@@ -370,7 +372,7 @@ function scanXmlNode(node: Node, path: string, rep: WriteReport, depth: number):
         "error",
       );
     }
-    if (v.includes("\r")) {
+    if (vText.includes("\r")) {
       rep.add(
         path,
         "string.cr_normalized",
@@ -431,6 +433,9 @@ function xmlText(v: Scalar): string {
   if (typeof v === "boolean") return v ? "true" : "false";
   if (v === null) return "";
   if (v instanceof Date) return isoOf(v);
+  // No native XML time-literal syntax (issue #96): a genuinely time-kinded
+  // value still writes as its plain text, same as a plain string would.
+  if (v instanceof TimeValue) return v.text;
   return String(v);
 }
 

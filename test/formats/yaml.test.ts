@@ -3,6 +3,7 @@ import { doc } from "../../src/document.js";
 import { ParseError, WriteError, DocumentError } from "../../src/errors.js";
 import { WriteReport } from "../../src/report.js";
 import { readYaml, writeYaml, checkYaml } from "../../src/formats/yaml.js";
+import { TimeValue } from "../../src/temporal.js";
 
 describe("readYaml", () => {
   it("does not flag a plain scalar whose trailing digit run merely happens to be long (issue #64 review finding)", () => {
@@ -232,5 +233,12 @@ describe("over-large integer literal (issue #54)", () => {
     const text = "# " + "1".repeat(4301) + "\na: 1\n";
     const node = readYaml(text);
     expect(node).toEqual([{ label: "a", target: 1 }]);
+  });
+});
+
+describe("issue #96: a TimeValue writes as plain text (YAML has no native time syntax)", () => {
+  it("writeYaml unwraps a TimeValue leaf to its plain text", () => {
+    const text = writeYaml([{ label: "t", target: new TimeValue("12:00:00") }]);
+    expect(text).toBe('t: "12:00:00"\n');
   });
 });

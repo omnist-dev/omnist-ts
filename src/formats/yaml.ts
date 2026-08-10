@@ -63,7 +63,7 @@
  */
 
 import YAML from "yaml";
-import { buildNode, grouped, type Node, type Scalar } from "../document.js";
+import { buildNode, grouped, unwrapTimeValues, type Node, type Scalar } from "../document.js";
 import { ParseError, WriteError } from "../errors.js";
 import { finishWrite, WriteReport } from "../report.js";
 import { materialize } from "../deserialize.js";
@@ -259,7 +259,9 @@ export interface WriteYamlOptions {
 export function writeYaml(node: Node, opts: WriteYamlOptions = {}): string {
   const { strict = false, report } = opts;
   const rep = scanYaml(node);
-  const text = YAML.stringify(grouped(node), {
+  // No native YAML time-literal syntax (issue #96): unwrap any
+  // TimeValue leaf to its plain text first, same as a plain string.
+  const text = YAML.stringify(grouped(unwrapTimeValues(node)), {
     schema: "yaml-1.1",
     sortMapEntries: false,
     customTags: customBoolTags,

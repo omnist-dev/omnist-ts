@@ -3,6 +3,7 @@ import { doc, Doc } from "../../src/document.js";
 import { ParseError, WriteError } from "../../src/errors.js";
 import { WriteReport } from "../../src/report.js";
 import { readToml, writeToml, checkToml } from "../../src/formats/toml.js";
+import { TimeValue } from "../../src/temporal.js";
 
 describe("readToml", () => {
   it("parses a table into a Document node", () => {
@@ -252,5 +253,12 @@ describe("checkWriteDepth is a real, reachable guard (issue #37)", () => {
       node = [{ label: "a", target: node }];
     }
     expect(() => writeToml(node)).toThrow(/nesting exceeds the maximum depth \(200\)/);
+  });
+});
+
+describe("issue #96: a TimeValue writes as plain text (TOML has no native time syntax)", () => {
+  it("writeToml unwraps a TimeValue leaf to its plain text", () => {
+    const text = writeToml([{ label: "t", target: new TimeValue("12:00:00") }]);
+    expect(text).toBe('t = "12:00:00"\n');
   });
 });

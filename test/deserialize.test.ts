@@ -4,6 +4,7 @@ import { ParseError } from "../src/errors.js";
 import { parseSchema } from "../src/osd.js";
 import { readOml } from "../src/oml.js";
 import { materialize } from "../src/deserialize.js";
+import { TimeValue } from "../src/temporal.js";
 
 // Ported from upstream omnist's tests/test_canonical.py: TestDeserialize
 // (schema= materialize path), TestValidateMaterializeAgreement (the
@@ -30,7 +31,7 @@ describe("materialize: iso strings become Date / numeric exactness", () => {
     ) as Edge[];
     const values = new Map(node.map((edge) => [edge.label, edge.target]));
     expect(values.get("d")).toEqual(new Date(Date.UTC(2024, 0, 1)));
-    expect(values.get("t")).toBe("12:00:00");
+    expect(values.get("t")).toEqual(new TimeValue("12:00:00"));
     expect(values.get("dt")).toEqual(new Date(Date.UTC(2024, 0, 1, 10, 0, 0)));
   });
 
@@ -167,7 +168,7 @@ describe("materialize: date/time/datetime mutual exclusion (string form)", () =>
     ) as Edge[];
     const values = new Map(node.map((edge) => [edge.label, edge.target]));
     expect(values.get("d")).toEqual(new Date(Date.UTC(2024, 0, 1)));
-    expect(values.get("t")).toBe("12:00:00");
+    expect(values.get("t")).toEqual(new TimeValue("12:00:00"));
     expect(values.get("dt")).toEqual(new Date(Date.UTC(2024, 0, 1, 12, 0, 0)));
   });
 
@@ -354,5 +355,35 @@ describe("issue #50: validate/materialize agreement on hour 24", () => {
     const s = parseSchema('record R { "t": time }\nroot R');
     expect(() => readOml('t: "24:00"', { schema: s })).toThrow(ParseError);
     expect(() => readOml("t: 24:00")).toThrow(ParseError);
+  });
+});
+
+describe("issue #96: materialize upgrades a time field to a TimeValue, not a plain string", () => {
+  it("a schema-directed materialize of a time field produces a TimeValue", () => {
+    const s = parseSchema('record R { "t": time }\nroot R');
+    const node = materialize([e("t", "12:00:00")], s);
+    expect(node).toEqual([e("t", new TimeValue("12:00:00"))]);
+  });
+
+  it("a TimeValue compares equal to its plain-string form in Document equality", () => {
+    const s = parseSchema('record R { "t": time }\nroot R');
+    const materialized = new Doc(materialize([e("t", "12:00:00")], s));
+    const plain = doc({ t: "12:00:00" });
+    expect(materialized.equals(plain)).toBe(true);
+  });
+
+  it("the materialized TimeValue still re-validates against the same schema", () => {
+    const s = parseSchema('record R { "t": time }\nroot R');
+    const node = materialize([e("t", "12:00:00")], s);
+    expect(s.validate(new Doc(node)).ok).toBe(true);
+  });
+});
+
+describe("issue #96: a TimeValue that no longer matches a field's declared kind is rejected", () => {
+  it("re-materializing an already-tagged TimeValue against a mismatched date field fails", () => {
+    const timeSchema = parseSchema('record R { "t": time }\nroot R');
+    const dateSchema = parseSchema('record R { "t": date }\nroot R');
+    const node = materialize([e("t", "12:00:00")], timeSchema); // node.t is now a TimeValue
+    expect(() => materialize(node, dateSchema)).toThrow(ParseError);
   });
 });

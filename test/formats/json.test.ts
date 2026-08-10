@@ -4,6 +4,7 @@ import type { Node } from "../../src/document.js";
 import { ParseError, WriteError } from "../../src/errors.js";
 import { WriteReport } from "../../src/report.js";
 import { readJson, writeJson, checkJson } from "../../src/formats/json.js";
+import { TimeValue } from "../../src/temporal.js";
 
 describe("readJson", () => {
   it("parses a JSON object into a Document node", () => {
@@ -296,5 +297,12 @@ describe("over-large integer literal (issue #54)", () => {
   it("does not reject a large-but-safe integer", () => {
     const node = readJson('{"a": 12345}');
     expect(node).toEqual([{ label: "a", target: 12345 }]);
+  });
+});
+
+describe("issue #96: a TimeValue writes as plain text (JSON has no native time syntax)", () => {
+  it("writeJson unwraps a TimeValue leaf to its plain text", () => {
+    const text = writeJson([{ label: "t", target: new TimeValue("12:00:00") }]);
+    expect(text).toBe('{"t": "12:00:00"}');
   });
 });
