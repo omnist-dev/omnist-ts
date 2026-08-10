@@ -36,8 +36,8 @@ function at<T>(arr: readonly T[], i: number): T {
 describe("scalar round trips", () => {
   it.each([
     ['a: "hello"', [e("a", "hello")]],
-    ["a: 42", [e("a", 42)]],
-    ["a: -42", [e("a", -42)]],
+    ["a: 42", [e("a", 42n)]],
+    ["a: -42", [e("a", -42n)]],
     ["a: 3.14", [e("a", 3.14)]],
     ["a: -3.14", [e("a", -3.14)]],
     ["a: 1e10", [e("a", 1e10)]],
@@ -72,11 +72,11 @@ it("empty document is an empty edge list", () => {
 });
 
 it("CRLF line endings act as separators", () => {
-  expect(readOml("a: 1\r\nb: 2\r\n")).toEqual([e("a", 1), e("b", 2)]);
+  expect(readOml("a: 1\r\nb: 2\r\n")).toEqual([e("a", 1n), e("b", 2n)]);
 });
 
 it("a bare leaf document is a plain scalar", () => {
-  expect(readOml("42")).toBe(42);
+  expect(readOml("42")).toBe(42n);
   expect(readOml('"just a string"')).toBe("just a string");
 });
 
@@ -158,10 +158,10 @@ describe("TS-native temporal parsing", () => {
 
 it("repeated labels and interleaving stay as separate edges", () => {
   const node = readOml("a: 1\nb: 2\na: 3\nb: 4\na: 5");
-  expect(node).toEqual([e("a", 1), e("b", 2), e("a", 3), e("b", 4), e("a", 5)]);
+  expect(node).toEqual([e("a", 1n), e("b", 2n), e("a", 3n), e("b", 4n), e("a", 5n)]);
   const d = new Doc(node as Edge[]);
   expect(d.count("a")).toBe(3);
-  expect(d.get("a").map((c) => c.value)).toEqual([1, 3, 5]);
+  expect(d.get("a").map((c) => c.value)).toEqual([1n, 3n, 5n]);
 });
 
 it("nested braces at arbitrary depth", () => {
@@ -170,12 +170,12 @@ it("nested braces at arbitrary depth", () => {
 });
 
 it("inline brace style with semicolons", () => {
-  expect(readOml("{ a: 1; b: 2 }")).toEqual([e("a", 1), e("b", 2)]);
+  expect(readOml("{ a: 1; b: 2 }")).toEqual([e("a", 1n), e("b", 2n)]);
 });
 
 it("comments are ignored", () => {
   const node = readOml("# a top comment\na: 1  # trailing comment\nb: 2\n");
-  expect(node).toEqual([e("a", 1), e("b", 2)]);
+  expect(node).toEqual([e("a", 1n), e("b", 2n)]);
 });
 
 // ---------------------------------------------------------------------------
@@ -306,7 +306,7 @@ describe("multiline strings", () => {
 
   it("internal newlines never act as a separator", () => {
     const node = readOml('a: """\nx\ny\n"""\nb: 1');
-    expect(node).toEqual([e("a", "x\ny\n"), e("b", 1)]);
+    expect(node).toEqual([e("a", "x\ny\n"), e("b", 1n)]);
   });
 
   it("immediately followed by a label with no SEP is a ParseError", () => {
@@ -315,7 +315,7 @@ describe("multiline strings", () => {
 
   it("followed by a semicolon separator is valid", () => {
     const node = readOml('a: """\nx\ny\n""";b: 1');
-    expect(node).toEqual([e("a", "x\ny\n"), e("b", 1)]);
+    expect(node).toEqual([e("a", "x\ny\n"), e("b", 1n)]);
   });
 
   it("escapes are still processed inside a multiline string", () => {
@@ -359,7 +359,7 @@ describe("top-level structural disambiguation", () => {
   });
 
   it("one set of braces around everything is fine", () => {
-    expect(readOml("{ a: 1; b: 2 }")).toEqual([e("a", 1), e("b", 2)]);
+    expect(readOml("{ a: 1; b: 2 }")).toEqual([e("a", 1n), e("b", 2n)]);
   });
 
   it("two bare leaves is an error", () => {
@@ -376,7 +376,7 @@ describe("top-level structural disambiguation", () => {
   });
 
   it("two edges with a newline separator is fine", () => {
-    expect(readOml("a: 1\nb: 2")).toEqual([e("a", 1), e("b", 2)]);
+    expect(readOml("a: 1\nb: 2")).toEqual([e("a", 1n), e("b", 2n)]);
   });
 });
 
@@ -416,11 +416,11 @@ describe("reserved words and labels", () => {
   });
 
   it("a quoted reserved word label is fine", () => {
-    expect(readOml('"true": 1')).toEqual([e("true", 1)]);
+    expect(readOml('"true": 1')).toEqual([e("true", 1n)]);
   });
 
   it("'nullable' is not reserved", () => {
-    expect(readOml("nullable: 1")).toEqual([e("nullable", 1)]);
+    expect(readOml("nullable: 1")).toEqual([e("nullable", 1n)]);
   });
 
   it("capitalized NaN is a bare ident, not the keyword", () => {
@@ -438,17 +438,17 @@ describe("reserved words and labels", () => {
 
   it("a label cannot start with a digit unless quoted", () => {
     expect(() => readOml("123: 1")).toThrow(ParseError);
-    expect(readOml('"123": 1')).toEqual([e("123", 1)]);
+    expect(readOml('"123": 1')).toEqual([e("123", 1n)]);
   });
 
   it("hyphenated labels are allowed", () => {
-    expect(readOml("a-b: 1")).toEqual([e("a-b", 1)]);
+    expect(readOml("a-b: 1")).toEqual([e("a-b", 1n)]);
   });
 
   it.each(["inf", "nan", "-inf"])(
     "reserved number spelling %s as a label round-trips",
     (label) => {
-      const node = [e(label, 1)];
+      const node = [e(label, 1n)];
       const written = writeOml(node);
       expect(written).toBe(`"${label}": 1`);
       expect(readOml(written)).toEqual(node);
@@ -464,7 +464,7 @@ describe("numeric edge cases", () => {
   it("negative zero integer is exactly zero", () => {
     const node = readOml("a: -0") as Edge[];
     const target = node[0]?.target;
-    expect(target === 0).toBe(true);
+    expect(target === 0n).toBe(true);
   });
 
   it("negative zero float is sign-preserving", () => {
@@ -475,7 +475,7 @@ describe("numeric edge cases", () => {
   it("integer digit limit is enforced", () => {
     const ok = "9".repeat(4300);
     const node = readOml(`a: ${ok}`) as Edge[];
-    expect(at(node, 0).target).toBe(Number(ok));
+    expect(at(node, 0).target).toBe(BigInt(ok));
     const tooBig = "9".repeat(4301);
     expect(() => readOml(`a: ${tooBig}`)).toThrow(ParseError);
   });
@@ -502,7 +502,7 @@ it("nesting depth limit is enforced", () => {
 // ---------------------------------------------------------------------------
 
 it("a leading BOM is ignored", () => {
-  expect(readOml("\uFEFFa: 1")).toEqual([e("a", 1)]);
+  expect(readOml("\uFEFFa: 1")).toEqual([e("a", 1n)]);
 });
 
 // ---------------------------------------------------------------------------
@@ -513,14 +513,14 @@ it("a full document round-trips losslessly and never needs an adjustment", () =>
   const node: Node = [
     e("title", "Conference"),
     e("attendee", "Ann"),
-    e("session", [e("id", 1), e("active", true)]),
+    e("session", [e("id", 1n), e("active", true)]),
     e("attendee", "Bob"),
-    e("session", [e("id", 2), e("active", false)]),
+    e("session", [e("id", 2n), e("active", false)]),
     e("when", new Date(Date.UTC(2024, 0, 1, 9, 30))),
     e("opens", "09:00:00"),
     e("on", new Date(Date.UTC(2024, 5, 1))),
     e("price", 29.99),
-    e("capacity", 250),
+    e("capacity", 250n),
     e("notes", null),
   ];
   const text = writeOml(node);
@@ -549,8 +549,8 @@ const GOLDEN_NODE: Node = [
   e("plain", 'hello "world"\n'),
   e("raw", String.raw`C:\no\escapes`),
   e("multi", "line one\nline two"),
-  e("neg-int", -42),
-  e("big-int", 4300),
+  e("neg-int", -42n),
+  e("big-int", 4300n),
   e("dec", -3.14),
   e("exp", 6.02e23),
   e("special", NaN),
@@ -602,6 +602,10 @@ describe("schema-directed reads", () => {
     // "d" arrives as an OML DATE token (already a Date); "n" is written as
     // a JSON/YAML-style string here to exercise materialize's own
     // integer/number-exact upgrade, not OML's own literal-number parsing.
+    // "n" is declared `number`; materialize always normalizes a
+    // number-typed field to a host float (spec Sec7.2), even from an
+    // integer-shaped literal -- so it converts to a plain JS `3`,
+    // not bigint.
     const node = readOml('d: 2024-01-01\nn: 3', { schema: s });
     expect(node).toEqual([e("d", new Date(Date.UTC(2024, 0, 1))), e("n", 3)]);
   });
@@ -739,7 +743,7 @@ it("the real-life document validates against a schema", () => {
 
 describe("writeOml edge cases", () => {
   it("a bare scalar document", () => {
-    expect(writeOml(42)).toBe("42");
+    expect(writeOml(42)).toBe("42.0");
   });
 
   it("an empty nested node", () => {
@@ -747,13 +751,13 @@ describe("writeOml edge cases", () => {
   });
 
   it("a label needing quotes", () => {
-    expect(writeOml([e("a b", 1)])).toBe('"a b": 1');
+    expect(writeOml([e("a b", 1n)])).toBe('"a b": 1');
   });
 
   it("a label with a trailing newline is quoted (regression: #170 upstream)", () => {
-    const written = writeOml([e("A\n", 1)]);
+    const written = writeOml([e("A\n", 1n)]);
     expect(written).toBe('"A\\n": 1');
-    expect(readOml(written)).toEqual([e("A\n", 1)]);
+    expect(readOml(written)).toEqual([e("A\n", 1n)]);
   });
 
   it("NaN", () => {
@@ -798,7 +802,7 @@ describe("writeOml(indent: null) compact output", () => {
   });
 
   it("bare scalar document", () => {
-    expect(writeOml(42, { indent: null })).toBe("42");
+    expect(writeOml(42, { indent: null })).toBe("42.0");
   });
 
   it.each([
@@ -806,15 +810,15 @@ describe("writeOml(indent: null) compact output", () => {
       [
         e("title", "Conference"),
         e("attendee", "Ann"),
-        e("session", [e("id", 1), e("active", true)]),
+        e("session", [e("id", 1n), e("active", true)]),
         e("attendee", "Bob"),
-        e("session", [e("id", 2), e("active", false)]),
+        e("session", [e("id", 2n), e("active", false)]),
         e("when", new Date(Date.UTC(2024, 0, 1, 9, 30))),
         e("price", 29.99),
         e("notes", null),
       ],
     ],
-    [[e("a", [e("b", [e("c", 1)])])]],
+    [[e("a", [e("b", [e("c", 1n)])])]],
     [[e("tag", "x"), e("tag", "y")]],
   ])("compact round-trips: %#", (node) => {
     expect(readOml(writeOml(node as Node, { indent: null }))).toEqual(node);
@@ -830,18 +834,18 @@ describe("array syntax", () => {
     const src = 'a: "x"\n' + "b: [1, 2, 3]\n" + "c: true\n" + "b: [4, 5, 6]\n";
     expect(readOml(src)).toEqual([
       e("a", "x"),
-      e("b", 1),
-      e("b", 2),
-      e("b", 3),
+      e("b", 1n),
+      e("b", 2n),
+      e("b", 3n),
       e("c", true),
-      e("b", 4),
-      e("b", 5),
-      e("b", 6),
+      e("b", 4n),
+      e("b", 5n),
+      e("b", 6n),
     ]);
   });
 
   it("expands to repeated edges, minimal case", () => {
-    expect(readOml("b: [1, 2, 3]")).toEqual([e("b", 1), e("b", 2), e("b", 3)]);
+    expect(readOml("b: [1, 2, 3]")).toEqual([e("b", 1n), e("b", 2n), e("b", 3n)]);
   });
 
   it("array of brace subtrees", () => {
@@ -861,12 +865,12 @@ describe("array syntax", () => {
   });
 
   it("a trailing comma is legal", () => {
-    expect(readOml("b: [1, 2, 3,]")).toEqual([e("b", 1), e("b", 2), e("b", 3)]);
+    expect(readOml("b: [1, 2, 3,]")).toEqual([e("b", 1n), e("b", 2n), e("b", 3n)]);
   });
 
   it("newlines inside brackets are legal and insignificant", () => {
     const src = "b: [\n  1,\n  2,\n  3\n]";
-    expect(readOml(src)).toEqual([e("b", 1), e("b", 2), e("b", 3)]);
+    expect(readOml(src)).toEqual([e("b", 1n), e("b", 2n), e("b", 3n)]);
   });
 
   it("a bare newline as separator inside brackets is illegal", () => {
@@ -879,7 +883,7 @@ describe("array syntax", () => {
 
   it("comments inside brackets are legal", () => {
     const src = "b: [\n  1, # one\n  2, # two\n]";
-    expect(readOml(src)).toEqual([e("b", 1), e("b", 2)]);
+    expect(readOml(src)).toEqual([e("b", 1n), e("b", 2n)]);
   });
 
   it("an array in label position is a ParseError", () => {
@@ -891,7 +895,7 @@ describe("array syntax", () => {
   });
 
   it("null elements", () => {
-    expect(readOml("b: [1, null, 3]")).toEqual([e("b", 1), e("b", null), e("b", 3)]);
+    expect(readOml("b: [1, null, 3]")).toEqual([e("b", 1n), e("b", null), e("b", 3n)]);
   });
 });
 
@@ -900,20 +904,20 @@ describe("array syntax", () => {
 // ---------------------------------------------------------------------------
 
 const GOLDEN_NODES_FOR_NO_REGRESSION: Node[] = [
-  [e("a", "x"), e("b", 1), e("c", true)],
+  [e("a", "x"), e("b", 1n), e("c", true)],
   [e("tag", "x"), e("tag", "y")],
-  [e("a", [e("b", [e("c", 1)])])],
+  [e("a", [e("b", [e("c", 1n)])])],
   [
     e("title", "Conference"),
     e("attendee", "Ann"),
-    e("session", [e("id", 1), e("active", true)]),
+    e("session", [e("id", 1n), e("active", true)]),
     e("attendee", "Bob"),
-    e("session", [e("id", 2), e("active", false)]),
+    e("session", [e("id", 2n), e("active", false)]),
     e("when", new Date(Date.UTC(2024, 0, 1, 9, 30))),
     e("price", 29.99),
     e("notes", null),
   ],
-  [e("b", 1), e("b", 2), e("c", true), e("b", 3)],
+  [e("b", 1n), e("b", 2n), e("c", true), e("b", 3n)],
   [],
 ];
 
@@ -929,24 +933,24 @@ describe("writeOml({ arrays: true })", () => {
   );
 
   it("collapses runs, pretty mode", () => {
-    const node = [e("a", "x"), e("b", 1), e("b", 2), e("b", 3), e("c", true)];
+    const node = [e("a", "x"), e("b", 1n), e("b", 2n), e("b", 3n), e("c", true)];
     expect(writeOml(node, { arrays: true })).toBe('a: "x"\nb: [1, 2, 3]\nc: true');
   });
 
   it("collapses runs, compact mode", () => {
-    const node = [e("a", "x"), e("b", 1), e("b", 2), e("b", 3), e("c", true)];
+    const node = [e("a", "x"), e("b", 1n), e("b", 2n), e("b", 3n), e("c", true)];
     expect(writeOml(node, { arrays: true, indent: null })).toBe(
       'a: "x"; b: [1, 2, 3]; c: true',
     );
   });
 
   it("a run of one stays a plain scalar edge", () => {
-    const node = [e("b", 1), e("c", true)];
+    const node = [e("b", 1n), e("c", true)];
     expect(writeOml(node, { arrays: true })).toBe("b: 1\nc: true");
   });
 
   it("never merges across a different label", () => {
-    const node = [e("b", 1), e("b", 2), e("c", true), e("b", 3)];
+    const node = [e("b", 1n), e("b", 2n), e("c", true), e("b", 3n)];
     const text = writeOml(node, { arrays: true });
     expect(text).toBe("b: [1, 2]\nc: true\nb: 3");
     expect(readOml(text)).toEqual(node);
@@ -979,7 +983,7 @@ describe("writeOml({ arrays: true })", () => {
     (
       [
         ...GOLDEN_NODES_FOR_NO_REGRESSION,
-        [e("b", 1), e("b", 2), e("c", true), e("b", 3)],
+        [e("b", 1n), e("b", 2n), e("c", true), e("b", 3n)],
         [e("members", [e("name", "Ann")]), e("members", [e("name", "Bob")])],
         [e("members", []), e("members", [e("name", "Ann")])],
       ] as Node[]

@@ -348,7 +348,7 @@ function scanXmlNode(node: Node, path: string, rep: WriteReport, depth: number):
     rep.add(path, "null.omitted", "null written as an empty element", "warning");
   } else if (v instanceof Date || v instanceof TimeValue) {
     rep.add(path, "temporal.stringified", "temporal value written as text (reads back as a string)", "warning");
-  } else if (typeof v === "boolean" || typeof v === "number") {
+  } else if (typeof v === "boolean" || typeof v === "number" || typeof v === "bigint") {
     // #288-equivalent (issue #88): readXml no longer infers scalar kind
     // from text shape on a schema-less read, so a non-string scalar
     // written to XML (XML has no native typed literals -- everything is

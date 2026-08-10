@@ -122,6 +122,10 @@ function canonicalKey(node: Node): string {
     return "[" + node.map((e) => JSON.stringify(e.label) + ":" + canonicalKey(e.target)).join(",") + "]";
   }
   if (node instanceof Date) return "D" + node.toISOString();
+  // JSON.stringify throws a TypeError on a bigint (issue #98's integer
+  // representation) -- tag it distinctly from a same-valued number so
+  // 1n and 1 never collide as the same universe witness.
+  if (typeof node === "bigint") return "I" + node.toString();
   return JSON.stringify(node);
 }
 

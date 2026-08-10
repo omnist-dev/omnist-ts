@@ -107,8 +107,15 @@ const BIGINT_TAG = String.fromCharCode(0) + "omnist-bigint" + String.fromCharCod
  * structure/syntax while integer precision survives via a post-parse
  * step. A float-shaped numeral (has a "." or "e"/"E") is left untouched --
  * `number`-kind values keep exactly today's float64 behavior.
+ 
+ *
+ * Exported (along with `bigintReviver`) so `tools/conformance/vectorRunner.ts`
+ * can apply the same fix to the conformance-vector JSON files it loads --
+ * those files can themselves contain a bare large-integer JSON literal
+ * (e.g. the issue #98 target vector), which plain `JSON.parse` would round
+ * the same way `readJson` used to.
  */
-function tagIntegerLiterals(text: string): string {
+export function tagIntegerLiterals(text: string): string {
   let out = "";
   const n = text.length;
   let i = 0;
@@ -164,7 +171,7 @@ function tagIntegerLiterals(text: string): string {
   return out;
 }
 
-function bigintReviver(_key: string, value: unknown): unknown {
+export function bigintReviver(_key: string, value: unknown): unknown {
   if (typeof value === "string" && value.startsWith(BIGINT_TAG)) {
     return BigInt(value.slice(BIGINT_TAG.length));
   }
@@ -322,7 +329,16 @@ function serialize(value: unknown, indent: number | null, level: number): string
     if (Number.isNaN(value)) return "NaN";
     if (value === Infinity) return "Infinity";
     if (value === -Infinity) return "-Infinity";
-    return String(value);
+    const text = String(value);
+    // Since issue #98, a bare digit-only token (no "." and no "e"/"E")
+    // parses back as a bigint (via tagIntegerLiterals/bigintReviver
+    // above) -- a different kind. A whole-valued `number` (e.g. -0, or
+    // 1e21 and up, where String() also omits both) must never write as
+    // bare digits, or it would silently change kind on the next read;
+    // same fix as oml.ts's writeScalar and toml.ts's numbersAsFloat
+    // option.
+    if (!/[.eE]/.test(text)) return `${text}.0`;
+    return text;
   }
   if (value instanceof Date) return JSON.stringify(isoOf(value));
   // No native JSON time syntax (issue #96): a genuinely time-kinded value

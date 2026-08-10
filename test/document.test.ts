@@ -161,6 +161,21 @@ describe("Doc: robustness (guards)", () => {
     );
   });
 
+  // issue #98: integer-kinded values are bigint-backed, so buildNode()'s
+  // own MAX_INT_DIGITS cap (matching document.ts's checkIntDigits, mirrored
+  // in each format reader) has a live bigint branch now, not just a
+  // documented-dormant one for JS  -- exercise it directly via a
+  // value constructed straight through the public API, not parsed text.
+  it("raises on a bigint value exceeding MAX_INT_DIGITS (issue #98)", () => {
+    const tooBig = BigInt("9".repeat(4301));
+    expect(() => doc({ a: tooBig })).toThrow(/more than 4300 digits/);
+  });
+
+  it("accepts a bigint value at exactly MAX_INT_DIGITS (issue #98)", () => {
+    const ok = BigInt("9".repeat(4300));
+    expect(() => doc({ a: ok })).not.toThrow();
+  });
+
   // issue #77: MAX_NODES is the third safety limit alongside MAX_DEPTH and
   // MAX_INT_DIGITS (docs/02-document-model.md section 2.4) -- a document
   // can be shallow (well under MAX_DEPTH) yet still unbounded in total

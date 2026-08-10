@@ -76,13 +76,18 @@ There's no type annotation -- the literal's shape says what it is:
 | Spelling | Scalar | Document (TS) type |
 |---|---|---|
 | `"text"` | string | `string` |
-| `42` / `-42` | integer | `number` |
+| `42` / `-42` | integer | `bigint` |
 | `3.14` / `1e10` / `nan` / `inf` / `-inf` | number | `number` |
 | `true` / `false` | boolean | `boolean` |
 | `2024-01-01` | date | `Date` |
 | `12:30:00` | time | `TimeValue` |
 | `2024-01-01T12:30:00` | datetime | `Date` |
 | `null` | null | `null` |
+
+`integer` and `number` are natively distinct JS types since issue #98
+(`bigint` vs `number`) -- this closed omnist-spec ledger entry D-6 (the
+int/number kind-tag collapse), which used to make this table's `integer`
+and `number` rows both say `number`, indistinguishable by shape alone.
 
 Bare words are never strings -- `name: Ann` is a `ParseError` ("bare word
 ... is not a valid value here; strings must be quoted"); quote it:
@@ -286,23 +291,22 @@ time-literal syntax) unwrap it to plain text on write, the same as
 
 ## Numeric edge cases
 
-- **Signed zero.** Both `-0` (integer literal) and `-0.0` (float
-  literal) preserve the sign on read: `Object.is(target, -0)` is `true`
-  for `readOml("a: -0")` and for `readOml("a: -0.0")` alike, since JS
-  has only one underlying numeric type and both branches route through
-  `Number(text)`, where `Number("-0") === -0`. There is no
-  int-vs-float distinction here. That sign does not survive a write,
-  though -- `writeScalar` renders a number with `String(v)`, and
-  `String(-0) === "0"` in JS, so `writeOml(readOml("a: -0.0"))` comes
-  back as `a: 0`, not `a: -0.0`. This is a real, one-directional loss
-  (read preserves the sign; write does not), unlike every other case on
-  this page.
+- **Signed zero.** `-0` (an integer literal) is `0n` on read -- `bigint`
+  has no signed zero, so `readOml("a: -0")` and `readOml("a: 0")`
+  produce the identical value. `-0.0` (a float literal) is different: it
+  preserves the sign, `Object.is(target, -0)` is `true` for
+  `readOml("a: -0.0")`, since it stays a plain JS `number` and routes
+  through `Number(text)`, where `Number("-0.0") === -0`.
 - **Scientific notation.** `1e10`, `1.5e-3`, and similar exponent forms
-  are all valid `NUMBER` literals and parse to the expected finite
-  `number`; `writeOml` renders a value like `1e10` back out via JS's
-  default `String(number)` formatting (`a: 10000000000` for that
-  example, not exponent form -- OML's grammar accepts either spelling on
-  read, but the writer always emits whatever `String()` produces).
+  are all valid `NUMBER` literals (`number`-kinded, never `integer`) and
+  parse to the expected finite `number`. `writeOml` renders a
+  `number`-kinded value via `String(v)`, then guarantees the result
+  always contains a `.` or an exponent marker -- appending `.0` when
+  `String()`'s own output wouldn't otherwise have one (e.g. `1e10`
+  writes as `a: 10000000000.0`, not bare `a: 10000000000`). Since issue
+  #98, a bare digit-only token parses back as an `integer` (`bigint`), a
+  different kind -- without this guarantee, a whole-valued `number`
+  would silently change kind on the next read.
 - **Overflow and underflow are defined, not errors.** A float literal
   that overflows float64 magnitude (`1e400`) reads as `Infinity`, and one
   that underflows (`1e-400`) reads as `0` -- both are IEEE-754-defined

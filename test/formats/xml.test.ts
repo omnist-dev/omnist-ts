@@ -209,7 +209,7 @@ describe("readXml", () => {
       const node = readXml("<r><i>30</i><f>3.5</f><b>true</b><s>hello</s></r>", { schema: s });
       expect(node).toEqual([
         { label: "r", target: [
-          { label: "i", target: 30 },
+          { label: "i", target: 30n },
           { label: "f", target: 3.5 },
           { label: "b", target: true },
           { label: "s", target: "hello" },
@@ -316,8 +316,11 @@ describe("readXml", () => {
       const { parseSchema } = await import("../../src/osd.js");
       const sInt = parseSchema('record R { "n": integer }\nroot R');
       const sNum = parseSchema('record R { "n": number }\nroot R');
-      expect(readXml("<n>0</n>", { schema: sInt })).toEqual([{ label: "n", target: 0 }]);
-      expect(readXml("<n>-0</n>", { schema: sInt })).toEqual([{ label: "n", target: -0 }]);
+      // bigint has no signed zero (unlike `number`'s -0) -- BigInt("-0")
+      // is 0n, so both "0" and "-0" recover to the same 0n for an integer
+      // field.
+      expect(readXml("<n>0</n>", { schema: sInt })).toEqual([{ label: "n", target: 0n }]);
+      expect(readXml("<n>-0</n>", { schema: sInt })).toEqual([{ label: "n", target: 0n }]);
       expect(readXml("<n>0.5</n>", { schema: sNum })).toEqual([{ label: "n", target: 0.5 }]);
       expect(readXml("<n>-0.5</n>", { schema: sNum })).toEqual([{ label: "n", target: -0.5 }]);
       expect(readXml("<n>1e10</n>", { schema: sNum })).toEqual([{ label: "n", target: 1e10 }]);

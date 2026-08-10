@@ -99,25 +99,38 @@ U+0085 for issue #69), and `test/formats/yaml.test.ts` has two direct
 regression tests pinning down both failure modes above.
 
 
-## Known limitation: an over-large integer literal is rejected, not corrupted (issue #54)
+## Arbitrary-precision integers (issue #98)
 
-`readYaml` raises `ParseError` on a bare integer-shaped token (all digits,
-no `.`, no exponent, outside a quoted scalar or comment) with more than
-4300 digits -- the same digit cap `src/document.ts` already enforces on a
-parsed Document value (`MAX_INT_DIGITS`, matching CPython's
-`sys.get_int_max_str_digits()` default). Before this check existed, the
-underlying `yaml` package would silently round such a literal to
-`Infinity`, indistinguishable from this port's documented native `.inf`
-support -- so `writeYaml` had no way to tell "the user wrote `.inf`" apart
-from "the reader silently lost precision."
+`integer`-kinded values are backed by native `BigInt`, not `number`.
+`readYaml` runs `YAML.parse` with the `yaml` package's own `intAsBigInt:
+true` option, so a bare integer-shaped token (all digits, no `.`, no
+exponent) parses into an exact `bigint` no matter how large -- no
+tag-and-revive workaround is needed here the way `readJson`'s does,
+because the `yaml` package exposes this natively. `writeYaml` similarly
+relies on the package's native `bigint` stringification (a bare digit
+token, same as before). `number`-kinded values (float-shaped tokens) are
+unaffected and stay plain JS `number`.
 
-`.inf`/`-.inf`/`.nan` themselves are unaffected: those round-trip natively
+`.inf`/`-.inf`/`.nan` are unaffected either way: those round-trip natively
 (see this file's top comment) and are not integer literals.
 
-This mirrors `readToml`'s own precedent (see `docs/formats/toml.md` and
-issue #25): reject with a clear error rather than silently lose precision.
-Full arbitrary-precision integer support (a JS `BigInt`-shaped Document
-value) would be a much larger structural change and is out of scope here.
+`readYaml` still raises `ParseError` on a bare integer-shaped token (all
+digits, outside a quoted scalar or comment) with more than 4300 digits
+(`MAX_INT_DIGITS`, matching CPython's `sys.get_int_max_str_digits()`
+default and `src/document.ts`'s own cap). Before issue #98 this same scan
+existed to catch the underlying `yaml` package silently rounding an
+over-long literal to `Infinity` (indistinguishable from `.inf`); now that
+`intAsBigInt: true` makes the package construct an arbitrarily large
+`bigint` instead of overflowing, the scan's purpose has shifted but its
+necessity hasn't: an unbounded-digit literal is still a real
+unbounded-digit-to-string conversion risk (security, superlinear),
+whether it would have overflowed or not.
+
+`writeYaml` also forces every plain JS `number` scalar (never a `bigint`)
+to render with at least one fraction digit, even when whole (e.g. `-0`
+writes as `-0.0`, not `-0`) -- otherwise a whole-valued `number` would
+write as a bare digit token indistinguishable from an `integer`, and read
+back as the wrong kind.
 
 The digit-cap scan is a text-level heuristic, not a full YAML tokenizer:
 it skips quoted scalars and `#` comments, but does not track block-scalar

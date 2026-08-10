@@ -185,18 +185,31 @@ and unraised on both sides.
 These are design consequences of the target language, not defects. Each was
 decided deliberately and is described in the relevant module header.
 
-### 1. `integer` and `number` collapse onto one `number` (issue #3)
+### 1. `integer` and `number` are natively distinct, matching Python -- **fixed** (issues #3, #98)
 
-JS has a single numeric type, so the Document layer cannot hold the
-`int`/`float` distinction Python does. Kind *tracking* for `integer` versus
-`number` lives entirely in the Schema layer.
+This used to be a real, documented divergence: JS's single numeric type
+meant the Document layer could not hold the `int`/`float` distinction
+Python does, so `integer` and `number` collapsed onto one JS `number`
+(this section originally described that collapse -- see git history for
+the pre-#98 writeup). Since issue #98, `integer`-kinded values are
+backed by native `bigint`; `number`-kinded values stay plain JS `number`.
+This is a real, native distinction (`typeof v === "bigint"` vs
+`"number"`), not a shape guess, and it closed omnist-spec ledger entry
+D-6 (the int/number kind-tag collapse) as a direct consequence.
 
-Consequences, all verified: `matchesKind(1.0, "integer")` is `true` here and
-`False` in Python; `valueKind(1.0)` is `"integer"` here and `"number"`
-there; `readJson` of `1.0` yields the integer `1`; `materialize` of a
-`number` field returns the value unchanged rather than upgrading it to a
-float; and writers emit `1` where Python emits `1.0`. (Verified via
-`test/python-parity.test.ts`, documented scalar collapses.)
+Consequences, all verified: `matchesKind(1.0, "integer")` is `false` here,
+matching Python's `False`; `valueKind(1.0)` is `"number"` here, matching
+Python's `"number"`; `readJson` of the integer-shaped literal `1` yields
+the `bigint` `1n`, exact for any magnitude. One deliberate,
+non-collapse-related divergence remains, by design rather than by
+limitation: `materialize` of a `number`-typed field always normalizes to
+a host float (spec Sec7.2), even from an integer-shaped source literal
+-- e.g. materializing the OML text `n: 3` against a `"n": number` field
+produces the plain JS number `3`, not `3n` -- while `validate` lets an
+`integer` value satisfy a `number`-typed field directly with no
+conversion at all (the one sanctioned scalar-subtyping relation, spec
+Sec6.3). Both directions are confirmed matching Python's own int -> float
+upgrade behavior. (Verified via `test/python-parity.test.ts`.)
 
 ### 2. `date` and `datetime` collapse onto one `Date`, with kind tagging (issue #14)
 
@@ -443,29 +456,38 @@ readXml("<n>0</n>", { schema: s }); // -> 0 -- bare zero is still valid
 ```
 <!-- verified-by: test/formats/xml.test.ts -->
 
-### G6. Integer-literal limits diverge, and disagree between codecs
+### G6. Integer-literal limits diverge, and disagree between codecs -- **fixed** (issues #54, #98)
 
-Tracked as issue [#54](https://github.com/omnist-dev/omnist-ts/issues/54).
+Tracked as issue [#54](https://github.com/omnist-dev/omnist-ts/issues/54),
+closed by issue [#98](https://github.com/omnist-dev/omnist-ts/issues/98).
 
-Three different behaviors for one class of input:
+Three different behaviors used to exist for one class of input:
 
-- `readJson` and `readYaml` accept an integer literal past the documented
-  4300-digit cap and silently yield `Infinity`, which `writeJson` then turns
-  into `null` with a `float.special` error. Python raises `ParseError`.
-- `readToml` rejects *any* integer past 2^53 outright (via `smol-toml`),
-  which Python accepts exactly.
-- So the same over-large integer is silently corrupted by two readers and
-  refused by a third.
+- `readJson` and `readYaml` accepted an integer literal past the
+  documented 4300-digit cap and silently yielded `Infinity`, which
+  `writeJson` then turned into `null` with a `float.special` error.
+  Python raised `ParseError`.
+- `readToml` rejected *any* integer past 2^53 outright (via `smol-toml`),
+  which Python accepted exactly.
+- So the same over-large integer was silently corrupted by two readers
+  and refused by a third.
 
-`checkIntDigits` in `src/document.ts` carries a comment calling the cap
-dormant for JS numbers. That is true of the *model* layer but leaves the
-reader layer with no guard at all.
+All three now match Python. `integer`-kinded values are `bigint`-backed
+throughout (`src/document.ts`'s `Scalar` type and `checkIntDigits`);
+`readJson`/`readToml`/`readYaml` all parse an integer literal of any
+magnitude exactly via each codec's own native or near-native bigint
+support (a tag-and-revive pre-pass for JSON, whose `JSON.parse` has no
+native option; `integersAsBigInt`/`intAsBigInt` options for
+`smol-toml`/`yaml`, which do). The 4300-digit `MAX_INT_DIGITS` cap still
+applies everywhere, unchanged -- it is a deliberate security guard
+against unbounded-digit int-to-str conversion, not a representational
+limit, and both ports enforce it identically.
 
 ```ts
-readJson('{"a": ' + "1".repeat(4301) + "}");
-// [{label:"a", target:Infinity}]   (Python: raises ParseError)
+readJson('{"a": 9999999999999999999999999}');
+// [{label:"a", target: 9999999999999999999999999n}]  (Python: same value)
 readToml("a = 9007199254740993");
-// throws ParseError                (Python: reads it exactly)
+// [{label:"a", target: 9007199254740993n}]            (Python: same value)
 ```
 <!-- verified-by: test/python-parity.test.ts -->
 

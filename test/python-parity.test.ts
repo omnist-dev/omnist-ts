@@ -150,8 +150,15 @@ describe("fixed: integer-literal limits (issue #54)", () => {
     expect(() => readYaml("a: " + big)).toThrow(ParseError);
   });
 
-  it("TOML instead rejects any integer past 2^53, which Python accepts (issue #25, accepted structural limitation)", () => {
-    expect(() => readToml("a = 9007199254740993")).toThrow(ParseError);
+  it("TOML now accepts an integer past 2^53 exactly, matching Python (issue #98 -- was previously an accepted structural limitation, issue #25)", () => {
+    // Was: readToml("a = 9007199254740993") threw ParseError, since
+    // TOML integers went through JS `number` (float64) and smol-toml
+    // rejected anything past the safe-integer range outright. Since
+    // issue #98, TOML integers are bigint-backed (smol-toml's own
+    // integersAsBigInt mode), so this now round-trips exactly, the
+    // same as Python -- no divergence left to document.
+    const node = readToml("a = 9007199254740993");
+    expect(node).toEqual([{ label: "a", target: 9007199254740993n }]);
   });
 });
 
@@ -163,6 +170,24 @@ describe("divergence: reader strictness JSON/YAML inherit from their parsers", (
 
   it("rejects a duplicate YAML mapping key (Python: last one wins)", () => {
     expect(() => readYaml("{a: 1, a: 2}")).toThrow(ParseError);
+  });
+});
+
+describe("fixed: integer/number kind distinction now matches Python (issues #3, #14, #98)", () => {
+  it("matches_kind/value_kind tell integer and number apart natively, no shape-guessing", () => {
+    // Was: matchesKind(1.0, "integer") was true and valueKind(1.0) was
+    // "integer" (JS has one `number` type, so a whole-valued float was
+    // indistinguishable from an integer -- omnist-spec ledger D-6).
+    // Python: matches_kind(1.0, "integer") is False; value_kind(1.0) is
+    // "number". Since issue #98, integer-kinded values are bigint-backed,
+    // so the same holds here now: a plain `number`, even a whole one,
+    // never satisfies "integer".
+    expect(matchesKind(1.0, "integer")).toBe(false);
+    expect(valueKind(1.0)).toBe("number");
+    expect(matchesKind(1n, "integer")).toBe(true);
+    expect(valueKind(1n)).toBe("integer");
+    expect(readJson('{"a": 1.0}')).toEqual([{ label: "a", target: 1.0 }]);
+    expect(readJson('{"a": 1}')).toEqual([{ label: "a", target: 1n }]);
   });
 });
 
@@ -185,12 +210,6 @@ describe("fixed: deterministic-output ordering now matches Python (issue #56)", 
 });
 
 describe("divergence: documented scalar collapses (issues #3, #14)", () => {
-  it("integer/number collapse onto one JS number", () => {
-    // Python: matches_kind(1.0, "integer") is False; value_kind(1.0) is "number".
-    expect(matchesKind(1.0, "integer")).toBe(true);
-    expect(valueKind(1.0)).toBe("integer");
-    expect(readJson('{"a": 1.0}')).toEqual([{ label: "a", target: 1 }]);
-  });
 
   it("a tagged Date is kind-exclusive, an untagged one is not", () => {
     const tagged = parseDateToken("2024-01-01") as Date;

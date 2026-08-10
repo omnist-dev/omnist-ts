@@ -230,8 +230,8 @@ function checkTomlIntegerDigits(text: string): void {
           "invalid TOML: integer literal has more than " +
             String(MAX_INT_DIGITS) +
             " digits, exceeding the digit limit (security: unbounded-digit " +
-            "int-to-str conversion is superlinear); matches this port\'s " +
-            "digit cap elsewhere (src/document.ts\'s MAX_INT_DIGITS)",
+            "int-to-str conversion is superlinear); matches this port's " +
+            "digit cap elsewhere (src/document.ts's MAX_INT_DIGITS)",
         );
       }
       i = j;
@@ -362,7 +362,17 @@ export function writeToml(node: Node, opts: WriteTomlOptions = {}): string {
     throw new WriteError("TOML needs a top-level table (the root must be an object)");
   }
   const tomlValue = toTomlValue(grp, 0) as Record<string, unknown>;
-  const text = stringifyToml(tomlValue as never);
+  // numbersAsFloat forces every plain JS `number` leaf (never a bigint
+  // -- those are genuinely integer-kinded and stringify bare) to render
+  // with an explicit decimal point, even when whole (e.g. -0 -> "-0.0",
+  // not "0"). Without this, a whole-valued number-kind leaf would write
+  // as a bare digit token indistinguishable from an integer, and since
+  // issue #98 that reads back as a genuinely different kind (bigint) --
+  // smol-toml has no per-value formatting hook, so this has to be a
+  // stringify-wide option; it is safe wide because every `number`
+  // reaching this point is already number-kind by construction (checked
+  // live: a bigint leaf is unaffected by this option).
+  const text = stringifyToml(tomlValue as never, { numbersAsFloat: true });
   return finishWrite(text, rep, report === undefined ? { strict } : { strict, report });
 }
 

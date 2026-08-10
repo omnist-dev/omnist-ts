@@ -24,14 +24,14 @@ function valid(text: string, data: unknown) {
 describe("parseSchema: validation-relevant parsing", () => {
   it("parses scalar kinds", () => {
     const s = 'record R { "n": integer, "s": string }\nroot R';
-    expect(valid(s, { n: 1, s: "x" }).ok).toBe(true);
+    expect(valid(s, { n: 1n, s: "x" }).ok).toBe(true);
     expect(valid(s, { n: "x", s: "x" }).ok).toBe(false);
   });
 
   it("parses required and optional fields via cardinality", () => {
     const s = 'record R { "name": string, "age" [0,1]: integer }\nroot R';
     expect(valid(s, { name: "a" }).ok).toBe(true);
-    expect(valid(s, { name: "a", age: 3 }).ok).toBe(true);
+    expect(valid(s, { name: "a", age: 3n }).ok).toBe(true);
     expect(valid(s, { age: 3 }).ok).toBe(false);
   });
 
@@ -44,17 +44,17 @@ describe("parseSchema: validation-relevant parsing", () => {
 
   it("array cardinality shorthand [0,]", () => {
     const s = 'record R { "xs" [0,]: integer }\nroot R';
-    expect(valid(s, { xs: [1, 2, 3] }).ok).toBe(true);
+    expect(valid(s, { xs: [1n, 2n, 3n] }).ok).toBe(true);
     expect(valid(s, {}).ok).toBe(true);
     const s2 = 'record R { "xs" [1,]: integer }\nroot R';
     expect(valid(s2, {}).ok).toBe(false);
-    expect(valid(s2, { xs: [1] }).ok).toBe(true);
+    expect(valid(s2, { xs: [1n] }).ok).toBe(true);
   });
 
   it("exact cardinality shorthand [n]", () => {
     const s3 = 'record R { "xs" [2]: integer }\nroot R';
-    expect(valid(s3, { xs: [1, 2] }).ok).toBe(true);
-    expect(valid(s3, { xs: [1] }).ok).toBe(false);
+    expect(valid(s3, { xs: [1n, 2n] }).ok).toBe(true);
+    expect(valid(s3, { xs: [1n] }).ok).toBe(false);
   });
 
   it("nullable scalar via string?", () => {
@@ -73,8 +73,8 @@ describe("parseSchema: validation-relevant parsing", () => {
 
   it("Ref and recursion", () => {
     const s = 'record Node { "value": integer, "kids" [0,]: Node }\nroot Node';
-    expect(valid(s, { value: 1, kids: [{ value: 2, kids: [] }] }).ok).toBe(true);
-    expect(valid(s, { value: 1, kids: [{ value: "x", kids: [] }] }).ok).toBe(false);
+    expect(valid(s, { value: 1n, kids: [{ value: 2n, kids: [] }] }).ok).toBe(true);
+    expect(valid(s, { value: 1n, kids: [{ value: "x", kids: [] }] }).ok).toBe(false);
   });
 
   it("'?' on a Ref is a SchemaError", () => {
@@ -333,10 +333,10 @@ root Service`;
     const s = parseSchema(text);
     const data = {
       host: "api.internal",
-      port: 8443,
+      port: 8443n,
       databases: [
-        { type: "prod", server: "db1.internal.example.com", port: 5432 },
-        { type: "test", server: "db2.internal.example.com", port: 5433 },
+        { type: "prod", server: "db1.internal.example.com", port: 5432n },
+        { type: "test", server: "db2.internal.example.com", port: 5433n },
       ],
       tags: ["prod", "us-east"],
     };

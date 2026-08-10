@@ -69,22 +69,40 @@ strict mode `finishWrite` sees a non-empty report and throws
 severity (`strict` ignores severity, unlike the default lenient/error
 split elsewhere -- see `docs/formats/overview.md` and `src/report.ts`).
 
-## Known limitation: an over-large integer literal is rejected, not corrupted (issue #54)
+## Arbitrary-precision integers (issue #98)
 
-`readJson` raises `ParseError` on an integer literal (no `.`, no exponent)
-with more than 4300 digits -- the same digit cap `src/document.ts` already
-enforces on a parsed Document value (`MAX_INT_DIGITS`, matching CPython's
-`sys.get_int_max_str_digits()` default). Before this check existed,
-`JSON.parse` would silently round such a literal to `Infinity`, and
-`writeJson` would then silently turn that `Infinity` into `null` -- data
-loss with no error and no adjustment recorded.
+`integer`-kinded values are backed by native `BigInt`, not `number` --
+`readJson` parses any integer-shaped JSON literal (no `.`, no exponent)
+into an exact `bigint`, no matter how large, and `writeJson` serializes a
+`bigint` leaf back to the same digit text. `1e400`-magnitude precision
+loss is a thing of the past for genuinely integer-shaped input; `number`-
+kinded values (anything with a `.` or exponent) are unaffected and stay
+plain JS `number`, float64 semantics unchanged.
+
+Mechanically: native `JSON.parse` always rounds an integer literal to
+float64 before any reviver ever sees it, so `readJson` never hands the
+raw text to `JSON.parse` directly for an integer-shaped token. It first
+rewrites every such token into a tagged JSON string (`tagIntegerLiterals`),
+runs `JSON.parse` with a reviver that converts the tagged strings back
+into `BigInt` (`bigintReviver`), and only then hands the result to
+`buildNode`. `tools/conformance/vectorRunner.ts` reuses the same two
+functions to load the conformance-vector JSON files themselves, which can
+also contain large integer literals.
+
+`readJson` still raises `ParseError` on an integer literal with more than
+4300 digits (`MAX_INT_DIGITS`, matching CPython's
+`sys.get_int_max_str_digits()` default and `src/document.ts`'s own cap) --
+that limit is a deliberate security guard against unbounded-digit
+int-to-str conversion (superlinear), not a representational limit, and
+stays in place.
 
 A float literal that overflows float64 to `Infinity` (e.g. `1e400`) is
 *not* rejected: Python's own `json` module produces `inf` for the same
 input, so treating that as an error would be a new mismatch, not a fix.
 Only an integer-shaped literal past the digit cap raises.
 
-This mirrors `readToml`'s own precedent (see `docs/formats/toml.md` and
-issue #25): reject with a clear error rather than silently lose precision.
-Full arbitrary-precision integer support (a JS `BigInt`-shaped Document
-value) would be a much larger structural change and is out of scope here.
+An integer value satisfies a `number`-typed schema field directly with no
+conversion (the one sanctioned scalar-subtyping relation, spec Sec6.3);
+`materialize`, by contrast, always normalizes a `number`-typed field to a
+host float even from an integer-shaped source literal (spec Sec7.2) --
+see `docs/python-parity.md` for the worked example.

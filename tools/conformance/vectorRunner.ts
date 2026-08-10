@@ -28,35 +28,21 @@
  * always compares in code-agnostic mode: `ok` plus the *set* of `path`s,
  * never `code`. Message text is never compared either way (rule 1).
  *
- * **2. D-6 (integer/number kind collapse) skip logic.** omnist-spec's
- * ledger entry D-6: omnist-ts's `Document` model has one JS numeric type,
- * so a `Scalar` carries no kind tag distinguishing `integer` from `number`
- * -- `matchesKind`/`valueKind` (`src/schema.ts`) derive the kind from
- * `Number.isInteger(v)`, a shape heuristic. Grepping
- * `vendor/omnist-spec/test-suite/**\/*.json` for `"kind": "integer"` /
- * `"kind": "number"` *inside `input.document`* (schema-side kind
- * declarations are unaffected -- a schema saying a field is `integer` is
- * fine either way) turned up exactly one vector where the collapse changes
- * the actual outcome:
- * `validate/scalar-kinds/number-does-not-satisfy-integer-even-when-whole`
- * (a `number`-kind `3.0` validated against an `integer` field -- the vector
- * expects `validate.type-mismatch` because validate checks *kind*, never
- * value; omnist-ts's `matchesKind(3, "integer")` is `true` since `3` is a
- * whole JS number, so validation would incorrectly pass). Two other
- * `kind: "number"`-with-a-whole-value vectors were checked and are *not*
- * actually D-6-affected: `materialize/upgrades/whole-number-to-integer-is-
- * value-exact` (`1.0` upgraded to `integer`) expects `ok: true` either way
- * -- omnist-ts's kind-collapse makes the value already look like an
- * `integer`, so the upgrade (a no-op here) still produces the right
- * document, no divergence in outcome. `materialize/rejections/non-whole-
- * number-does-not-upgrade-to-integer` (`1.5`) isn't whole, so
- * `Number.isInteger` correctly says "not integer" regardless. The D-6 skip
- * logic below is therefore built generically (any `validate`/`materialize`
- * vector whose `input.document` contains a `number`-kind scalar holding a
- * mathematically whole value, where `expect.ok` is `false`), not hardcoded
- * to the one vector name, so it also catches any future vector shaped the
- * same way. Every such skip cites `"skip: D-6 (integer/number kind
- * collapse)"` per Sec8.5.5 and the issue's explicit citation format.
+ * **2. D-6 (integer/number kind collapse) -- CLOSED, issue #98.** Used to
+ * document a skip here: omnist-ts's `Document` model had one JS numeric
+ * type, so a `Scalar` carried no kind tag distinguishing `integer` from
+ * `number` -- `matchesKind`/`valueKind` (`src/schema.ts`) derived the kind
+ * from `Number.isInteger(v)`, a shape heuristic, and one vector
+ * (`validate/scalar-kinds/number-does-not-satisfy-integer-even-when-whole`)
+ * depended on the real distinction and had to be skipped. As of issue #98,
+ * `integer`-kinded values are represented as native `bigint` (`number`
+ * stays plain JS `number`), so `matchesKind`/`valueKind` now derive the
+ * kind from `typeof v` -- a real, native distinction, not a shape guess.
+ * That one vector runs for real now (no skip logic left in this file) and
+ * passes. See `src/schema.ts`'s `matchesKind` doc comment and the issue
+ * #98 design comment for the full mapping (including the sanctioned
+ * `integer <: number` value-level subtyping relation, Sec6.3, which is a
+ * separate, intentional rule -- not a reopening of D-6).
  *
  * **3. Runtime-configurable-limit vectors (`document-model/limits.json`).**
  * Present in this suite (6 vectors), assuming a runtime-configurable safety
@@ -107,6 +93,7 @@ import { infer, inferWithReport } from "../../src/infer.js";
 import { getFormat } from "../../src/registry.js";
 import { WriteReport } from "../../src/report.js";
 import { parseDateToken, parseDatetimeToken, TimeValue } from "../../src/temporal.js";
+import { tagIntegerLiterals, bigintReviver } from "../../src/formats/json.js";
 
 import { compareSchema } from "./referee.js";
 
@@ -122,7 +109,7 @@ interface Diagnostic {
 
 // The envelope's own types are intentionally loose (`unknown`-ish JSON) --
 // each driver narrows what it needs, mirroring Python's untyped dict access.
-type JsonValue = string | number | boolean | null | JsonObject | JsonValue[];
+type JsonValue = string | number | bigint | boolean | null | JsonObject | JsonValue[];
 interface JsonObject {
   [key: string]: JsonValue | undefined;
 }
@@ -171,8 +158,26 @@ function decodeScalar(kind: string | null, value: JsonValue): Scalar {
     case "boolean":
       return value as string | boolean;
     case "integer":
+      // Since issue #98, integer-kinded values are bigint-backed. A vector's
+      // encoded value arrives here as: a native `bigint` (an integer-shaped
+      // JSON literal, tagged and revived by the parse in iterVectors below,
+      // so precision survived JSON.parse intact), or a JSON string (the
+      // vector suite's own explicit string-encoding convention -- see the
+      // "decodes a string-encoded integer value" test).
+      if (typeof value === "bigint") return value;
+      if (typeof value === "string") return BigInt(value);
+      // A bare small-magnitude JSON number reaching here (rather than
+      // bigint) would mean the tagger in iterVectors somehow missed an
+      // integer-shaped literal -- defensive fallback, not an expected path.
+      return BigInt(value as number);
     case "number":
-      return typeof value === "string" ? Number(value) : (value as number);
+      if (typeof value === "number") return value;
+      // A number-kind field can still be encoded as an integer-shaped JSON
+      // literal (e.g. `3` for a whole-number `number` field) -- it arrives
+      // here as bigint via the same tag-and-revive path as the integer
+      // case above, so convert it back to a JS number.
+      if (typeof value === "bigint") return Number(value);
+      return Number(value as string);
     case "date": {
       const d = parseDateToken(value as string);
       if (d === null) throw new Error(`invalid date literal ${JSON.stringify(value)}`);
@@ -215,36 +220,15 @@ function errorMessage(e: unknown): string {
 }
 
 // ---------------------------------------------------------------------------
-// D-6 detection (decision 2 above) -- checked before dispatch, not discovered
-// vector-by-vector.
+// D-6 (integer/number kind collapse) is CLOSED as of issue #98: integer-
+// kinded values are now bigint-backed, so matchesKind/valueKind
+// (src/schema.ts) tell integer and number apart via native `typeof`, not
+// Number.isInteger shape-guessing. The skip logic that used to live here
+// (hasKindCollapseRisk/d6Affected, checked before dispatch in runValidate/
+// runMaterialize below) is gone -- every vector runs for real now,
+// including validate/scalar-kinds/number-does-not-satisfy-integer-even-
+// when-whole, which used to be the one vector this collapse affected.
 // ---------------------------------------------------------------------------
-
-/** `true` iff `node`'s canonical encoding contains a `number`-kind scalar
- * holding a mathematically whole value -- the one shape omnist-ts's
- * `Number.isInteger`-based `matchesKind` cannot distinguish from `integer`. */
-function hasKindCollapseRisk(node: EncodedNode): boolean {
-  if (node.scalar !== undefined) {
-    const { kind, value } = node.scalar;
-    return kind === "number" && typeof value === "number" && Number.isInteger(value);
-  }
-  return (node.edges ?? []).some(([, child]) => hasKindCollapseRisk(child));
-}
-
-function d6Affected(v: Vector): boolean {
-  /* v8 ignore start -- defensive: d6Affected is only ever called from
-   * runValidate/runMaterialize (below), whose own v.operation is always
-   * "validate"/"materialize" respectively by construction of the RUNNERS
-   * dispatch table -- this guard can't actually see any other operation
-   * through either real call site. Kept for safety against a future
-   * third caller. */
-  if (v.operation !== "validate" && v.operation !== "materialize") return false;
-  /* v8 ignore stop */
-  const doc = v.input.document as EncodedNode | undefined;
-  if (doc === undefined) return false;
-  const expectOk = v.expect.ok as boolean | undefined;
-  if (expectOk !== false) return false;
-  return hasKindCollapseRisk(doc);
-}
 
 // ---------------------------------------------------------------------------
 // Operation drivers -- one function per operation, (vector) -> Result
@@ -296,7 +280,6 @@ function runParseSchema(v: Vector): Result {
 }
 
 function runValidate(v: Vector): Result {
-  if (d6Affected(v)) return skip("D-6 (integer/number kind collapse)");
   const inp = v.input;
   const expect = v.expect;
   const schema = parseSchema(inp.schema as string);
@@ -316,7 +299,6 @@ function runValidate(v: Vector): Result {
 }
 
 function runMaterialize(v: Vector): Result {
-  if (d6Affected(v)) return skip("D-6 (integer/number kind collapse)");
   const inp = v.input;
   const expect = v.expect;
   const schema = parseSchema(inp.schema as string);
@@ -550,7 +532,16 @@ function walkJsonFiles(dir: string): string[] {
 export function iterVectors(suiteDir: string = VECTOR_SUITE_DIR): Vector[] {
   const vectors: Vector[] = [];
   for (const file of walkJsonFiles(suiteDir)) {
-    const data = JSON.parse(readFileSync(file, "utf-8")) as { vectors?: Vector[] };
+    // Vector files can themselves contain a bare large-integer JSON
+    // literal in `expect.document` (e.g. the issue #98 target vector,
+    // document-model/limits/integer-beyond-fixed-width-still-parses-
+    // under-default-limit) -- a plain JSON.parse here would silently
+    // round it to float64 before decodeScalar ever saw it, corrupting
+    // the very expectation being checked against. Reuse json.ts's
+    // tag-and-revive fix so an integer-shaped literal survives as a
+    // native bigint (see decodeScalar's "integer" case below).
+    const raw = readFileSync(file, "utf-8");
+    const data = JSON.parse(tagIntegerLiterals(raw), bigintReviver) as { vectors?: Vector[] };
     vectors.push(...(data.vectors ?? []));
   }
   return vectors;

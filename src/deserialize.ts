@@ -178,24 +178,34 @@ function materializeScalar(
       if (typeof value === "boolean") return value;
       break;
     case "integer":
-      // Since issue #98, `integer`-kinded values are represented as native
-      // `bigint` (see file-top comment and src/document.ts's file-top
-      // comment) -- a plain JS `number`, even an exact integer, no longer
-      // satisfies `integer` here; it belongs to `number` instead. This
-      // mirrors matchesKind's own bigint check, so validate/materialize
-      // can never disagree.
       if (typeof value === "bigint") return value;
+      // A number-kind literal that is a whole number upgrades to
+      // integer -- value-exact, loses nothing (spec Sec7.2: "the one
+      // direction materialize permits between integer and number
+      // leaves"). The reverse (an integer value read where `number`
+      // is declared) needs no upgrade at all: matchesKind's "number"
+      // case already accepts bigint directly (Sec6.3 subtyping), so
+      // it never reaches materializeScalar's upgrade logic in the
+      // first place -- see this file's own top comment.
+      if (typeof value === "number" && Number.isInteger(value)) return BigInt(value);
       break;
     case "number":
       if (typeof value === "number") return value;
-      // A bigint-typed (integer-shaped) literal upgrades to number the
-      // same way Python upgrades int -> float for a number-kind field
-      // (see file-top comment): value-exact as long as it round-trips
-      // through Number() without losing precision.
-      if (typeof value === "bigint") {
-        const asNumber = Number(value);
-        if (BigInt(asNumber) === value) return asNumber;
-      }
+      // A number-typed field always materializes to a host float, never
+      // a host integer, regardless of whether the source value looked
+      // whole (spec Sec7.2, confirmed live by the
+      // materialize/upgrades/integer-to-number-always-yields-a-float-
+      // representation vector) -- this is the opposite direction from
+      // matchesKind's "number" case (src/schema.ts), which lets an
+      // integer satisfy a number-typed field *without* materializing
+      // (Sec6.3 subtyping, so validate never reaches this code at all).
+      // materialize, unlike validate, always normalizes representation:
+      // an out-of-range bigint converting to a non-finite/rounded
+      // Number is accepted here the same way Python's int -> float
+      // upgrade is (float overflow to Infinity is defined behavior, not
+      // an error, elsewhere in this port -- see oml.ts's "overflow/
+      // underflow are defined, not errors" test).
+      if (typeof value === "bigint") return Number(value);
       break;
     case "date":
     case "time":
