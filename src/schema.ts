@@ -383,7 +383,7 @@ export function matchesKind(value: unknown, name: ScalarKind): boolean {
     case "boolean":
       return typeof value === "boolean";
     case "integer":
-      return typeof value === "number" && Number.isInteger(value);
+      return typeof value === "bigint";
     case "number":
       return typeof value === "number";
     case "date":
@@ -419,7 +419,8 @@ export function matchesKind(value: unknown, name: ScalarKind): boolean {
  * declared field kind to disambiguate against). */
 export function valueKind(v: unknown): ScalarKind {
   if (typeof v === "boolean") return "boolean";
-  if (typeof v === "number") return Number.isInteger(v) ? "integer" : "number";
+  if (typeof v === "bigint") return "integer";
+  if (typeof v === "number") return "number";
   if (v instanceof Date) return "datetime";
   if (v instanceof TimeValue) return "time";
   return "string";

@@ -53,7 +53,7 @@ import {
 // 1. Universe construction
 // ---------------------------------------------------------------------------
 
-const LEAVES: readonly Scalar[] = [1, "x", null];
+const LEAVES: readonly Scalar[] = [1n, "x", null];
 const LABELS: readonly string[] = ["a", "b"];
 
 // Sec.5.3a / I-22 universe guarantee (see upstream's identical comment):
@@ -79,7 +79,7 @@ const SCALAR_WITNESS_LEAVES: readonly Scalar[] = [
 // see `matchesKind` in `src/schema.ts` for how the Schema layer tells them
 // apart via `dateKind()` tagging on schema-directed parses, which this raw
 // witness construction does not go through.
-const ALL_SCALAR_KIND_LEAVES: readonly Scalar[] = [1, "x", ...SCALAR_WITNESS_LEAVES];
+const ALL_SCALAR_KIND_LEAVES: readonly Scalar[] = [1n, "x", ...SCALAR_WITNESS_LEAVES];
 
 function toDoc(node: Node): Doc {
   return new Doc(node);
@@ -362,7 +362,7 @@ function isSubset<T>(a: ReadonlySet<T>, b: ReadonlySet<T>): boolean {
 
 const MINIMAL_LEAF: Record<string, Scalar> = {
   string: "x",
-  integer: 1,
+  integer: 1n,
   number: 1.5,
   boolean: true,
   date: new Date("2000-01-01T00:00:00.000Z"),

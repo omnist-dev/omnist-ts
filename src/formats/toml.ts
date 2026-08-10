@@ -187,10 +187,65 @@ export interface ReadTomlOptions {
  * issue #25). Rejecting with a clear ParseError, rather than silently
  * losing precision, matches this port's numeric model everywhere else.
  */
+// Matches src/document.ts's own MAX_INT_DIGITS / src/formats/json.ts's and
+// yaml.ts's own local copies of the same guard constant (see json.ts's
+// comment for this convention's precedent). Needed here since issue #98:
+// smol-toml is now called with { integersAsBigInt: true } (see readToml
+// below), so it no longer implicitly caps an integer literal's magnitude
+// the way its old float64-only parsing did -- this text-level scan is the
+// only remaining place that can see an over-long literal's true digit
+// count before BigInt construction.
+const MAX_INT_DIGITS = 4300;
+
+function checkTomlIntegerDigits(text: string): void {
+  const n = text.length;
+  let i = 0;
+  while (i < n) {
+    const c = text.charAt(i);
+    if (c === "#") {
+      while (i < n && text.charAt(i) !== "\n") i++;
+      continue;
+    }
+    if (c === '"' || c === "'") {
+      const quote = c;
+      i++;
+      while (i < n && text.charAt(i) !== quote) {
+        if (quote === '"' && text.charAt(i) === "\\") i++;
+        i++;
+      }
+      i++;
+      continue;
+    }
+    if (c === "-" || c === "+" || (c >= "0" && c <= "9")) {
+      let j = c === "-" || c === "+" ? i + 1 : i;
+      const digitsStart = j;
+      while (j < n && ((text.charAt(j) >= "0" && text.charAt(j) <= "9") || text.charAt(j) === "_")) j++;
+      const digitsLen = j - digitsStart;
+      const next = text.charAt(j);
+      const isFloatOrDate = next === "." || next === "e" || next === "E" || next === "-" || next === ":";
+      const isWordChar = (ch: string): boolean => /[A-Za-z0-9_]/.test(ch);
+      const precededByWord = i > 0 && isWordChar(text.charAt(i - 1));
+      if (!isFloatOrDate && !precededByWord && digitsLen > MAX_INT_DIGITS) {
+        throw new ParseError(
+          "invalid TOML: integer literal has more than " +
+            String(MAX_INT_DIGITS) +
+            " digits, exceeding the digit limit (security: unbounded-digit " +
+            "int-to-str conversion is superlinear); matches this port\'s " +
+            "digit cap elsewhere (src/document.ts\'s MAX_INT_DIGITS)",
+        );
+      }
+      i = j;
+      continue;
+    }
+    i++;
+  }
+}
+
 export function readToml(text: string, opts: ReadTomlOptions = {}): Node {
+  checkTomlIntegerDigits(text);
   let parsed: unknown;
   try {
-    parsed = parseToml(text);
+    parsed = parseToml(text, { integersAsBigInt: true });
   } catch (exc) {
     // smol-toml's parse always throws a TomlError (an Error instance) on
     // malformed input, never a bare value, so the non-Error branch below
@@ -263,6 +318,7 @@ function toTomlValue(value: unknown, depth: number): unknown {
   // No native TOML time-literal syntax (issue #96): a genuinely time-kinded
   // value still writes as its plain text, same as a plain string would.
   if (value instanceof TimeValue) return value.text;
+  if (typeof value === "bigint") return value;
   if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return value;
   if (Array.isArray(value)) {
     checkWriteDepth(depth);

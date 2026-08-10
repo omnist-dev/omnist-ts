@@ -178,13 +178,24 @@ function materializeScalar(
       if (typeof value === "boolean") return value;
       break;
     case "integer":
-      // `typeof value === "number"` is false for a JS boolean, so no
-      // separate bool exclusion is needed here (see file-top comment) --
-      // covered by its own test regardless.
-      if (typeof value === "number" && Number.isInteger(value)) return value;
+      // Since issue #98, `integer`-kinded values are represented as native
+      // `bigint` (see file-top comment and src/document.ts's file-top
+      // comment) -- a plain JS `number`, even an exact integer, no longer
+      // satisfies `integer` here; it belongs to `number` instead. This
+      // mirrors matchesKind's own bigint check, so validate/materialize
+      // can never disagree.
+      if (typeof value === "bigint") return value;
       break;
     case "number":
       if (typeof value === "number") return value;
+      // A bigint-typed (integer-shaped) literal upgrades to number the
+      // same way Python upgrades int -> float for a number-kind field
+      // (see file-top comment): value-exact as long as it round-trips
+      // through Number() without losing precision.
+      if (typeof value === "bigint") {
+        const asNumber = Number(value);
+        if (BigInt(asNumber) === value) return asNumber;
+      }
       break;
     case "date":
     case "time":
@@ -196,7 +207,9 @@ function materializeScalar(
   }
   errors.push({
     path,
-    message: `${JSON.stringify(value)} cannot be read as ${s.scalarKind} (not a value-exact conversion)`,
+    message: `${
+      typeof value === "bigint" ? value.toString() : JSON.stringify(value)
+    } cannot be read as ${s.scalarKind} (not a value-exact conversion)`,
     code: "type-mismatch",
   });
   return value;

@@ -86,6 +86,91 @@ function checkJsonIntegerDigits(text: string): void {
   }
 }
 
+
+// Sentinel prefix used to round-trip an integer-shaped JSON numeral through
+// JSON.parse without losing precision (issue #98). JSON.parse always
+// rounds an integer literal to a float64 "number" before any reviver ever
+// sees it -- the reviver only gets the already-rounded *value*, never the
+// source text -- so the only way to preserve the exact digits is to
+// rewrite the literal into a JSON *string* before JSON.parse ever runs,
+// then have the reviver turn that tagged string back into a BigInt. The
+// U+0000 prefix can never collide with real JSON text (a real string
+// literal containing a NUL byte is legal JSON but vanishingly unlikely,
+// and even if one did, it would need to *also* match the exact tag below
+// to misfire -- accepted as with json.ts's other text-level scanning
+// tricks in this file, e.g. checkJsonIntegerDigits).
+const BIGINT_TAG = String.fromCharCode(0) + "omnist-bigint" + String.fromCharCode(0);
+
+/**
+ * Rewrite every integer-shaped numeral in raw JSON text (outside string
+ * literals) into a tagged JSON string, so JSON.parse can be used for
+ * structure/syntax while integer precision survives via a post-parse
+ * step. A float-shaped numeral (has a "." or "e"/"E") is left untouched --
+ * `number`-kind values keep exactly today's float64 behavior.
+ */
+function tagIntegerLiterals(text: string): string {
+  let out = "";
+  const n = text.length;
+  let i = 0;
+  const QUOTE = String.fromCharCode(34);
+  const BACKSLASH = String.fromCharCode(92);
+  while (i < n) {
+    const c = text.charAt(i);
+    if (c === QUOTE) {
+      const start = i;
+      i++;
+      while (i < n && text.charAt(i) !== QUOTE) {
+        if (text.charAt(i) === BACKSLASH) i++;
+        i++;
+      }
+      i++;
+      out += text.slice(start, i);
+      continue;
+    }
+    if (c === "-" || (c >= "0" && c <= "9")) {
+      // Consume the *entire* JSON number literal in one pass (integer
+      // part, optional fraction, optional exponent) before deciding
+      // int-vs-float -- consuming only the leading digit run and letting
+      // the outer loop re-scan the rest (e.g. the "400" in "1e400") would
+      // treat the exponent's own digits as a second, bare integer literal
+      // and corrupt the text (confirmed live: it broke the existing
+      // "1e400 overflow" test by mis-tagging "400" mid-token).
+      const start = i;
+      if (c === "-") i++;
+      while (i < n && text.charAt(i) >= "0" && text.charAt(i) <= "9") i++;
+      let isFloat = false;
+      if (i < n && text.charAt(i) === ".") {
+        isFloat = true;
+        i++;
+        while (i < n && text.charAt(i) >= "0" && text.charAt(i) <= "9") i++;
+      }
+      if (i < n && (text.charAt(i) === "e" || text.charAt(i) === "E")) {
+        isFloat = true;
+        i++;
+        if (i < n && (text.charAt(i) === "+" || text.charAt(i) === "-")) i++;
+        while (i < n && text.charAt(i) >= "0" && text.charAt(i) <= "9") i++;
+      }
+      const numText = text.slice(start, i);
+      if (!isFloat && numText !== "-" && numText.length > 0) {
+        out += JSON.stringify(BIGINT_TAG + numText);
+      } else {
+        out += numText;
+      }
+      continue;
+    }
+    out += c;
+    i++;
+  }
+  return out;
+}
+
+function bigintReviver(_key: string, value: unknown): unknown {
+  if (typeof value === "string" && value.startsWith(BIGINT_TAG)) {
+    return BigInt(value.slice(BIGINT_TAG.length));
+  }
+  return value;
+}
+
 function checkWriteDepth(depth: number): void {
   // NOT unreachable (issue #37): writeJson takes a raw `Node`, a publicly
   // exported type -- a caller can hand-build one (or splice a subtree in
@@ -123,7 +208,7 @@ export function readJson(text: string, opts: ReadJsonOptions = {}): Node {
   checkJsonIntegerDigits(text);
   let parsed: unknown;
   try {
-    parsed = JSON.parse(text);
+    parsed = JSON.parse(tagIntegerLiterals(text), bigintReviver);
   } catch (exc) {
     // JSON.parse always throws a SyntaxError (an Error instance) on
     // malformed input, never a bare value, so the non-Error branch below is
@@ -232,6 +317,7 @@ function serialize(value: unknown, indent: number | null, level: number): string
   if (value === null || value === undefined) return "null";
   if (typeof value === "string") return JSON.stringify(value);
   if (typeof value === "boolean") return value ? "true" : "false";
+  if (typeof value === "bigint") return value.toString();
   if (typeof value === "number") {
     if (Number.isNaN(value)) return "NaN";
     if (value === Infinity) return "Infinity";

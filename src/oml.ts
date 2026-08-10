@@ -779,7 +779,7 @@ class Parser {
               "int-to-str conversion is superlinear)",
           );
         }
-        return Number(text);
+        return BigInt(text);
       }
       case "NUMDEC":
       case "NUMEXP":
@@ -1072,6 +1072,7 @@ function writeTimePart(v: Date): string {
 function writeScalar(v: Scalar): string {
   if (v === null) return "null";
   if (typeof v === "boolean") return v ? "true" : "false";
+  if (typeof v === "bigint") return v.toString();
   if (typeof v === "number") {
     if (Number.isNaN(v)) return "nan";
     if (!Number.isFinite(v)) return v < 0 ? "-inf" : "inf";

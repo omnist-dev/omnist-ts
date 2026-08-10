@@ -261,7 +261,7 @@ function xmlPretypeScalar(value: Node, s: ScalarType): Node {
   if (s.scalarKind === "boolean" && (value === "true" || value === "false")) {
     return value === "true";
   }
-  if (s.scalarKind === "integer" && INT_RE.test(value)) return Number(value);
+  if (s.scalarKind === "integer" && INT_RE.test(value)) return BigInt(value);
   if (s.scalarKind === "number" && FLOAT_RE.test(value)) return Number(value);
   return value;
 }
