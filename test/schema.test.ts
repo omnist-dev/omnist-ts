@@ -145,7 +145,7 @@ describe("Schema construction errors", () => {
 
   it("the Schema class accepts a Map directly, and defaults env to empty", () => {
     const s1 = new Schema(ref("R"), new Map([["R", record(field("a", t.integer))]]));
-    expect(s1.validate(doc({ a: 1 })).ok).toBe(true);
+    expect(s1.validate(doc({ a: 1n })).ok).toBe(true);
     // a root Ref to a record that would need an env, called with no env at
     // all, still constructs (an empty env) -- it just can never validate.
     expect(() => new Schema(ref("R"))).toThrow(/unknown type "R"/);
@@ -178,14 +178,14 @@ describe("validate: scalar kinds and cardinality", () => {
 
   it("scalar kinds are checked", () => {
     const sch = s(record(field("n", t.integer), field("string_", t.string, 1, 1)));
-    expect(sch.validate(doc({ n: 1, string_: "x" })).ok).toBe(true);
+    expect(sch.validate(doc({ n: 1n, string_: "x" })).ok).toBe(true);
     expect(sch.validate(doc({ n: "x", string_: "x" })).ok).toBe(false);
   });
 
   it("required and optional fields", () => {
     const sch = s(record(field("name", t.string), field("age", t.integer, 0, 1)));
     expect(sch.validate(doc({ name: "a" })).ok).toBe(true);
-    expect(sch.validate(doc({ name: "a", age: 3 })).ok).toBe(true);
+    expect(sch.validate(doc({ name: "a", age: 3n })).ok).toBe(true);
     expect(sch.validate(doc({ age: 3 })).ok).toBe(false); // name required
   });
 
@@ -199,16 +199,16 @@ describe("validate: scalar kinds and cardinality", () => {
 
   it("array cardinality", () => {
     const zeroPlus = s(record(field("xs", t.integer, 0, null)));
-    expect(zeroPlus.validate(doc({ xs: [1, 2, 3] })).ok).toBe(true);
+    expect(zeroPlus.validate(doc({ xs: [1n, 2n, 3n] })).ok).toBe(true);
     expect(zeroPlus.validate(doc({})).ok).toBe(true);
 
     const onePlus = s(record(field("xs", t.integer, 1, null)));
     expect(onePlus.validate(doc({})).ok).toBe(false);
-    expect(onePlus.validate(doc({ xs: [1] })).ok).toBe(true);
+    expect(onePlus.validate(doc({ xs: [1n] })).ok).toBe(true);
 
     const exactlyTwo = s(record(field("xs", t.integer, 2, 2)));
-    expect(exactlyTwo.validate(doc({ xs: [1, 2] })).ok).toBe(true);
-    expect(exactlyTwo.validate(doc({ xs: [1] })).ok).toBe(false);
+    expect(exactlyTwo.validate(doc({ xs: [1n, 2n] })).ok).toBe(true);
+    expect(exactlyTwo.validate(doc({ xs: [1n] })).ok).toBe(false);
   });
 
   it("nullable scalars accept null and their kind, reject other kinds", () => {
@@ -230,10 +230,10 @@ describe("validate: scalar kinds and cardinality", () => {
       Node: record(field("value", t.integer), field("kids", ref("Node"), 0, null)),
     });
     expect(
-      sch.validate(doc({ value: 1, kids: [{ value: 2, kids: [] }] })).ok,
+      sch.validate(doc({ value: 1n, kids: [{ value: 2n, kids: [] }] })).ok,
     ).toBe(true);
     expect(
-      sch.validate(doc({ value: 1, kids: [{ value: "x", kids: [] }] })).ok,
+      sch.validate(doc({ value: 1n, kids: [{ value: "x", kids: [] }] })).ok,
     ).toBe(false);
   });
 
@@ -282,7 +282,7 @@ describe("validate: scalar kinds and cardinality", () => {
 
   it("accepts() delegates to validate()", () => {
     const sch = s(record(field("a", t.integer)));
-    expect(sch.accepts(doc({ a: 1 }))).toBe(true);
+    expect(sch.accepts(doc({ a: 1n }))).toBe(true);
     expect(sch.accepts(doc({ a: "x" }))).toBe(false);
   });
 });
@@ -355,13 +355,13 @@ describe("matchesKind / valueKind", () => {
   });
 
   it("integer requires a whole number", () => {
-    expect(matchesKind(4, "integer")).toBe(true);
+    expect(matchesKind(4n, "integer")).toBe(true);
     expect(matchesKind(4.5, "integer")).toBe(false);
     expect(matchesKind(4.5, "number")).toBe(true);
   });
 
   it("valueKind reports the most specific kind", () => {
-    expect(valueKind(1)).toBe("integer");
+    expect(valueKind(1n)).toBe("integer");
     expect(valueKind(1.5)).toBe("number");
     expect(valueKind(true)).toBe("boolean");
     expect(valueKind("x")).toBe("string");
@@ -509,7 +509,7 @@ describe("structural equality helpers (TS has no dunder overloading)", () => {
 
   it("validationResultToString renders ok and error cases", () => {
     const sch = schema("R", { R: record(field("a", t.integer)) });
-    expect(validationResultToString(sch.validate(doc({ a: 1 })))).toBe("valid");
+    expect(validationResultToString(sch.validate(doc({ a: 1n })))).toBe("valid");
     const bad = sch.validate(doc({ a: "x" }));
     expect(validationResultToString(bad)).toMatch(/^invalid:\n {2}at \$\.a: /);
   });
@@ -518,7 +518,7 @@ describe("structural equality helpers (TS has no dunder overloading)", () => {
 describe("public-API-shaped usage (TestPublicApi's non-OSD assertions)", () => {
   it("operations are exposed as Schema methods, wired through the builder API", () => {
     const s = schema(ref("R"), { R: record(field("v", nullable(t.integer))) });
-    expect(s.validate(doc({ v: 7 })).ok).toBe(true);
+    expect(s.validate(doc({ v: 7n })).ok).toBe(true);
     expect(s.validate(doc({ v: null })).ok).toBe(true);
     expect(s.validate(doc({ v: "other" })).ok).toBe(false);
   });

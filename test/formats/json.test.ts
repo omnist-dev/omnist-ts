@@ -9,7 +9,7 @@ import { TimeValue } from "../../src/temporal.js";
 describe("readJson", () => {
   it("parses a JSON object into a Document node", () => {
     const node = readJson('{"a": 1, "b": [1, 2]}');
-    expect(node).toEqual(doc({ a: 1, b: [1, 2] }).toData());
+    expect(node).toEqual(doc({ a: 1n, b: [1n, 2n] }).toData());
   });
 
   it("raises ParseError on invalid JSON", () => {
@@ -78,7 +78,11 @@ describe("temporal and special-float handling", () => {
         { label: "y", target: 1 },
       ] },
     ];
-    expect(writeJson(node)).toBe('{"r": {"x": null, "y": 1}}');
+    // "y" is a plain JS `number` (not bigint), so it writes with a
+    // decimal point since issue #98 -- see oml.ts's writeScalar for
+    // why a bare digit token would otherwise read back as a
+    // different kind (bigint).
+    expect(writeJson(node)).toBe('{"r": {"x": null, "y": 1.0}}');
   });
 });
 
@@ -95,6 +99,9 @@ describe("schema-directed reads", () => {
   it("materializes via a schema when opts.schema is given", async () => {
     const { parseSchema } = await import("../../src/osd.js");
     const s = parseSchema("record R { \"n\": number }\nroot R");
+    // "n" is declared `number` -- materialize always normalizes to a
+    // host float (spec Sec7.2), even from JSON's own integer-shaped
+    // literal `1`.
     const node = readJson('{"n": 1}', { schema: s });
     expect(node).toEqual([{ label: "n", target: 1 }]);
   });
@@ -102,16 +109,18 @@ describe("schema-directed reads", () => {
 
 describe("writeJson indent option", () => {
   it("formats with newlines and per-level indentation, matching json.dumps(indent=N)", () => {
+    // doc({...}) builds plain JS numbers (`number`-kind, not bigint),
+    // which write with a decimal point since issue #98.
     const d = doc({ a: 1, b: { c: 2 } }).toData();
     expect(writeJson(d, { indent: 2 })).toBe(
-      '{\n  "a": 1,\n  "b": {\n    "c": 2\n  }\n}',
+      '{\n  "a": 1.0,\n  "b": {\n    "c": 2.0\n  }\n}',
     );
   });
 
   it("indents an array too", () => {
     const d = doc({ members: [1, 2] }).toData();
     expect(writeJson(d, { indent: 2 })).toBe(
-      '{\n  "members": [\n    1,\n    2\n  ]\n}',
+      '{\n  "members": [\n    1.0,\n    2.0\n  ]\n}',
     );
   });
 });
@@ -135,7 +144,7 @@ describe("unsupported scalar", () => {
     const target: Record<string, unknown> = Object.create(null) as Record<string, unknown>;
     target["x"] = 1;
     const node = [{ label: "a", target: target as unknown as null }];
-    expect(writeJson(node)).toBe('{"a": {"x": 1}}');
+    expect(writeJson(node)).toBe('{"a": {"x": 1.0}}');
   });
 
   it("NaN reached via serialize in strict mode still round-trips through the branch", () => {
@@ -296,7 +305,7 @@ describe("over-large integer literal (issue #54)", () => {
 
   it("does not reject a large-but-safe integer", () => {
     const node = readJson('{"a": 12345}');
-    expect(node).toEqual([{ label: "a", target: 12345 }]);
+    expect(node).toEqual([{ label: "a", target: 12345n }]);
   });
 });
 

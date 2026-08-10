@@ -82,7 +82,7 @@ function countNode(counter: NodeCounter, path: string): void {
 }
 
 /** A leaf value. See the file-top comment for the scalar-kind mapping. */
-export type Scalar = string | number | boolean | Date | TimeValue | null;
+export type Scalar = string | number | bigint | boolean | Date | TimeValue | null;
 
 /** A single labeled edge: `(label, target)` in the Python source's terms. */
 export interface Edge {
@@ -104,6 +104,7 @@ function isScalar(v: unknown): v is Scalar {
     v === null ||
     typeof v === "string" ||
     typeof v === "number" ||
+    typeof v === "bigint" ||
     typeof v === "boolean" ||
     v instanceof Date ||
     v instanceof TimeValue
@@ -111,15 +112,23 @@ function isScalar(v: unknown): v is Scalar {
 }
 
 function checkIntDigits(v: unknown, path: string): void {
+  if (typeof v === "bigint") {
+    const digits = (v < 0n ? -v : v).toString().length;
+    if (digits <= MAX_INT_DIGITS) return;
+    throw new DocumentError(
+      `${path}: integer has more than ${MAX_INT_DIGITS} digits, exceeding ` +
+        "the digit limit (security: unbounded-digit int-to-str conversion " +
+        "is superlinear)",
+    );
+  }
+  /* v8 ignore start -- unreachable: a plain JS `number` (float64) tops out
+   * around 1.8e308 (~309 digits), well under MAX_INT_DIGITS (4300), and
+   * since issue #98 `integer`-kinded values are represented as `bigint`
+   * (handled above), not `number` -- so this branch documents why a
+   * `number` can never trip the cap, matching Python's `_check_int_digits`
+   * structurally even though it is dormant for this type here. */
   if (typeof v !== "number" || !Number.isInteger(v)) return;
   const digits = Math.abs(v).toString().length;
-  /* v8 ignore start -- unreachable: JS's `number` is a float64, whose finite
-   * range tops out around 1.8e308 (~309 digits), well under MAX_INT_DIGITS
-   * (4300). Unlike Python (arbitrary-precision `int`), a JS number can never
-   * reach this cap, so this branch can never fire. Kept anyway (rather than
-   * deleted) so this function stays a direct structural match to Python's
-   * `_check_int_digits`, documenting *why* the guard is dormant here -- see
-   * the file-top comment's scalar-kind mapping note. */
   if (digits <= MAX_INT_DIGITS) return;
   throw new DocumentError(
     `${path}: integer has more than ${MAX_INT_DIGITS} digits, exceeding ` +

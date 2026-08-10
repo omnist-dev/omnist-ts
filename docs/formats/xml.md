@@ -76,7 +76,7 @@ import { readXml, parseSchema } from "@omnist-dev/omnist";
 const s = parseSchema('record R { "n": integer, "f": number, "ok": boolean }\nroot R');
 readXml("<r><n>30</n><f>3.5</f><ok>true</ok></r>", { schema: s });
 // [{ label: "r", target: [
-//   { label: "n", target: 30 },
+//   { label: "n", target: 30n },
 //   { label: "f", target: 3.5 },
 //   { label: "ok", target: true },
 // ] }]

@@ -383,9 +383,13 @@ export function matchesKind(value: unknown, name: ScalarKind): boolean {
     case "boolean":
       return typeof value === "boolean";
     case "integer":
-      return typeof value === "number" && Number.isInteger(value);
+      return typeof value === "bigint";
     case "number":
-      return typeof value === "number";
+      // Sec6.3 scalar subtyping: an integer value satisfies a
+      // number-typed field directly, no materialize step needed --
+      // this is the one sanctioned subtyping relation, and it applies
+      // at the value level, not just between schema types.
+      return typeof value === "number" || typeof value === "bigint";
     case "date":
       if (value instanceof Date) return dateKind(value) !== "datetime";
       return isIsoDateString(value);
@@ -419,7 +423,8 @@ export function matchesKind(value: unknown, name: ScalarKind): boolean {
  * declared field kind to disambiguate against). */
 export function valueKind(v: unknown): ScalarKind {
   if (typeof v === "boolean") return "boolean";
-  if (typeof v === "number") return Number.isInteger(v) ? "integer" : "number";
+  if (typeof v === "bigint") return "integer";
+  if (typeof v === "number") return "number";
   if (v instanceof Date) return "datetime";
   if (v instanceof TimeValue) return "time";
   return "string";
@@ -544,9 +549,14 @@ export class Schema {
       return;
     }
     if (!matchesKind(v, s.scalarKind)) {
+      // JSON.stringify throws a TypeError on a bigint (issue #98's
+      // integer representation) -- format it with its own toString()
+      // instead, matching the same fallback deserialize.ts's materialize
+      // error message uses.
+      const shown = typeof v === "bigint" ? v.toString() : JSON.stringify(v);
       errors.push({
         path: d.path,
-        message: `expected ${s.scalarKind}, got ${typeName(v)} (${JSON.stringify(v)})`,
+        message: `expected ${s.scalarKind}, got ${typeName(v)} (${shown})`,
         code: "type-mismatch",
       });
     }

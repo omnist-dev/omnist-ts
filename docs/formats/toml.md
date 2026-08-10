@@ -66,18 +66,29 @@ TOML back gives a document with the edge missing, not present-and-null,
 so `strict: true` is the only way to learn synchronously, at write time,
 that a `null` leaf was in the input at all.
 
-## Known limitation: an over-large integer literal is rejected outright (issue #25/#8)
+## Arbitrary-precision integers (issue #98)
 
-`readToml` throws `ParseError` on an integer literal beyond
-±(2^53 - 1) (`Number.MAX_SAFE_INTEGER`) -- `smol-toml` itself enforces
-this at parse time ("integer value cannot be represented losslessly"),
-surfaced here unchanged. TOML's spec requires 64-bit signed integer
-support, but this port's Document model unifies Python's separate
-int/float onto a single JS `number`, which can't represent an integer in
-that range losslessly. Python's `tomllib`/`tomli_w` support the full
-64-bit (and beyond) range because Python's own `int` is arbitrary
-precision; adding that here would mean a parallel `BigInt`-shaped numeric
-pipeline throughout this port, out of scope for the TOML codec alone.
-Rejecting with a clear `ParseError`, rather than silently losing
-precision, matches this port's numeric model everywhere else (see
-`docs/formats/json.md`'s equivalent large-integer-digit-cap note).
+`integer`-kinded values are backed by native `BigInt`, not `number`.
+`readToml`/`writeToml` run `smol-toml` with its own `integersAsBigInt:
+true` / `numbersAsFloat: true` options, so a TOML integer literal of any
+magnitude parses into an exact `bigint` (TOML's own spec already requires
+64-bit signed integer support; `smol-toml`'s bigint mode goes beyond that
+to genuinely arbitrary precision, matching Python's `tomllib`), and every
+plain JS `number` leaf (`number`-kinded, never `integer`) writes with an
+explicit decimal point even when whole -- otherwise a whole-valued
+`number` would write as a bare digit token indistinguishable from an
+`integer`, and read back as the wrong kind.
+
+This closes what used to be a real, documented structural limitation
+(issue #25/#8): before issue #98, this port's Document model unified
+Python's separate `int`/`float` onto a single JS `number`, which cannot
+represent an integer beyond ±(2^53 - 1) (`Number.MAX_SAFE_INTEGER`)
+losslessly, so `readToml` threw `ParseError` on anything past that range
+even though TOML's own spec (and Python's `tomllib`/`tomli_w`) supports
+the full 64-bit range and beyond. `readToml` still enforces this port's
+own `MAX_INT_DIGITS` cap (4300 digits, matching CPython's
+`sys.get_int_max_str_digits()` default and `src/document.ts`'s own cap)
+via a text-level pre-parse scan (`checkTomlIntegerDigits`) -- that limit
+is a deliberate security guard against unbounded-digit int-to-str
+conversion, not a representational limit, and stays in place (see
+`docs/formats/json.md`'s equivalent note).

@@ -209,7 +209,7 @@ describe("readXml", () => {
       const node = readXml("<r><i>30</i><f>3.5</f><b>true</b><s>hello</s></r>", { schema: s });
       expect(node).toEqual([
         { label: "r", target: [
-          { label: "i", target: 30 },
+          { label: "i", target: 30n },
           { label: "f", target: 3.5 },
           { label: "b", target: true },
           { label: "s", target: "hello" },
@@ -316,13 +316,44 @@ describe("readXml", () => {
       const { parseSchema } = await import("../../src/osd.js");
       const sInt = parseSchema('record R { "n": integer }\nroot R');
       const sNum = parseSchema('record R { "n": number }\nroot R');
-      expect(readXml("<n>0</n>", { schema: sInt })).toEqual([{ label: "n", target: 0 }]);
-      expect(readXml("<n>-0</n>", { schema: sInt })).toEqual([{ label: "n", target: -0 }]);
+      // bigint has no signed zero (unlike `number`'s -0) -- BigInt("-0")
+      // is 0n, so both "0" and "-0" recover to the same 0n for an integer
+      // field.
+      expect(readXml("<n>0</n>", { schema: sInt })).toEqual([{ label: "n", target: 0n }]);
+      expect(readXml("<n>-0</n>", { schema: sInt })).toEqual([{ label: "n", target: 0n }]);
       expect(readXml("<n>0.5</n>", { schema: sNum })).toEqual([{ label: "n", target: 0.5 }]);
       expect(readXml("<n>-0.5</n>", { schema: sNum })).toEqual([{ label: "n", target: -0.5 }]);
       expect(readXml("<n>1e10</n>", { schema: sNum })).toEqual([{ label: "n", target: 1e10 }]);
       expect(readXml("<n>-1.5e-3</n>", { schema: sNum })).toEqual([{ label: "n", target: -1.5e-3 }]);
     });
+
+    it("rejects an over-long schema-directed integer literal (regression: BigInt() has no digit cap of its own)", async () => {
+      // PR #99 switched xmlPretypeScalar's integer path from Number(value)
+      // (which silently rounds an over-long digit string to a bounded,
+      // if imprecise, float) to BigInt(value) (which does unbounded work
+      // proportional to digit count -- the exact superlinear cost
+      // MAX_INT_DIGITS exists to cap elsewhere, per json.ts/toml.ts). XML's
+      // schema-directed path never went through document.ts's buildNode()/
+      // checkIntDigits (see this file's top comment), so nothing capped
+      // it here. Matches json.ts's/toml.ts's identical guard and error
+      // convention (issue #54's cap, applied to XML's schema-directed
+      // integer coercion for the first time).
+      const { parseSchema } = await import("../../src/osd.js");
+      const s = parseSchema('record R { "n": integer }\nroot R');
+      const text = "9".repeat(4301);
+      expect(() => readXml(`<n>${text}</n>`, { schema: s })).toThrow(ParseError);
+      expect(() => readXml(`<n>${text}</n>`, { schema: s })).toThrow(/digit/);
+    });
+
+    it("schema-directed integer digit cap boundary: exactly MAX_INT_DIGITS digits succeeds, one more fails", async () => {
+      const { parseSchema } = await import("../../src/osd.js");
+      const s = parseSchema('record R { "n": integer }\nroot R');
+      const ok = "9".repeat(4300);
+      expect(readXml(`<n>${ok}</n>`, { schema: s })).toEqual([{ label: "n", target: BigInt(ok) }]);
+      const tooBig = "9".repeat(4301);
+      expect(() => readXml(`<n>${tooBig}</n>`, { schema: s })).toThrow(ParseError);
+    });
+
   });
 
   describe("XXE / entity-expansion safety (security-critical)", () => {

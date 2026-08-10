@@ -39,8 +39,12 @@ describe("materialize: iso strings become Date / numeric exactness", () => {
     const s = parseSchema('record R { "n": number, "i": integer }\nroot R');
     const node = readOml("n: 3\ni: 4\n", { schema: s }) as Edge[];
     const values = new Map(node.map((edge) => [edge.label, edge.target]));
+    // "n" is declared `number` -- materialize always normalizes a
+    // number-typed field to a host float (spec Sec7.2), even from
+    // OML's own integer-shaped literal `3`. "i" is declared
+    // `integer`, so it stays bigint.
     expect(values.get("n")).toBe(3);
-    expect(values.get("i")).toBe(4);
+    expect(values.get("i")).toBe(4n);
   });
 
   it("inexact numeric conversion raises", () => {
@@ -73,7 +77,7 @@ describe("materialize: shape and cardinality errors", () => {
   it("unknown field raises; no schema leaves the node unchanged", () => {
     const s = parseSchema('record R { "a": integer }\nroot R');
     expect(() => readOml('a: 1\nb: "extra"\n', { schema: s })).toThrow(/unexpected field/);
-    expect(readOml("a: 1\n")).toEqual([e("a", 1)]);
+    expect(readOml("a: 1\n")).toEqual([e("a", 1n)]);
   });
 
   it("shape mismatches raise (record expected got scalar, and vice versa)", () => {

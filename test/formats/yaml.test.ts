@@ -22,7 +22,7 @@ describe("readYaml", () => {
 
   it("parses a YAML mapping into a Document node", () => {
     const node = readYaml("a: 1\nb:\n  - 1\n  - 2\n");
-    expect(node).toEqual(doc({ a: 1, b: [1, 2] }).toData());
+    expect(node).toEqual(doc({ a: 1n, b: [1n, 2n] }).toData());
   });
 
   it("raises ParseError on invalid YAML", () => {
@@ -44,9 +44,13 @@ describe("readYaml", () => {
   });
 
   it("a bare time-of-day resolves to YAML 1.1's sexagesimal integer, not a time type", () => {
+    // YAML 1.1's sexagesimal-integer resolution produces an
+    // integer-shaped value (43200), bigint-backed since issue #98 --
+    // not a `time` type (there is no bare time-of-day literal in this
+    // grammar; see the test name).
     const node = readYaml("t: 12:00:00");
     const edges = node as { label: string; target: unknown }[];
-    expect(edges[0]?.target).toBe(43200);
+    expect(edges[0]?.target).toBe(43200n);
   });
 
   it("YAML 1.1 boolean coercion turns a bare on/off/yes/no scalar into a boolean", () => {
@@ -58,7 +62,7 @@ describe("readYaml", () => {
     const node = readYaml("n: 12:00:00\n");
     const edges = node as { label: string; target: unknown }[];
     expect(edges[0]?.label).toBe("n");
-    expect(edges[0]?.target).toBe(43200);
+    expect(edges[0]?.target).toBe(43200n);
   });
 
   it("issue #89 vector 2 (the Norway problem): a bare 'on' key resolves to boolean true and MUST reject the document, not silently coerce to the label \"true\"", () => {
@@ -113,6 +117,8 @@ describe("merge-key label is a genuine YAML limitation (issue #46)", () => {
     const text = writeYaml(d);
     const back = readYaml(text);
     expect(back).not.toEqual(d);
+    // a/b here are plain JS `number` (not bigint) both before and after --
+    // this test is about the merge-key splice, not integer representation.
     expect(back).toEqual(doc({ a: 1, b: 2 }).toData());
   });
 });
@@ -178,6 +184,9 @@ describe("schema-directed reads", () => {
     const { parseSchema } = await import("../../src/osd.js");
     const s = parseSchema(String.raw`record R { "num": number }
 root R`);
+    // declared `number` -- materialize always normalizes to a host
+    // float (spec Sec7.2), even from YAML's own integer-shaped
+    // literal `1`.
     const node = readYaml("num: 1", { schema: s });
     expect(node).toEqual([{ label: "num", target: 1 }]);
   });
@@ -226,13 +235,13 @@ describe("over-large integer literal (issue #54)", () => {
 
   it("does not reject a large-but-safe integer", () => {
     const node = readYaml("a: 12345\n");
-    expect(node).toEqual([{ label: "a", target: 12345 }]);
+    expect(node).toEqual([{ label: "a", target: 12345n }]);
   });
 
   it("does not scan an over-long digit run inside a comment", () => {
     const text = "# " + "1".repeat(4301) + "\na: 1\n";
     const node = readYaml(text);
-    expect(node).toEqual([{ label: "a", target: 1 }]);
+    expect(node).toEqual([{ label: "a", target: 1n }]);
   });
 });
 

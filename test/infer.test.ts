@@ -103,7 +103,7 @@ describe("infer: errors", () => {
 
 describe("infer: allow-any fallback", () => {
   it("multi-kind scalar opens to any", () => {
-    const { schema: s, report: fb } = inferWithReport([doc({ v: 1 }), doc({ v: "x" })], {
+    const { schema: s, report: fb } = inferWithReport([doc({ v: 1n }), doc({ v: "x" })], {
       allowAny: true,
     });
     const rec = s.env.get("Root");

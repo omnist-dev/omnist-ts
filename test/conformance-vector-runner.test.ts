@@ -67,9 +67,14 @@ describeIfVendored("main() against the real vendor/omnist-spec/test-suite", () =
   it("reports the real, current pass/fail/skip tally", () => {
     const { result: exitCode, logs, errs } = withCapturedConsole(() => main());
     expect(errs).toEqual([]);
-    expect(exitCode).toBe(0); // all real failures fixed (issues #86, #88, #89) -- clean run
+    // All real failures fixed (issues #86, #88, #89, #98) -- clean run.
+    // vendor/omnist-spec bumped past v0.2.2-alpha to f93c569 (issue #98),
+    // which adds 6 new vectors (152 vs 146) and includes the fix that
+    // closed D-6, so the D-6 skip that used to sit in this tally is gone
+    // (36 skips either way -- see the skip-category test below).
+    expect(exitCode).toBe(0);
     expect(logs.at(-1)).toBe(
-      "\n110 passed, 0 failed, 36 skipped (of 146 vectors) -- " +
+      "\n116 passed, 0 failed, 36 skipped (of 152 vectors) -- " +
         "diagnostics compared in code-agnostic mode (Sec8.5.2 rule 4)",
     );
   });
@@ -79,14 +84,16 @@ describeIfVendored("main() against the real vendor/omnist-spec/test-suite", () =
     const skipLines = logs.filter((l) => l.startsWith("[SKIP]"));
     expect(skipLines.length).toBe(36);
     for (const line of skipLines) {
+      // D-6 (integer/number kind collapse) is CLOSED as of issue #98 --
+      // no vector cites it anymore (see tools/conformance/vectorRunner.ts).
       expect(line).toMatch(
-        /: (D-6 \(integer\/number kind collapse\)|not yet implemented|syntax-level \w+Error carries no structured path\/code)/,
+        /: (not yet implemented|syntax-level \w+Error carries no structured path\/code)/,
       );
     }
   });
 
-  it("iterVectors discovers all 146 real vectors", () => {
-    expect(iterVectors(REAL_SUITE_DIR).length).toBe(146);
+  it("iterVectors discovers all 152 real vectors", () => {
+    expect(iterVectors(REAL_SUITE_DIR).length).toBe(152);
   });
 });
 
@@ -351,7 +358,11 @@ describe("parse_schema", () => {
 describe("validate", () => {
   const SCHEMA = 'record R {\n    "n": string,\n}\nroot R\n';
 
-  it("skips a D-6-affected vector", () => {
+  it("a number-kind whole value does not satisfy an integer field (D-6 CLOSED, issue #98)", () => {
+    // Used to be skipped (D-6: omnist-ts could not tell 3.0 apart from
+    // an integer). Since issue #98, integer-kinded values are
+    // bigint-backed, so a plain JS `number` -- even a whole one -- never
+    // satisfies `integer`; this now runs for real and passes.
     const r = runVector(
       vec(
         "validate",
@@ -359,7 +370,7 @@ describe("validate", () => {
         { ok: false, diagnostics: [{ path: "$.n", code: "validate.type-mismatch" }] },
       ),
     );
-    expect(r).toEqual({ status: "skip", message: "D-6 (integer/number kind collapse)" });
+    expect(r).toEqual({ status: "pass", message: "ok" });
   });
 
   it("does not skip a materialize/validate vector whose expect.ok is true, even with a whole number kind", () => {
@@ -427,7 +438,17 @@ describe("validate", () => {
     expect(r.message).toContain("diagnostic paths differ");
   });
 
-  it("recurses through a childless node (no scalar, no edges) when checking D-6 risk", () => {
+  it("decodeDocument treats a childless node (no scalar, no edges) as an empty edge list", () => {
+    // Was originally written to exercise the (now-removed) D-6 skip
+    // detection's own recursion through decodeDocument; that skip logic
+    // is gone (D-6 CLOSED, issue #98), so this now runs runValidate for
+    // real. SCHEMA is a closed record with only "n" declared, so the
+    // undeclared "child" edge is itself a real diagnostic alongside the
+    // "n" type mismatch (a plain JS `number` 3 no longer satisfies
+    // `string`... wait, it never did -- the real failure here is a
+    // genuine type mismatch at $.n plus an unknown-field diagnostic at
+    // $.child, neither of which the empty expected-diagnostics set
+    // matches).
     const r = runVector(
       vec(
         "validate",
@@ -435,7 +456,26 @@ describe("validate", () => {
         { ok: false, diagnostics: [] },
       ),
     );
-    expect(r).toEqual({ status: "skip", message: "D-6 (integer/number kind collapse)" });
+    expect(r.status).toBe("fail");
+    expect(r.message).toContain("diagnostic paths differ");
+  });
+
+  // decodeScalar's "number" case has its own bigint branch (issue #98):
+  // a vector loaded from real JSON text tags every integer-shaped
+  // literal as bigint via iterVectors' tag-and-revive fix, even one
+  // sitting in a `kind: "number"` slot -- exercise that branch directly
+  // with a fabricated vector (vec() builds the Vector object in TS, not
+  // through the JSON pipeline, so a raw `3n` here stands in for what a
+  // real integer-shaped `"value": 3` JSON literal would decode to).
+  it("decodeScalar converts a bigint-encoded value to a host float for a number-kind scalar", () => {
+    const r = runVector(
+      vec(
+        "validate",
+        { schema: 'record R {\n    "n": number,\n}\nroot R\n', document: { edges: [["n", { scalar: { kind: "number", value: 3n as unknown as number } }]] } },
+        { ok: true },
+      ),
+    );
+    expect(r).toEqual({ status: "pass", message: "ok" });
   });
 });
 
@@ -446,15 +486,22 @@ describe("validate", () => {
 describe("materialize", () => {
   const SCHEMA = 'record R {\n    "n": integer,\n}\nroot R\n';
 
-  it("skips a D-6-affected vector", () => {
+  it("a whole number-kind value upgrades to integer via materialize (D-6 CLOSED, issue #98)", () => {
+    // Was skipped under the old D-6 logic; that logic assumed this
+    // upgrade should FAIL (ok:false), which was itself never actually
+    // correct per spec -- Sec7.2 explicitly permits materializing a
+    // whole number-kind literal into an integer field (confirmed by the
+    // real materialize/upgrades/whole-number-to-integer-is-value-exact
+    // vector, which expects ok:true). Since issue #98 this materializes
+    // for real and succeeds.
     const r = runVector(
       vec(
         "materialize",
         { schema: SCHEMA, document: { edges: [["n", { scalar: { kind: "number", value: 3.0 } }]] } },
-        { ok: false, diagnostics: [{ path: "$.n", code: "type-mismatch" }] },
+        { ok: true, document: { edges: [["n", { scalar: { kind: "integer", value: 3 } }]] } },
       ),
     );
-    expect(r).toEqual({ status: "skip", message: "D-6 (integer/number kind collapse)" });
+    expect(r).toEqual({ status: "pass", message: "ok" });
   });
 
   it("passes when materialized output matches expected", () => {

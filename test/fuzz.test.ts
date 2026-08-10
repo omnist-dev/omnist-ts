@@ -51,10 +51,15 @@ const strings = fc.string({ maxLength: 20 });
 // neighborhood -- see upstream's identical comment. This generator's job is
 // round-trip values, not boundary values; the boundary itself is covered by
 // targeted tests elsewhere, not widened into here.
+//
+// bigint-backed since issue #98 (Document-layer `integer` scalars are
+// native bigint, `number` stays plain JS number -- see
+// src/document.ts's file-top comment). `bigint` has no signed zero, so
+// unlike the `floats` generator below there is only one zero constant
+// here, not a `0`/`-0` pair.
 const integers = fc.oneof(
-  fc.integer({ min: -(2 ** 53) + 1, max: 2 ** 53 - 1 }),
-  fc.constant(0),
-  fc.constant(-0),
+  fc.bigInt({ min: -(2n ** 53n) + 1n, max: 2n ** 53n - 1n }),
+  fc.constant(0n),
 );
 
 // Floats: very large/small magnitudes, signed zero, nan/inf.

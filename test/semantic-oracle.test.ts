@@ -98,13 +98,19 @@ describe("semantic oracle: bounded CI run", () => {
 
 function scalarKindOf(value: unknown): string {
   if (typeof value === "boolean") return "boolean";
-  if (typeof value === "number") return Number.isInteger(value) ? "integer" : "number";
+  // Since issue #98, integer-kinded values are bigint-backed and
+  // number-kinded values stay plain JS `number` -- a real, native
+  // distinction, not the old Number.isInteger shape guess.
+  if (typeof value === "bigint") return "integer";
+  if (typeof value === "number") return "number";
   if (typeof value === "string") {
     if (/^\d{2}:\d{2}:\d{2}$/.test(value)) return "time";
     return "string";
   }
   if (value instanceof Date) return "datetime"; // see tools/semantic_oracle.ts's date/datetime note
-  throw new Error(`unclassifiable witness value: ${JSON.stringify(value)}`);
+  throw new Error(
+    `unclassifiable witness value: ${typeof value === "bigint" ? String(value) : JSON.stringify(value)}`,
+  );
 }
 
 describe("ALL_SCALAR_KIND_LEAVES", () => {

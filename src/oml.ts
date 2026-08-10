@@ -779,7 +779,7 @@ class Parser {
               "int-to-str conversion is superlinear)",
           );
         }
-        return Number(text);
+        return BigInt(text);
       }
       case "NUMDEC":
       case "NUMEXP":
@@ -1072,10 +1072,22 @@ function writeTimePart(v: Date): string {
 function writeScalar(v: Scalar): string {
   if (v === null) return "null";
   if (typeof v === "boolean") return v ? "true" : "false";
+  if (typeof v === "bigint") return v.toString();
   if (typeof v === "number") {
     if (Number.isNaN(v)) return "nan";
     if (!Number.isFinite(v)) return v < 0 ? "-inf" : "inf";
-    return String(v);
+    const text = String(v);
+    // Since issue #98, a bare digit-only token (no "." and no "e"/"E")
+    // parses back as an INTEGER token -- a real `bigint`, a different
+    // kind. A whole-valued `number` (e.g. 1e10, or a `number`-typed
+    // field materialized from a whole-number literal) must never write
+    // as bare digits, or it would silently change kind on the next
+    // read: this only ever matters for a finite value with no "." and
+    // no exponent marker in its default string form, which is exactly
+    // the whole-valued case (String() only omits both for values in
+    // that range) -- appending ".0" keeps it unambiguously NUMDEC.
+    if (!/[.eE]/.test(text)) return `${text}.0`;
+    return text;
   }
   if (v instanceof Date) return writeDate(v);
   // A genuinely time-kinded value carries its own provenance tag (issue

@@ -75,11 +75,14 @@ import type { Schema } from "../schema.js";
 const MAX_DEPTH = 200;
 
 // Matches src/document.ts's own MAX_INT_DIGITS / src/formats/json.ts's own
-// copy of the same guard constant (see json.ts's comment for why this
-// needs to be checked against the raw source text, not the parsed value:
-// by the time YAML.parse hands back a JS `number`, an over-long integer
-// literal has already silently become `Infinity`, indistinguishable from a
-// genuine `.inf` scalar -- see issue #54).
+// copy of the same guard constant. Needed as a pre-parse text-level check
+// for the same reason json.ts/toml.ts need one: since issue #98,
+// YAML.parse runs with { intAsBigInt: true } (native support in the yaml
+// package), so an over-long integer literal no longer silently overflows
+// to `Infinity` -- it would happily become an enormous, exact `bigint`
+// instead, unbounded, which is exactly the unbounded-digit int-to-str
+// superlinear-conversion risk this cap exists to prevent (see issue #54
+// and document.ts's own checkIntDigits).
 const MAX_INT_DIGITS = 4300;
 
 /**
@@ -235,7 +238,7 @@ export function readYaml(text: string, opts: ReadYamlOptions = {}): Node {
     // object always would -- see the file-top comment's second bullet
     // and issue #89's vector 2. buildNode (src/document.ts) already
     // rejects a Map with a non-string key with a DocumentError.
-    parsed = YAML.parse(text, { schema: "yaml-1.1", mapAsMap: true, customTags: customBoolTags });
+    parsed = YAML.parse(text, { schema: "yaml-1.1", mapAsMap: true, customTags: customBoolTags, intAsBigInt: true });
   } catch (exc) {
     // YAML.parse always throws a YAMLError (an Error instance) on malformed
     // input, never a bare value, so the non-Error branch below is a
@@ -261,11 +264,31 @@ export function writeYaml(node: Node, opts: WriteYamlOptions = {}): string {
   const rep = scanYaml(node);
   // No native YAML time-literal syntax (issue #96): unwrap any
   // TimeValue leaf to its plain text first, same as a plain string.
-  const text = YAML.stringify(grouped(unwrapTimeValues(node)), {
+  const doc = new YAML.Document(undefined, {
     schema: "yaml-1.1",
-    sortMapEntries: false,
     customTags: customBoolTags,
-  }) as string;
+    sortMapEntries: false,
+  });
+  doc.contents = doc.createNode(grouped(unwrapTimeValues(node))) as never;
+  // Force every plain JS `number` scalar (never a bigint -- those are
+  // genuinely integer-kinded and stringify bare via the yaml package's
+  // own native bigint support) to render with at least one fraction
+  // digit, even when whole (e.g. -0 -> "-0.0", not "-0"). Without this,
+  // a whole-valued number-kind leaf writes as a bare digit token
+  // indistinguishable from an integer, and since issue #98 that reads
+  // back as a genuinely different kind (bigint) -- see oml.ts's
+  // writeScalar and toml.ts's numbersAsFloat option for the same fix in
+  // those two writers. Scoped per-node (via minFractionDigits), not a
+  // stringify-wide option like TOML's, since the yaml package exposes
+  // this as a Scalar-node property rather than a global stringify flag.
+  YAML.visit(doc, {
+    Scalar(_key, scalarNode) {
+      if (typeof scalarNode.value === "number" && Number.isFinite(scalarNode.value)) {
+        scalarNode.minFractionDigits = 1;
+      }
+    },
+  });
+  const text = doc.toString() as string;
   return finishWrite(text, rep, report === undefined ? { strict } : { strict, report });
 }
 

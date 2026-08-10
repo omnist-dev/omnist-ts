@@ -8,7 +8,7 @@ import { TimeValue } from "../../src/temporal.js";
 describe("readToml", () => {
   it("parses a table into a Document node", () => {
     const node = readToml('a = 1\n[b]\nc = 2\n');
-    expect(node).toEqual(doc({ a: 1, b: { c: 2 } }).toData());
+    expect(node).toEqual(doc({ a: 1n, b: { c: 2n } }).toData());
   });
 
   it("raises ParseError on invalid TOML", () => {
@@ -52,6 +52,27 @@ describe("readToml", () => {
   it("raises ParseError on an oversized integer literal", () => {
     const text = "a = " + "9".repeat(4301);
     expect(() => readToml(text)).toThrow(ParseError);
+  });
+
+  // issue #98: checkTomlIntegerDigits's quoted-string skip has its own
+  // escaped-backslash branch (mirrors json.ts/yaml.ts's identical scanner
+  // convention) -- exercise it directly: a backslash-escaped backslash
+  // inside a double-quoted string, immediately followed by an over-long
+  // digit run outside any string, must still trip the cap (the escape
+  // must not desync the scanner's quote-tracking).
+  it("is not confused by an escaped backslash inside a quoted string when scanning for oversized integers", () => {
+    const text = "s = \"a\\\\b\"\n" + "a = " + "9".repeat(4301);
+    expect(() => readToml(text)).toThrow(ParseError);
+  });
+
+  // checkTomlIntegerDigits's comment-skip branch (the '#'-to-end-of-line
+  // scan) -- an over-long digit run inside a comment must not trip the
+  // cap; mirrors yaml.ts's identical "does not scan an over-long digit
+  // run inside a comment" test.
+  it("does not scan an over-long digit run inside a comment", () => {
+    const text = "# " + "9".repeat(4301) + "\na = 1\n";
+    const node = readToml(text);
+    expect(node).toEqual([{ label: "a", target: 1n }]);
   });
 });
 
@@ -175,6 +196,9 @@ describe("schema-directed reads", () => {
   it("materializes via a schema when opts.schema is given", async () => {
     const { parseSchema } = await import("../../src/osd.js");
     const s = parseSchema('record R { "n": number }\nroot R');
+    // "n" is declared `number` -- materialize always normalizes to a
+    // host float (spec Sec7.2), even from TOML's own integer-shaped
+    // literal `3`.
     const node = readToml('n = 3', { schema: s });
     expect(node).toEqual([{ label: "n", target: 3 }]);
   });
@@ -217,8 +241,12 @@ describe("toTomlValue is hardened against __proto__/constructor labels (issue #3
     // TOML has no guaranteed key order for a round-tripped table, so
     // compare the grouped (JSON-shaped) projection instead of the raw
     // edge list, which is order-sensitive.
+    // kept:2 is integer-shaped, so it's bigint-backed (issue #98) both
+    // in the original node and in the round-tripped one -- compare
+    // against readJson's own decoding instead of a plain JSON.parse,
+    // which would hand back a JS `number` for "kept" and never match.
     expect(new Doc(roundTripped).toGrouped()).toEqual(
-      JSON.parse('{"outer":{"__proto__":{"polluted":true},"kept":2}}'),
+      new Doc(readJson('{"outer":{"__proto__":{"polluted":true},"kept":2}}')).toGrouped(),
     );
   });
 
