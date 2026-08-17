@@ -234,14 +234,24 @@ odeEquals), schema validation (schema.ts's matchesKind), and every
  * other format's writer (JSON/YAML/TOML/XML have no native time syntax, so
  * they always emit plain text regardless of provenance).
  */
+/**
+ * An ISO 8601 clock time value wrapper (spec §2.2).
+ */
 export class TimeValue {
-  constructor(public readonly text: string) {}
+  /**
+   * Construct a new {@link TimeValue} wrapping an ISO 8601 clock time string.
+   */
+  constructor(
+    /** The canonical ISO 8601 clock time string (e.g. `"12:30:00"`). */
+    public readonly text: string,
+  ) {}
+
+  /** Returns the ISO 8601 clock time string. */
   toString(): string {
     return this.text;
   }
-  // So an incidental JSON.stringify() (e.g. document.ts's debug `reprNode`,
-  // which already relies on the equivalent Date.prototype.toJSON() built-in)
-  // renders a TimeValue as its plain text, not `{"text":"..."}`.
+
+  /** Returns the ISO 8601 clock time string for JSON serialization. */
   toJSON(): string {
     return this.text;
   }

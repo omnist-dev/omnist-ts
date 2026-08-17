@@ -275,6 +275,9 @@ export function parseSchema(text: string): Schema {
 // Serialize a Schema back to OSD text
 // ---------------------------------------------------------------------------
 
+/**
+ * Options for serializing a {@link Schema} to OSD schema text.
+ */
 export interface ToOsdOptions {
   /** Pretty-mode indent width in spaces (default 4). `null` renders a
    * single-line, machine-oriented form instead: record defs and the `root`

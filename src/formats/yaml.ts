@@ -222,7 +222,9 @@ function* labeledEdges(
 }
 
 /** Options accepted by readYaml. */
+/** Options for parsing YAML text into a Document node. */
 export interface ReadYamlOptions {
+  /** Optional {@link Schema} for schema-directed materialization (spec §4). */
   schema?: Schema;
 }
 
@@ -253,8 +255,11 @@ export function readYaml(text: string, opts: ReadYamlOptions = {}): Node {
 }
 
 /** Options accepted by writeYaml. */
+/** Options for serializing a Document node into YAML text. */
 export interface WriteYamlOptions {
+  /** If true, throws {@link WriteError} if any lossy adjustments are made. */
   strict?: boolean;
+  /** Optional {@link WriteReport} accumulator to collect adjustments into. */
   report?: WriteReport;
 }
 
@@ -293,6 +298,7 @@ export function writeYaml(node: Node, opts: WriteYamlOptions = {}): string {
 }
 
 /** Report what writing YAML would adjust, without producing output. */
+/** Simulates writing a node to YAML without emitting text, returning any lossy adjustments (spec §4). */
 export function checkYaml(node: Node): WriteReport {
   return scanYaml(node);
 }

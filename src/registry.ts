@@ -15,6 +15,7 @@ import type { WriteReport } from "./report.js";
 
 /** A registered format plugin: a name plus read/write/check callables. */
 export interface Format {
+  /** Registered format name identifier (e.g. `"json"`, `"yaml"`, `"oml"`). */
   readonly name: string;
   /** text -> node */
   readonly read: (text: string) => unknown;

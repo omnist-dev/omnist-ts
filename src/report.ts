@@ -35,6 +35,7 @@ export interface Adjustment {
   readonly code: string;
   /** human-readable sentence. */
   readonly message: string;
+  /** Severity level of this adjustment (`"warning"` or `"error"`). */
   readonly severity: Severity;
 }
 
@@ -47,16 +48,20 @@ export interface Adjustment {
  * getter instead -- same truth table, called out rather than implicit.
  */
 export class WriteReport {
+  /** All adjustments recorded during write operations. */
   readonly adjustments: Adjustment[] = [];
 
+  /** Record an adjustment into this report. */
   add(path: string, code: string, message: string, severity: Severity): void {
     this.adjustments.push({ path, code, message, severity });
   }
 
+  /** Filtered list of adjustments with `"warning"` severity. */
   get warnings(): Adjustment[] {
     return this.adjustments.filter((a) => a.severity === "warning");
   }
 
+  /** Filtered list of adjustments with `"error"` severity. */
   get errors(): Adjustment[] {
     return this.adjustments.filter((a) => a.severity === "error");
   }
@@ -66,15 +71,17 @@ export class WriteReport {
     return this.errors.length === 0;
   }
 
+  /** Total count of recorded adjustments. */
   get length(): number {
     return this.adjustments.length;
   }
 
+  /** Returns an iterator over all recorded adjustments. */
   [Symbol.iterator](): Iterator<Adjustment> {
     return this.adjustments[Symbol.iterator]();
   }
 
-
+  /** Formats all adjustments into a human-readable multi-line string. */
   toString(): string {
     if (this.adjustments.length === 0) return "no adjustments";
     return this.adjustments.map((a) => a.severity + ": " + a.path + ": " + a.message).join("\n");
@@ -83,7 +90,9 @@ export class WriteReport {
 
 /** Options for {@link finishWrite}: the standard strict/report handling. */
 export interface FinishWriteOptions {
+  /** If true, throws {@link WriteError} if any adjustments occurred. */
   strict?: boolean;
+  /** Optional {@link WriteReport} accumulator to collect adjustments into. */
   report?: WriteReport;
 }
 

@@ -118,10 +118,13 @@ function checkWriteDepth(depth: number): void {
   }
 }
 
+/** Options for parsing XML text into a Document node. */
 export interface ReadXmlOptions {
+  /** Optional {@link Schema} for schema-directed materialization (spec §4). */
   schema?: Schema;
 }
 
+/** Parses XML text into a Document node (spec §4). */
 export function readXml(text: string, opts: ReadXmlOptions = {}): Node {
   const valid = XMLValidator.validate(text);
   if (valid !== true) {
@@ -321,11 +324,15 @@ function local(tag: string): string {
   return i === -1 ? real : real.slice(i + 1);
 }
 
+/** Options for serializing a Document node into XML text. */
 export interface WriteXmlOptions {
+  /** If true, throws {@link WriteError} if any lossy adjustments are made (e.g. invalid XML tag sanitization). */
   strict?: boolean;
+  /** Optional {@link WriteReport} accumulator to collect adjustments into. */
   report?: WriteReport;
 }
 
+/** Serializes a Document node into XML text (spec §4). */
 export function writeXml(node: Node, opts: WriteXmlOptions = {}): string {
   const { strict = false, report } = opts;
   if (!Array.isArray(node) || node.length !== 1) {
@@ -341,6 +348,7 @@ export function writeXml(node: Node, opts: WriteXmlOptions = {}): string {
   return finishWrite(text, rep, report === undefined ? { strict } : { strict, report });
 }
 
+/** Simulates writing a node to XML without emitting text, returning any lossy adjustments (spec §4). */
 export function checkXml(node: Node): WriteReport {
   return scanXml(node);
 }

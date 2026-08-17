@@ -206,7 +206,9 @@ function* leaves(node: Node, path = "$", depth = 0): Generator<[string, Scalar]>
 }
 
 /** Options accepted by readJson. */
+/** Options for parsing JSON text into a Document node. */
 export interface ReadJsonOptions {
+  /** Optional {@link Schema} for schema-directed materialization (spec §4). */
   schema?: Schema;
 }
 
@@ -230,9 +232,13 @@ export function readJson(text: string, opts: ReadJsonOptions = {}): Node {
 }
 
 /** Options accepted by writeJson. */
+/** Options for serializing a Document node into JSON text. */
 export interface WriteJsonOptions {
+  /** Indent width in spaces (default 2), or `null` for compact single-line JSON. */
   indent?: number | null;
+  /** If true, throws {@link WriteError} if any lossy adjustments are made (e.g. NaN/Infinity -> null). */
   strict?: boolean;
+  /** Optional {@link WriteReport} accumulator to collect adjustments into. */
   report?: WriteReport;
 }
 

@@ -848,6 +848,9 @@ class Parser {
 // Public read/write
 // ---------------------------------------------------------------------------
 
+/**
+ * Options for parsing OML source text into a Document node (spec §4).
+ */
 export interface ReadOmlOptions {
   /** If given, the parsed document is run through `materialize` (issue #7,
    * `src/deserialize.ts`) against this schema: leaf values are upgraded
@@ -867,6 +870,9 @@ export function readOml(text: string, opts: ReadOmlOptions = {}): Node {
   return node;
 }
 
+/**
+ * Options for serializing a Document node into OML source text (spec §4).
+ */
 export interface WriteOmlOptions {
   /** Pretty-mode indent width in spaces (default 2). `null` renders a
    * single-line, machine-oriented form instead: edges joined by `"; "`, no

@@ -24,9 +24,15 @@ export class SchemaError extends OmnistError {}
  * A schema-conformance problem found during {@link materialize}: a path,
  * a message, and a machine-readable code. Mirrors `omnist.schema.Error`.
  */
+/**
+ * Machine-readable description of a single validation, lint, or parse issue (spec §5).
+ */
 export interface OmnistIssue {
+  /** Path inside the document or schema where the issue occurred (e.g. `"$.user.age"`). */
   readonly path: string;
+  /** Human-readable explanation of the issue. */
   readonly message: string;
+  /** Stable machine-readable error code matching `omnist-spec` §5. */
   readonly code: string;
 }
 
@@ -39,6 +45,7 @@ export interface OmnistIssue {
  * message, machine-readable code), not just the first one.
  */
 export class ParseError extends OmnistError {
+  /** Detailed list of structural or schema-conformance issues encountered. */
   readonly errors: readonly OmnistIssue[];
 
   constructor(message: string, errors: readonly OmnistIssue[] = []) {
@@ -76,6 +83,7 @@ export class DetachedNode extends DocumentError {}
 export class WriteError extends OmnistError {
   // Typed `unknown` here rather than importing WriteReport, to avoid a
   // circular import between errors.ts and report.ts; report.ts narrows it.
+  /** Attached adjustment report when written in strict mode or reporting is enabled. */
   readonly report: unknown;
 
   constructor(message: string, report: unknown = undefined) {

@@ -165,7 +165,9 @@ function convertTomlDates(value: unknown): unknown {
 }
 
 /** Options accepted by readToml. */
+/** Options for parsing TOML text into a Document node. */
 export interface ReadTomlOptions {
+  /** Optional {@link Schema} for schema-directed materialization (spec §4). */
   schema?: Schema;
 }
 
@@ -241,6 +243,7 @@ function checkTomlIntegerDigits(text: string): void {
   }
 }
 
+/** Parses TOML text into a Document node (spec §4). */
 export function readToml(text: string, opts: ReadTomlOptions = {}): Node {
   checkTomlIntegerDigits(text);
   let parsed: unknown;
@@ -347,8 +350,11 @@ function toTomlValue(value: unknown, depth: number): unknown {
 }
 
 /** Options accepted by writeToml. */
+/** Options for serializing a Document node into TOML text. */
 export interface WriteTomlOptions {
+  /** If true, throws {@link WriteError} if any lossy adjustments are made (e.g. dropping nulls). */
   strict?: boolean;
+  /** Optional {@link WriteReport} accumulator to collect adjustments into. */
   report?: WriteReport;
 }
 
