@@ -37,6 +37,7 @@ export default defineConfig({
       { text: "Quickstart", link: "/quickstart" },
       { text: "Guide", link: "/guide" },
       { text: "API", link: "/api" },
+      { text: "TypeDoc", link: "/api/index.html", target: "_self" },
       { text: "CLI", link: "/cli" },
     ],
 
