@@ -52,10 +52,15 @@ const MAX_DEPTH = 200;
  * not be given a single precise type.
  */
 export interface AnyFallback {
+  /** The record and field location opened as `any` (e.g. `"Root.payload"`). */
   readonly location: string;
+  /** Explanation of why the field fell back to `any`. */
   readonly reason: string;
 }
 
+/**
+ * Options for schema inference (spec §6.8).
+ */
 export interface InferOptions {
   /** The name given to the root record in the generated environment.
    * Defaults to `"Root"`. */
@@ -77,12 +82,22 @@ export function infer(samples: readonly unknown[], options: InferOptions = {}): 
   return inferWithReport(samples, options).schema;
 }
 
+/**
+ * Result returned by {@link inferWithReport}.
+ */
+export interface InferResult {
+  /** The drafted {@link Schema}. */
+  readonly schema: Schema;
+  /** Array of fields opened as `any` during inference. */
+  readonly report: readonly AnyFallback[];
+}
+
 /** Infer a `Schema` accepting every one of `samples`, plus a report of any
  * field opened to `any` (only ever non-empty when `allowAny` is `true`). */
 export function inferWithReport(
   samples: readonly unknown[],
   options: InferOptions = {},
-): { schema: Schema; report: AnyFallback[] } {
+): InferResult {
   const rootName = options.rootName ?? "Root";
   const allowAny = options.allowAny ?? false;
   const nodes = samples.map(sampleNode);

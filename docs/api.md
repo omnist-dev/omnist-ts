@@ -1,5 +1,7 @@
 # API reference
 
+> Looking for the complete generated TypeDoc documentation? See the [TypeDoc API Reference](/api/index.html).
+
 Every public name exported from `@omnist-dev/omnist` (see `src/index.ts`),
 grouped by area, with signatures. This mirrors the Python package's
 `__all__` -- see [layout.md](layout.md) for which `src/*.ts` module owns

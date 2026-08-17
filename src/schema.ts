@@ -41,6 +41,7 @@ import { prune as opsPrune, isEmpty as opsIsEmpty } from "./ops/prune.js";
 // Types
 // ---------------------------------------------------------------------------
 
+/** The list of all seven predefined scalar kinds (spec §2.2). */
 export const SCALAR_KINDS = [
   "string",
   "integer",
@@ -51,6 +52,7 @@ export const SCALAR_KINDS = [
   "datetime",
 ] as const;
 
+/** One of the seven predefined scalar kinds (spec §2.2). */
 export type ScalarKind = (typeof SCALAR_KINDS)[number];
 
 const SCALAR_KIND_SET: ReadonlySet<string> = new Set(SCALAR_KINDS);
@@ -63,14 +65,19 @@ export type FieldType = ScalarType | RefType | AnyFieldType;
 
 /** One of the seven predefined value kinds, optionally nullable. */
 export interface ScalarType {
+  /** Discriminated union tag: `'scalar'`. */
   readonly tag: "scalar";
+  /** The value kind of this scalar (spec §2.2). */
   readonly scalarKind: ScalarKind;
+  /** Whether this scalar type accepts `null` values (the `?` suffix in OSD). */
   readonly nullable: boolean;
 }
 
 /** A reference to a named record in a schema's environment. */
 export interface RefType {
+  /** Discriminated union tag: `'ref'`. */
   readonly tag: "ref";
+  /** Target record name in the schema environment. */
   readonly name: string;
 }
 
@@ -78,6 +85,7 @@ export interface RefType {
  * (it has no kind and no nullable flag -- null is already included) and not
  * a `RefType` (it names nothing). */
 export interface AnyFieldType {
+  /** Discriminated union tag: `'any'`. */
   readonly tag: "any";
 }
 
@@ -110,13 +118,21 @@ function makeScalarType(scalarKind: ScalarKind, nullable = false): ScalarType {
  * `t.integer`, ..., `t.any`. Each scalar is ready to use directly as a
  * field's type, e.g. `field("name", t.string)`. */
 export const t = {
+  /** Non-nullable `string` scalar type builder (spec §2.2). */
   string: makeScalarType("string"),
+  /** Non-nullable `integer` scalar type builder (spec §2.2). */
   integer: makeScalarType("integer"),
+  /** Non-nullable `number` scalar type builder (spec §2.2). */
   number: makeScalarType("number"),
+  /** Non-nullable `boolean` scalar type builder (spec §2.2). */
   boolean: makeScalarType("boolean"),
+  /** Non-nullable `date` scalar type builder (spec §2.2). */
   date: makeScalarType("date"),
+  /** Non-nullable `time` scalar type builder (spec §2.2). */
   time: makeScalarType("time"),
+  /** Non-nullable `datetime` scalar type builder (spec §2.2). */
   datetime: makeScalarType("datetime"),
+  /** The `any` field type (spec §3.1). */
   get any(): AnyFieldType {
     return ANY;
   },
@@ -128,12 +144,19 @@ export const t = {
  * `omnist.INTEGER`, etc. (see `omnist/__init__.py` `__all__`). Prefer
  * `t.string` in new code -- these exist for parity with the Python public
  * surface and for callers who already have a bare-name habit from there. */
+/** Non-nullable `string` scalar type constant (spec §2.2). */
 export const STRING: ScalarType = t.string;
+/** Non-nullable `integer` scalar type constant (spec §2.2). */
 export const INTEGER: ScalarType = t.integer;
+/** Non-nullable `number` scalar type constant (spec §2.2). */
 export const NUMBER: ScalarType = t.number;
+/** Non-nullable `boolean` scalar type constant (spec §2.2). */
 export const BOOLEAN: ScalarType = t.boolean;
+/** Non-nullable `date` scalar type constant (spec §2.2). */
 export const DATE: ScalarType = t.date;
+/** Non-nullable `time` scalar type constant (spec §2.2). */
 export const TIME: ScalarType = t.time;
+/** Non-nullable `datetime` scalar type constant (spec §2.2). */
 export const DATETIME: ScalarType = t.datetime;
 
 /** A copy of `scalar` that also accepts `null` (the `?` form). Raises if
@@ -158,9 +181,13 @@ export function ref(name: string): RefType {
 /** One named, cardinality-bound field slot of a record: `label` of `type`,
  * occurring `[min, max]` times (`max === null` is unbounded). */
 export interface Field {
+  /** The field label. */
   readonly label: string;
+  /** The field's type. */
   readonly type: FieldType;
+  /** Minimum occurrence count required. */
   readonly min: number;
+  /** Maximum occurrence count allowed (`null` indicates unbounded cardinality). */
   readonly max: number | null;
 }
 
@@ -204,6 +231,7 @@ export function cardinalityStr(f: Field): string {
 
 /** A closed set of named fields (constrained by its child labels). */
 export interface Record {
+  /** The fields of this record in declaration order. */
   readonly fields: readonly Field[];
 }
 
@@ -232,10 +260,13 @@ export function recordField(rec: Record, label: string): Field | undefined {
  * every conformance problem found (not just the first). Mirrors Python's
  * `ValidationResult`. */
 export interface ValidationResult {
+  /** `true` iff the document conformed to the schema with zero errors (spec §5). */
   readonly ok: boolean;
+  /** All validation issues collected during validation (spec §5). */
   readonly errors: readonly OmnistIssue[];
 }
 
+/** Formats a {@link ValidationResult} into human-readable multi-line text representation. */
 function validationResultToString(res: ValidationResult): string {
   if (res.ok) return "valid";
   return "invalid:\n" + res.errors.map((e) => `  at ${e.path}: ${e.message}`).join("\n");
@@ -446,7 +477,9 @@ const MAX_DEPTH = 200;
 
 /** A schema: a root reference plus an environment of named records. */
 export class Schema {
+  /** Reference to the root record in the schema environment. */
   readonly root: RefType;
+  /** Map of record names to their {@link Record} definitions. */
   readonly env: ReadonlyMap<string, Record>;
 
   constructor(root: RefType, env?: ReadonlyMap<string, Record> | Readonly<globalThis.Record<string, Record>>) {

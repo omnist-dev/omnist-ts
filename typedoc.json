@@ -1,0 +1,12 @@
+{
+  "$schema": "https://typedoc.org/schema.json",
+  "entryPoints": [
+    "src/index.ts"
+  ],
+  "tsconfig": "tsconfig.build.json",
+  "out": "docs/.vitepress/dist/api",
+  "cleanOutputDir": true,
+  "validation": {
+    "notDocumented": true
+  }
+}

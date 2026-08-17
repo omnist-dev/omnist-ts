@@ -81,16 +81,24 @@ function countNode(counter: NodeCounter, path: string): void {
   }
 }
 
-/** A leaf value. See the file-top comment for the scalar-kind mapping. */
+/**
+ * A leaf scalar value (spec §2.2): string, number, arbitrary-precision bigint, boolean, Date, TimeValue, or null.
+ */
 export type Scalar = string | number | bigint | boolean | Date | TimeValue | null;
 
-/** A single labeled edge: `(label, target)` in the Python source's terms. */
+/**
+ * A single labeled edge `(label, target)` pointing to a child Node (spec §2.1).
+ */
 export interface Edge {
+  /** The edge label. */
   readonly label: string;
+  /** Target node along this edge. */
   readonly target: Node;
 }
 
-/** A Document node: a leaf scalar, or an ordered list of labeled edges. */
+/**
+ * A Document node (spec §2.1): a leaf {@link Scalar}, or an ordered list of labeled {@link Edge}s.
+ */
 export type Node = Scalar | Edge[];
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {
@@ -232,6 +240,7 @@ function typeName(v: unknown): string {
 /** A guarded handle on a Document node (a leaf value or an edge list). */
 export class Doc {
   private _node: Node;
+  /** Path string representing the location of this cursor within the document (e.g. `"$.user.name"`). */
   readonly path: string;
   // The depth of this cursor's own node relative to the document root
   // (root is depth 0). Threaded through child()/edges() as cursors
@@ -256,10 +265,12 @@ export class Doc {
 
   // -- shape ------------------------------------------------------------
 
+  /** Returns `true` if this document cursor points to a scalar leaf node (spec §2.1). */
   get isLeaf(): boolean {
     return !Array.isArray(this._node);
   }
 
+  /** The scalar value at this leaf node (spec §2.2). Throws {@link DocumentError} if this is an internal node. */
   get value(): Scalar {
     if (Array.isArray(this._node)) {
       throw new DocumentError(`${this.path}: not a leaf; use edges()`);
@@ -267,6 +278,7 @@ export class Doc {
     return this._node;
   }
 
+  /** Returns the ordered list of `[label, Doc]` child edges (spec §2.1). Throws {@link DocumentError} if this is a leaf node. */
   edges(): Array<[string, Doc]> {
     if (!Array.isArray(this._node)) {
       throw new DocumentError(`${this.path}: a leaf has no edges`);
@@ -282,6 +294,7 @@ export class Doc {
     return out;
   }
 
+  /** Returns the deduplicated list of child edge labels in first-occurrence order. */
   labels(): string[] {
     const seen = new Set<string>();
     const out: string[] = [];
@@ -294,12 +307,14 @@ export class Doc {
     return out;
   }
 
+  /** Returns all child `Doc` cursors for edges with the specified `label`. */
   get(label: string): Doc[] {
     return this.edges()
       .filter(([lbl]) => lbl === label)
       .map(([, c]) => c);
   }
 
+  /** Returns the single child `Doc` cursor for `label`. Throws {@link DocumentError} if there are 0 or >1 matching edges. */
   getOne(label: string): Doc {
     const cs = this.get(label);
     if (cs.length !== 1) {
@@ -309,6 +324,7 @@ export class Doc {
     return cs[0]!;
   }
 
+  /** Returns the number of edges with the specified `label`. */
   count(label: string): number {
     let n = 0;
     for (const [lbl] of this.iter()) {
@@ -395,6 +411,7 @@ export class Doc {
 
   // -- export -------------------------------------------------------------
 
+  /** Exports a deep copy of the underlying {@link Node} tree. */
   toData(): Node {
     return copyNode(this._node);
   }
@@ -412,6 +429,7 @@ export class Doc {
 
   // -- dunders --------------------------------------------------------------
 
+  /** Tests structural equivalence against another {@link Doc} or plain JS value (spec §2.3). */
   equals(other: unknown): boolean {
     if (other instanceof Doc) {
       return nodeEquals(this._node, other._node);
@@ -423,6 +441,7 @@ export class Doc {
     }
   }
 
+  /** Human-readable string representation of this document node. */
   toString(): string {
     return `Doc(${this.isLeaf ? "leaf" : "node"}: ${reprNode(this._node)})`;
   }

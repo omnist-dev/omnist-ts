@@ -17,6 +17,9 @@ export default defineConfig({
   ignoreDeadLinks: [
     /\/deserialization$/,
     /\/docs\/paper$/,
+    /\/api\/index\.html$/,
+    /\/api\/index$/,
+    /\/api\//,
   ],
 
   head: [
@@ -68,6 +71,7 @@ export default defineConfig({
         text: "Reference",
         items: [
           { text: "API reference", link: "/api" },
+          { text: "TypeDoc API", link: "/api/index.html", target: "_self" },
           { text: "CLI", link: "/cli" },
         ],
       },

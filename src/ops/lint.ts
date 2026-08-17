@@ -35,9 +35,13 @@ import { satisfiableSet } from "./prune.js";
  * `location` is a record name (or `record.label` for `any-field`);
  * `message` is a human-readable, actionable description. */
 export interface LintFinding {
+  /** Stable machine-readable diagnostic code. */
   readonly code: string;
+  /** Severity level (`"warning"` or `"info"`). */
   readonly severity: "warning" | "info";
+  /** Schema location of the finding (e.g. `"User.bio"`). */
   readonly location: string;
+  /** Human-readable explanation and suggestion. */
   readonly message: string;
 }
 

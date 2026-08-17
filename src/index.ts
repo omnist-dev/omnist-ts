@@ -25,6 +25,8 @@ export {
   type Scalar,
 } from "./document.js";
 
+export { type TimeValue } from "./temporal.js";
+
 export {
   WriteReport,
   finishWrite,
@@ -82,6 +84,7 @@ export {
   inferWithReport,
   type AnyFallback,
   type InferOptions,
+  type InferResult,
 } from "./infer.js";
 
 export { materialize } from "./deserialize.js";
@@ -103,6 +106,7 @@ export {
   readOml,
   writeOml,
   checkOml,
+  type ReadOmlOptions,
   type WriteOmlOptions,
 } from "./oml.js";
 
@@ -181,4 +185,5 @@ _registerFormat({
   check: _checkYaml as (node: unknown) => _WriteReport,
 });
 
+/** The package version of `@omnist-dev/omnist`, matching `package.json`. */
 export const VERSION = "0.1.0-alpha";
