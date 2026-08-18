@@ -1,10 +1,13 @@
 # API reference
 
-> Looking for the complete generated TypeDoc documentation? See the <a href="/api/index.html" target="_self">TypeDoc API Reference</a>.
-> (Plain markdown link syntax can't carry a `target` attribute -- without it, VitePress's client-side
-> router intercepts the click and silently does nothing, since `/api/index.html` isn't one of its own
-> routes. The top nav's "TypeDoc" link works because it's configured with `target: "_self"` in
-> `.vitepress/config.ts`; this is the same fix applied inline.)
+> Looking for the complete generated TypeDoc documentation? See the <a href="/api/index.html" target="_blank" rel="noopener">TypeDoc API Reference</a> (opens in a new tab).
+> (VitePress's client-side router intercepts same-page `<a>` clicks regardless of a plain
+> `target="_self"` attribute -- confirmed empirically: the top nav's "TypeDoc" link, the sidebar's,
+> and this page's own prev/next pager link to the same URL all still get swallowed by the router
+> when clicked from within rendered page content, even though the top-nav item itself (a different
+> Vue component, not routed through content-click interception) does work with `target="_self"`.
+> `target="_blank"` reliably bypasses this everywhere, since opening a new tab is native browser
+> behavior no SPA router can intercept.)
 
 Every public name exported from `@omnist-dev/omnist` (see `src/index.ts`),
 grouped by area, with signatures. This mirrors the Python package's
