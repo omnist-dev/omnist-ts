@@ -1,6 +1,10 @@
 # API reference
 
-> Looking for the complete generated TypeDoc documentation? See the [TypeDoc API Reference](/api/index.html).
+> Looking for the complete generated TypeDoc documentation? See the <a href="/api/index.html" target="_self">TypeDoc API Reference</a>.
+> (Plain markdown link syntax can't carry a `target` attribute -- without it, VitePress's client-side
+> router intercepts the click and silently does nothing, since `/api/index.html` isn't one of its own
+> routes. The top nav's "TypeDoc" link works because it's configured with `target: "_self"` in
+> `.vitepress/config.ts`; this is the same fix applied inline.)
 
 Every public name exported from `@omnist-dev/omnist` (see `src/index.ts`),
 grouped by area, with signatures. This mirrors the Python package's
