@@ -457,6 +457,39 @@ describe("readXml", () => {
       expect(Object.prototype.hasOwnProperty.call(Object.prototype, "polluted")).toBe(false);
     });
   });
+
+  describe("hasOwnProperty/toString/valueOf-labeled elements (the second, configurable guard)", () => {
+    // fast-xml-parser 5.x's *other* prototype-pollution guard: by default,
+    // hasOwnProperty/toString/valueOf/__define{G,S}etter__/
+    // __lookup{G,S}etter__ element names are silently renamed with a "__"
+    // prefix (OptionsBuilder.js's defaultOnDangerousProperty), rather than
+    // rejected outright like __proto__/constructor/prototype above. PARSER
+    // is constructed with `onDangerousProperty: (name) => name` to disable
+    // this (see the comment on PARSER's definition for why it's safe given
+    // preserveOrder: true) -- deterministic regression test for that,
+    // since relying on the property-based fuzz test below to randomly
+    // generate one of these exact 7 strings as a label is not reliable
+    // (found once by a lucky shrink locally; a different CI seed on the
+    // same PR missed it entirely).
+    it.each(["hasOwnProperty", "toString", "valueOf"])(
+      "reads a %s-labeled element with its real label, not fast-xml-parser's __-prefixed rename",
+      (label) => {
+        const node = readXml(`<root><${label}><x>1</x></${label}></root>`);
+        expect(node).toEqual([
+          { label: "root", target: [{ label, target: [{ label: "x", target: "1" }] }] },
+        ]);
+      },
+    );
+
+    it("round-trips a valueOf element through write and read unchanged", () => {
+      const xml = "<root><valueOf><x>1</x></valueOf></root>";
+      const node = readXml(xml);
+      const written = writeXml(node);
+      expect(written).toContain("<valueOf>");
+      expect(written).not.toContain("__valueOf");
+      expect(readXml(written)).toEqual(node);
+    });
+  });
 });
 
 describe("writeXml", () => {
