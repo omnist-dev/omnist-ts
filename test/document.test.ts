@@ -16,6 +16,13 @@ describe("Doc: build and navigate", () => {
     expect(d.getOne("age").value).toBe(30);
   });
 
+  it("count()/labels() on a leaf-rooted document see zero edges (iter()'s non-array branch)", () => {
+    const d = doc(42);
+    expect(d.isLeaf).toBe(true);
+    expect(d.count("anything")).toBe(0);
+    expect(d.labels()).toEqual([]);
+  });
+
   it("repeated label is an array", () => {
     const d = doc({ member: [{ n: 1 }, { n: 2 }] });
     expect(d.count("member")).toBe(2);
@@ -184,16 +191,27 @@ describe("Doc: robustness (guards)", () => {
     return { x: Array.from({ length: k }, (_, i) => i) };
   }
 
-  it("a document at exactly MAX_NODES (1,000,000) nodes constructs successfully", () => {
-    // root object node (1) + k leaf elements under repeated label "x".
-    const value = repeatedLeafDoc(999_999);
-    expect(() => doc(value)).not.toThrow();
-  });
+  // Explicit longer timeout: genuinely just slow (constructing a
+  // million-node document), not a hang -- bumped when vitest 2 -> 4 (#103)
+  // pushed this past the 5000ms default in a full-suite run.
+  it(
+    "a document at exactly MAX_NODES (1,000,000) nodes constructs successfully",
+    () => {
+      // root object node (1) + k leaf elements under repeated label "x".
+      const value = repeatedLeafDoc(999_999);
+      expect(() => doc(value)).not.toThrow();
+    },
+    20000,
+  );
 
-  it("a document one node over MAX_NODES throws", () => {
-    const value = repeatedLeafDoc(1_000_000);
-    expect(() => doc(value)).toThrow(/node count exceeds the maximum \(1000000\)/);
-  });
+  it(
+    "a document one node over MAX_NODES throws",
+    () => {
+      const value = repeatedLeafDoc(1_000_000);
+      expect(() => doc(value)).toThrow(/node count exceeds the maximum \(1000000\)/);
+    },
+    20000,
+  );
 
   it("raises on an unsupported value type (non-object)", () => {
     expect(() => doc({ a: (): void => undefined })).toThrow(

@@ -385,12 +385,25 @@ it("xmlSafeNode classifies empty/non-empty and control chars correctly", () => {
   expect(xmlSafeNode(42)).toBe(true);
 });
 
+// fast-xml-parser 5.x rejects an element literally named __proto__,
+// constructor, or prototype outright (see the dedicated
+// "prototype-pollution hardening" tests in test/formats/xml.test.ts for
+// why) -- excluded here too, same reasoning as xmlSafeNode's control-char
+// exclusion: this test exercises the *documented* adjustments only, and a
+// hard parse rejection for a known, deliberately-tested case is not one.
+const CRITICAL_XML_LABELS = new Set(["__proto__", "constructor", "prototype"]);
+function hasCriticalLabel(node: Node): boolean {
+  if (!Array.isArray(node)) return false;
+  return node.some(({ label, target }) => CRITICAL_XML_LABELS.has(label) || hasCriticalLabel(target));
+}
+
 describe("XML round-trip fuzzing (modulo documented adjustments)", () => {
   it("only ever reports documented adjustment codes, and round-trips when unadjusted", () => {
     fc.assert(
       fc.property(labels, boundedNodes(), (label, node) => {
         fc.pre(xmlSafeNode(node));
         const rooted: Node = [{ label, target: node }];
+        fc.pre(!CRITICAL_XML_LABELS.has(label) && !hasCriticalLabel(node));
         const rep = checkXml(rooted);
         const codes = codesOf(rep);
         for (const c of codes) expect((ALLOWED_CODES.xml as ReadonlySet<string>).has(c)).toBe(true);

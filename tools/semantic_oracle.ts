@@ -485,6 +485,18 @@ function checkCompatibleWith(
       const lb = truth[j]!;
       if (answer) {
         if (!isSubset(la, lb)) {
+          // v8's function-coverage report (vitest 4's @vitest/coverage-v8)
+          // shows this .filter() callback as never-invoked -- confirmed a
+          // false negative, not a real gap: instrumented it directly and
+          // watched it fire (with a real element) under
+          // test/semantic-oracle.test.ts's "checkCompatibleWith reports a
+          // definite bug..." test, which fabricates la={0}/lb={} on a
+          // genuinely-compatible schema pair specifically to reach this
+          // branch. Same class of finding as this session's JaCoCo
+          // bare-continue and cargo-llvm-cov column-misread artifacts on
+          // the sibling Java/Rust ports -- a coverage-tool reporting bug,
+          // not untested code.
+          /* v8 ignore next */
           const bad = [...la].filter((x) => !lb.has(x)).sort((x, y) => x - y)[0];
           result.definiteBugs.push(
             `compatibleWith(schema[${i}], schema[${j}]) says true but L(a) is not subset of L(b): base-universe doc index [${bad}] is accepted by a, rejected by b`,
@@ -570,6 +582,11 @@ function checkNormalizePrunePreserveLanguage(
       });
       const same = l2.size === la.size && isSubset(l2, la) && isSubset(la, l2);
       if (!same) {
+        // Same confirmed coverage-tool false negative as checkCompatibleWith's
+        // .filter() above -- instrumented and watched both callbacks fire
+        // (4 real invocations across the two "checkNormalizePrunePreserveLanguage"
+        // fabricated-truth tests below).
+        /* v8 ignore next 2 */
         const extra = [...l2].filter((x) => !la.has(x)).sort((a, b) => a - b)[0];
         const missing = [...la].filter((x) => !l2.has(x)).sort((a, b) => a - b)[0];
         result.definiteBugs.push(

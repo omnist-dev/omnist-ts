@@ -259,19 +259,30 @@ describe("checkWriteDepth is a real, reachable guard (issue #37)", () => {
   // issue #77: MAX_NODES boundary -- a shallow-but-wide document (one label
   // repeated many times) must still be rejected once its total node count
   // exceeds the limit, even though it never comes close to MAX_DEPTH.
-  it("readJson accepts a document at exactly MAX_NODES (1,000,000) nodes", () => {
-    const k = 999_999;
-    const arr = Array.from({ length: k }, (_, i) => i);
-    const text = JSON.stringify({ x: arr });
-    expect(() => readJson(text)).not.toThrow();
-  });
+  // Explicit longer timeout: genuinely just slow (~3s to build/parse a
+  // million-node document), not a hang -- bumped when vitest 2 -> 4 (#103)
+  // pushed this past the 5000ms default in a full-suite run.
+  it(
+    "readJson accepts a document at exactly MAX_NODES (1,000,000) nodes",
+    () => {
+      const k = 999_999;
+      const arr = Array.from({ length: k }, (_, i) => i);
+      const text = JSON.stringify({ x: arr });
+      expect(() => readJson(text)).not.toThrow();
+    },
+    20000,
+  );
 
-  it("readJson rejects a document one node over MAX_NODES", () => {
-    const k = 1_000_000;
-    const arr = Array.from({ length: k }, (_, i) => i);
-    const text = JSON.stringify({ x: arr });
-    expect(() => readJson(text)).toThrow(/node count exceeds the maximum \(1000000\)/);
-  });
+  it(
+    "readJson rejects a document one node over MAX_NODES",
+    () => {
+      const k = 1_000_000;
+      const arr = Array.from({ length: k }, (_, i) => i);
+      const text = JSON.stringify({ x: arr });
+      expect(() => readJson(text)).toThrow(/node count exceeds the maximum \(1000000\)/);
+    },
+    20000,
+  );
 
   it("writeJson rejects a hand-built Node deeper than MAX_DEPTH", () => {
     // writeJson takes a raw Node (a publicly exported type), so a caller

@@ -72,6 +72,23 @@ describe("check_doc_examples", () => {
     expect(out).toContain("passed");
   });
 
+  it("ignores a trailing --base-ref with no value and falls back to the default", () => {
+    // Exercises the argv[i + 1] !== undefined branch's false side: --base-ref
+    // as the very last argument, nothing after it to consume.
+    const logs: string[] = [];
+    const orig = console.log;
+    console.log = (...args: unknown[]) => {
+      logs.push(args.join(" "));
+    };
+    try {
+      const code = main(["--base-ref"], repo);
+      expect(code).toBe(0);
+      expect(logs.join("\n")).toContain("passed");
+    } finally {
+      console.log = orig;
+    }
+  });
+
   it("fails on a new unmarked block", () => {
     appendAndCommit("\n```python\nprint(1)\n```\n", "add unmarked block");
     const { code, out } = runCheck();

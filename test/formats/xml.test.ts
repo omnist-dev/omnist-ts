@@ -149,22 +149,43 @@ describe("readXml", () => {
   // a shallow-but-wide document (many sibling elements, not deep nesting)
   // must still be rejected once its total node count exceeds the limit.
   describe("node-count guard", () => {
-    it("parses at the MAX_NODES (1,000,000) boundary", () => {
-      const k = 999_999;
-      const parts: string[] = [];
-      for (let i = 0; i < k; i++) parts.push("<x>" + String(i) + "</x>");
-      const s = "<root>" + parts.join("") + "</root>";
-      expect(() => readXml(s)).not.toThrow();
-    });
+    // Explicit longer timeout: genuinely just slow (parsing a million-node
+    // XML document), not a hang -- bumped when vitest 2 -> 4 (#103) pushed
+    // this past the 5000ms default in a full-suite run.
+    it(
+      "parses at the MAX_NODES (1,000,000) boundary",
+      () => {
+        const k = 999_999;
+        const parts: string[] = [];
+        for (let i = 0; i < k; i++) parts.push("<x>" + String(i) + "</x>");
+        const s = "<root>" + parts.join("") + "</root>";
+        expect(() => readXml(s)).not.toThrow();
+      },
+      20000,
+    );
 
-    it("raises DocumentError one node past the boundary", () => {
-      const k = 1_000_000;
-      const parts: string[] = [];
-      for (let i = 0; i < k; i++) parts.push("<x>" + String(i) + "</x>");
-      const s = "<root>" + parts.join("") + "</root>";
-      expect(() => readXml(s)).toThrow(DocumentError);
-      expect(() => readXml(s)).toThrow(/node count exceeds the maximum \(1000000\)/);
-    });
+    it(
+      "raises DocumentError one node past the boundary",
+      () => {
+        const k = 1_000_000;
+        const parts: string[] = [];
+        for (let i = 0; i < k; i++) parts.push("<x>" + String(i) + "</x>");
+        const s = "<root>" + parts.join("") + "</root>";
+        // Single parse, asserted on the one caught error -- parsing this
+        // input twice (once per expect(...).toThrow(...) call) doubled an
+        // already-slow million-node parse and timed out under coverage
+        // instrumentation even at a 20s timeout.
+        let caught: unknown;
+        try {
+          readXml(s);
+        } catch (e) {
+          caught = e;
+        }
+        expect(caught).toBeInstanceOf(DocumentError);
+        expect((caught as Error).message).toMatch(/node count exceeds the maximum \(1000000\)/);
+      },
+      20000,
+    );
   });
 
   describe("depth guard", () => {
@@ -402,57 +423,38 @@ describe("readXml", () => {
     });
   });
 
-  describe("__proto__-labeled elements (prototype-pollution hardening)", () => {
-    it("reads a __proto__ element as the real tag name, not fast-xml-parser's #__proto__ alias", () => {
-      // fast-xml-parser aliases an element literally named __proto__ to
-      // "#__proto__" internally (xmlNode.js addChild: if tagname is
-      // "__proto__" it is reassigned to "#__proto__") to protect its own
-      // object construction. readXml must undo that alias so the
-      // document's label is the real tag name the input actually used.
-      const node = readXml("<root><__proto__><polluted>true</polluted></__proto__><kept>1</kept></root>");
-      expect(node).toEqual([
-        {
-          label: "root",
-          target: [
-            { label: "__proto__", target: [{ label: "polluted", target: "true" }] },
-            { label: "kept", target: "1" },
-          ],
-        },
-      ]);
+  describe("__proto__/constructor/prototype-labeled elements (prototype-pollution hardening)", () => {
+    // fast-xml-parser 5.x (bumped from 4.x, GHSA-gh4j-gqv2-49f6) added its
+    // own unconditional, non-configurable guard (OrderedObjParser.js's
+    // sanitizeName, checked against a fixed criticalProperties list of
+    // exactly these three names) that throws before a node is ever built,
+    // superseding 4.x's behavior of silently aliasing __proto__ to an
+    // internal "#__proto__" marker and letting constructor/prototype pass
+    // through untouched. There is no parser option to opt back into the
+    // old lenient behavior -- verified directly against the installed
+    // source, same standard this file's XXE-safety comments above already
+    // hold to. readXml's existing catch-and-wrap (below) turns the
+    // library's thrown Error into a ParseError with no source change
+    // needed; the old alias-and-restore code this test group used to
+    // exercise is now unreachable and has been removed from src/formats/xml.ts.
+    it.each(["__proto__", "constructor", "prototype"])(
+      "rejects a %s-labeled element as a ParseError instead of silently allowing it through",
+      (label) => {
+        expect(() => readXml(`<root><${label}><x>1</x></${label}></root>`)).toThrow(ParseError);
+      },
+    );
+
+    it("rejects __proto__ as the document (root) element itself the same way", () => {
+      expect(() => readXml("<__proto__><a>1</a></__proto__>")).toThrow(ParseError);
     });
 
-    it("round-trips a __proto__ element through write and read unchanged", () => {
-      const xml = "<root><__proto__><polluted>true</polluted></__proto__><kept>1</kept></root>";
-      const node = readXml(xml);
-      const written = writeXml(node);
-      expect(written).not.toContain("___proto__");
-      expect(written).toContain("<__proto__>");
-      expect(readXml(written)).toEqual(node);
-    });
-
-    it("does not pollute Object.prototype when reading a __proto__ element", () => {
+    it("does not pollute Object.prototype even though the parse is rejected", () => {
       const before = ({} as Record<string, unknown>).polluted;
-      readXml("<root><__proto__><polluted>true</polluted></__proto__></root>");
+      expect(() =>
+        readXml("<root><__proto__><polluted>true</polluted></__proto__></root>"),
+      ).toThrow(ParseError);
       expect(({} as Record<string, unknown>).polluted).toBe(before);
       expect(Object.prototype.hasOwnProperty.call(Object.prototype, "polluted")).toBe(false);
-    });
-
-    it("__proto__ as the document (root) element itself also reads back correctly", () => {
-      const node = readXml("<__proto__><a>1</a></__proto__>");
-      expect(node).toEqual([{ label: "__proto__", target: [{ label: "a", target: "1" }] }]);
-    });
-
-    it("leaves constructor/prototype element labels untouched (fast-xml-parser does not alias those)", () => {
-      const node = readXml("<root><constructor><x>1</x></constructor><prototype><y>2</y></prototype></root>");
-      expect(node).toEqual([
-        {
-          label: "root",
-          target: [
-            { label: "constructor", target: [{ label: "x", target: "1" }] },
-            { label: "prototype", target: [{ label: "y", target: "2" }] },
-          ],
-        },
-      ]);
     });
   });
 });

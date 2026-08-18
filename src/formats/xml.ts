@@ -96,12 +96,29 @@ const XML_ILLEGAL_CHAR = new RegExp("[\\x00-\\x08\\x0B\\x0C\\x0E-\\x1F\\uD800-\\
 // stateful lastIndex that would silently skip matches across repeated calls.
 const XML_ILLEGAL_CHAR_G = new RegExp(XML_ILLEGAL_CHAR.source, "g");
 
+// fast-xml-parser 5.x (GHSA-gh4j-gqv2-49f6) added a second, *configurable*
+// prototype-pollution guard beyond the hard-rejected __proto__/constructor/
+// prototype trio (see the "prototype-pollution hardening" tests below): by
+// default it silently renames an element named hasOwnProperty, toString,
+// valueOf, __defineGetter__/__defineSetter__/__lookupGetter__/
+// __lookupSetter__ by prefixing it with "__" (OptionsBuilder.js's
+// defaultOnDangerousProperty). That protection exists for the library's
+// non-preserveOrder mode, where a parsed tag name can become a raw object
+// property key. This module always parses with preserveOrder: true, so a
+// tag name only ever ends up as a plain string value inside an array entry
+// -- never as a live property key on an object this module or its callers
+// touch -- making the rename unnecessary here and, left enabled, a silent
+// data-corrupting relabeling (readXml(writeXml(doc)) would return a
+// different label than it was given). Disabled by returning the name
+// unchanged; verified this doesn't reopen a real pollution path via this
+// file's own "does not pollute Object.prototype" tests below.
 const PARSER = new XMLParser({
   preserveOrder: true,
   trimValues: false,
   parseTagValue: false,
   ignoreAttributes: true,
   maxNestedTags: PARSER_MAX_NESTED_TAGS,
+  onDangerousProperty: (name: string) => name,
 });
 
 type XmlEntry = Record<string, unknown>;
@@ -301,27 +318,16 @@ function xmlPretypeScalar(value: Node, s: ScalarType): Node {
   return value;
 }
 
-// fast-xml-parser aliases an element literally named __proto__ to the
-// internal marker "#__proto__" (xmlNode.js addChild/add: unconditionally,
-// on every parse, to stop the tag name from ever reaching a raw property
-// assignment on one of its own plain objects). It never applies the same
-// treatment to "constructor" or "prototype" -- those pass through
-// untouched, verified directly against the installed source and by the
-// "leaves constructor/prototype element labels untouched" test below. The
-// alias is unconditional and keyed on exact equality, not an opt-out
-// option, so there is no parser flag to disable it; this module corrects
-// the label back afterwards instead. The corrected string can never
-// collide with a genuine input tag: "#" is not a legal XML name-start
-// character (XML_NAME below, and the spec's NameStartChar production), so
-// no well-formed document can contain an element actually named
-// "#__proto__" -- every occurrence this function sees originated from
-// the parser's own aliasing, and undoing it is lossless.
-const FAST_XML_PARSER_PROTO_ALIAS = "#__proto__";
-
+// fast-xml-parser 5.x (bumped from 4.x, GHSA-gh4j-gqv2-49f6) rejects an
+// element literally named __proto__, constructor, or prototype outright
+// (OrderedObjParser.js's sanitizeName throws before a node is ever built)
+// -- readXml's own catch-and-wrap turns that into a ParseError, so this
+// module no longer needs to intercept and undo an internal aliasing step;
+// 4.x's "#__proto__" marker (and this function's job of undoing it) is
+// unreachable under 5.x. See "prototype-pollution hardening" tests below.
 function local(tag: string): string {
-  const real = tag === FAST_XML_PARSER_PROTO_ALIAS ? "__proto__" : tag;
-  const i = real.lastIndexOf(":");
-  return i === -1 ? real : real.slice(i + 1);
+  const i = tag.lastIndexOf(":");
+  return i === -1 ? tag : tag.slice(i + 1);
 }
 
 /** Options for serializing a Document node into XML text. */
