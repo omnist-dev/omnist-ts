@@ -53,27 +53,88 @@ interface Token {
 }
 
 // One alternation, tried left to right at each position -- mirrors the
-// Python tokenizer's single regex. Whitespace and comments are matched so
-// they can be skipped, but never emitted as tokens.
+// Python tokenizer's single regex, minus the `string` case: string literals
+// are lexed by `scanString` below so that unterminated strings and literal
+// control characters can be attributed a precise position and a
+// `parse.*` code (omnist-spec Sec8.3.1, extended by spec#46 to cover OSD's
+// lexical stage the same way it already covers OML's).
 const TOKEN_RE =
-  /(?<ws>\s+)|(?<comment>#[^\n]*)|(?<string>"(?:\\.|[^"\\])*")|(?<number>-?\d+\.\d+|-?\d+)|(?<name>[A-Za-z_][A-Za-z0-9_]*)|(?<punct>[{}[\]:,?])/y;
+  /(?<ws>\s+)|(?<comment>#[^\n]*)|(?<number>-?\d+\.\d+|-?\d+)|(?<name>[A-Za-z_][A-Za-z0-9_]*)|(?<punct>[{}[\]:,?])/y;
+
+/** 1-based `line:col` text-position path for a `parse.*` diagnostic (spec Sec8.4). */
+function posToPath(text: string, pos: number): string {
+  let line = 1;
+  let col = 1;
+  for (let i = 0; i < pos; i++) {
+    if (text[i] === "\n") {
+      line += 1;
+      col = 1;
+    } else {
+      col += 1;
+    }
+  }
+  return `${line}:${col}`;
+}
+
+function lexError(text: string, pos: number, code: string, message: string): SchemaError {
+  return new SchemaError(message, code, posToPath(text, pos));
+}
+
+// Scans a `"..."` OSD string literal starting at `start` (text[start] ===
+// '"'). OSD strings use weak unescaping (spec Sec5.3.1): `\X` for any `X`
+// is accepted and decoded to the literal character `X` -- there is no
+// named-escape table, so unlike OML there is no `parse.invalid-escape` or
+// `parse.unpaired-surrogate` case reachable here. The only two lexical
+// failure modes are running off the end of input before the closing quote
+// (`parse.unterminated-string`) and a literal control character inside the
+// string (`parse.control-character`).
+function scanString(text: string, start: number): { token: Token; next: number } {
+  let i = start + 1;
+  while (true) {
+    if (i >= text.length) {
+      throw lexError(text, start, "parse.unterminated-string", "unterminated string");
+    }
+    const ch = text[i];
+    if (ch === '"') {
+      i += 1;
+      return { token: { kind: "string", text: text.slice(start, i), pos: start }, next: i };
+    }
+    if (ch === "\\") {
+      i += 1;
+      if (i >= text.length) {
+        throw lexError(text, start, "parse.unterminated-string", "unterminated string");
+      }
+      i += 1; // consume the escaped character verbatim, whatever it is
+      continue;
+    }
+    const code = (ch as string).codePointAt(0) as number;
+    if (code < 0x20) {
+      throw lexError(text, i, "parse.control-character", "control character in string");
+    }
+    i += 1;
+  }
+}
 
 function tokenize(text: string): Token[] {
   const toks: Token[] = [];
   let i = 0;
-  TOKEN_RE.lastIndex = 0;
   while (i < text.length) {
+    if (text[i] === '"') {
+      const { token, next } = scanString(text, i);
+      toks.push(token);
+      i = next;
+      continue;
+    }
     TOKEN_RE.lastIndex = i;
     const m = TOKEN_RE.exec(text);
     if (!m || m.index !== i) {
-      throw new SchemaError(`unexpected character ${JSON.stringify(text[i])} at ${i}`);
+      throw lexError(text, i, "parse.unexpected-token", `unexpected character ${JSON.stringify(text[i])} at ${i}`);
     }
     i = TOKEN_RE.lastIndex;
     const groups = m.groups as Record<string, string | undefined>;
     if (groups.ws !== undefined || groups.comment !== undefined) continue;
     let kind: TokenKind;
-    if (groups.string !== undefined) kind = "string";
-    else if (groups.number !== undefined) kind = "number";
+    if (groups.number !== undefined) kind = "number";
     else if (groups.name !== undefined) kind = "name";
     else kind = "punct";
     toks.push({ kind, text: m[0], pos: m.index });

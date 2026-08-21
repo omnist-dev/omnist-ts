@@ -18,7 +18,11 @@ each group.
 
 - `class OmnistError extends Error` -- the base of every error this
   library throws.
-- `class SchemaError extends OmnistError`
+- `class SchemaError extends OmnistError` -- `code?: string` and `path?: string`
+  are populated for `osd.ts`'s lexical/tokenization errors (the `parse.*`
+  family, omnist-spec Sec8.3.1, extended by spec#46 to cover OSD's own
+  lexing stage), with a `line:col` `path` (Sec8.4). Every other throw site
+  leaves both `undefined`.
 - `class ParseError extends OmnistError`
 - `class WriteError extends OmnistError`
 - `class DocumentError extends OmnistError`

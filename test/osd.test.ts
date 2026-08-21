@@ -184,6 +184,74 @@ describe("OSD error paths (TestOsdErrors)", () => {
   });
 });
 
+describe("OSD lexical error codes (spec Sec8.3.1, extended by spec#46 to cover OSD)", () => {
+  it("unexpected character gets parse.unexpected-token and a line:col path", () => {
+    let err: SchemaError | undefined;
+    try {
+      parseSchema('record R { "a": integer }\nroot R\n%');
+    } catch (e) {
+      err = e as SchemaError;
+    }
+    expect(err).toBeInstanceOf(SchemaError);
+    expect(err?.code).toBe("parse.unexpected-token");
+    expect(err?.path).toBe("3:1");
+  });
+
+  it("unterminated string gets parse.unterminated-string", () => {
+    let err: SchemaError | undefined;
+    try {
+      parseSchema('record R { "a');
+    } catch (e) {
+      err = e as SchemaError;
+    }
+    expect(err).toBeInstanceOf(SchemaError);
+    expect(err?.code).toBe("parse.unterminated-string");
+    expect(err?.path).toBe("1:12");
+  });
+
+  it("a trailing backslash right before end of input is still unterminated-string, not a crash", () => {
+    let err: SchemaError | undefined;
+    try {
+      parseSchema('record R { "a\\');
+    } catch (e) {
+      err = e as SchemaError;
+    }
+    expect(err).toBeInstanceOf(SchemaError);
+    expect(err?.code).toBe("parse.unterminated-string");
+  });
+
+  it("a literal control character inside a string gets parse.control-character", () => {
+    let err: SchemaError | undefined;
+    try {
+      parseSchema('record R { "a\tb": integer }\nroot R');
+    } catch (e) {
+      err = e as SchemaError;
+    }
+    expect(err).toBeInstanceOf(SchemaError);
+    expect(err?.code).toBe("parse.control-character");
+    expect(err?.path).toBe("1:14");
+  });
+
+  it("a weak backslash escape of an arbitrary character is accepted, not an invalid-escape error", () => {
+    // OSD strings use weak unescaping (spec Sec5.3.1): \X decodes to the
+    // literal character X for any X -- there is no parse.invalid-escape
+    // case reachable from OSD, unlike OML.
+    expect(() => parseSchema('record R { "a\\qb": integer }\nroot R')).not.toThrow();
+  });
+
+  it("non-lexical SchemaError throw sites still carry no code/path (unchanged, additive-only scope)", () => {
+    let err: SchemaError | undefined;
+    try {
+      parseSchema('record R { "a": integer }');
+    } catch (e) {
+      err = e as SchemaError;
+    }
+    expect(err).toBeInstanceOf(SchemaError);
+    expect(err?.code).toBeUndefined();
+    expect(err?.path).toBeUndefined();
+  });
+});
+
 describe("grammar quoting rule and 'any' handling", () => {
   it("quoted string is always the label; unquoted name is always a type", () => {
     const s = parseSchema('record R { "a": string }\nroot R');
