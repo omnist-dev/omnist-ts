@@ -66,14 +66,31 @@ export interface OmnistIssue {
  * message -- `.errors` is empty. Schema-conformance failures from
  * `materialize` carry the full structured list of every problem found (path,
  * message, machine-readable code), not just the first one.
+ *
+ * `code` and `path` are optional and populated only where the throw site has
+ * a stable machine-readable code to offer (currently: `oml.ts`'s
+ * lexer/parser errors, using the `parse.*` family from `omnist-spec`
+ * Sec8.3.1, with a `line:col` `path` per Sec8.4 -- see issue #108, the same
+ * "only the codes the actual grammar can produce" discipline #105 already
+ * used for `SchemaError`/`osd.ts`). Every other `ParseError` throw site in
+ * this package continues to pass only a message (and, for materialize
+ * failures, `errors`); both fields are simply `undefined` there. This is an
+ * additive widening of an existing public type, not a breaking change: no
+ * existing call site or catch site needs updating.
  */
 export class ParseError extends OmnistError {
   /** Detailed list of structural or schema-conformance issues encountered. */
   readonly errors: readonly OmnistIssue[];
+  /** Stable machine-readable error code (omnist-spec Sec8.3), when the throw site has one. */
+  readonly code: string | undefined;
+  /** Location of the error -- a `line:col` text-position path for lexical/syntax errors (Sec8.4), when known. */
+  readonly path: string | undefined;
 
-  constructor(message: string, errors: readonly OmnistIssue[] = []) {
+  constructor(message: string, errors: readonly OmnistIssue[] = [], code?: string, path?: string) {
     super(message);
     this.errors = errors;
+    this.code = code;
+    this.path = path;
   }
 }
 
