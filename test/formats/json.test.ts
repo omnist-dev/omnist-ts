@@ -259,14 +259,30 @@ describe("checkWriteDepth is a real, reachable guard (issue #37)", () => {
   // issue #77: MAX_NODES boundary -- a shallow-but-wide document (one label
   // repeated many times) must still be rejected once its total node count
   // exceeds the limit, even though it never comes close to MAX_DEPTH.
+  //
+  // issue #107: only actual `node`-typed values (edge lists, spec section
+  // 2.2) count against MAX_NODES -- a scalar leaf's target is a `value`,
+  // categorically distinct from `node`. So the boundary fixture repeats
+  // \*empty objects\* (each a genuine node) under one label, not scalars.
   // Explicit longer timeout: genuinely just slow (~3s to build/parse a
   // million-node document), not a hang -- bumped when vitest 2 -> 4 (#103)
   // pushed this past the 5000ms default in a full-suite run.
   it(
+    "readJson accepts 1,000,000 scalar leaf fields under one root (issue #107)",
+    () => {
+      const fields: Record<string, number> = {};
+      for (let i = 0; i < 1_000_000; i++) fields[`k${i}`] = i;
+      const text = JSON.stringify(fields);
+      expect(() => readJson(text)).not.toThrow();
+    },
+    90000,
+  );
+
+  it(
     "readJson accepts a document at exactly MAX_NODES (1,000,000) nodes",
     () => {
       const k = 999_999;
-      const arr = Array.from({ length: k }, (_, i) => i);
+      const arr = Array.from({ length: k }, () => ({}));
       const text = JSON.stringify({ x: arr });
       expect(() => readJson(text)).not.toThrow();
     },
@@ -277,7 +293,7 @@ describe("checkWriteDepth is a real, reachable guard (issue #37)", () => {
     "readJson rejects a document one node over MAX_NODES",
     () => {
       const k = 1_000_000;
-      const arr = Array.from({ length: k }, (_, i) => i);
+      const arr = Array.from({ length: k }, () => ({}));
       const text = JSON.stringify({ x: arr });
       expect(() => readJson(text)).toThrow(/node count exceeds the maximum \(1000000\)/);
     },

@@ -187,9 +187,31 @@ describe("Doc: robustness (guards)", () => {
   // MAX_INT_DIGITS (docs/02-document-model.md section 2.4) -- a document
   // can be shallow (well under MAX_DEPTH) yet still unbounded in total
   // node count, e.g. one label repeated an arbitrary number of times.
-  function repeatedLeafDoc(k: number): unknown {
-    return { x: Array.from({ length: k }, (_, i) => i) };
+  //
+  // issue #107: the counter only tracks actual `node`-typed values (edge
+  // lists per spec section 2.2, `node = [ edge, ... ]`), not scalar
+  // leaves -- a scalar leaf's target is a `value`, categorically distinct
+  // from `node`. So the boundary fixture below repeats \*empty
+  // objects\* under one label -- each one is itself a genuine edge-list
+  // node -- rather than repeating scalars, which (after the fix) would
+  // never approach the cap no matter how many there are.
+  function repeatedNodeDoc(k: number): unknown {
+    return { x: Array.from({ length: k }, () => ({})) };
   }
+
+  // A document with a huge number of scalar leaves under one root is
+  // still exactly ONE node (the root's edge list) -- this is the issue
+  // #107 repro itself: it must succeed, not throw, and must do so well
+  // under MAX_NODES.
+  it(
+    "a document with 1,000,000 scalar leaf fields under one root has exactly one node",
+    () => {
+      const fields: Record<string, number> = {};
+      for (let i = 0; i < 1_000_000; i++) fields[`k${i}`] = i;
+      expect(() => doc(fields)).not.toThrow();
+    },
+    30000,
+  );
 
   // Explicit longer timeout: genuinely just slow (constructing a
   // million-node document), not a hang -- bumped when vitest 2 -> 4 (#103)
@@ -197,8 +219,8 @@ describe("Doc: robustness (guards)", () => {
   it(
     "a document at exactly MAX_NODES (1,000,000) nodes constructs successfully",
     () => {
-      // root object node (1) + k leaf elements under repeated label "x".
-      const value = repeatedLeafDoc(999_999);
+      // root object node (1) + k empty-object nodes under repeated label "x".
+      const value = repeatedNodeDoc(999_999);
       expect(() => doc(value)).not.toThrow();
     },
     20000,
@@ -207,7 +229,7 @@ describe("Doc: robustness (guards)", () => {
   it(
     "a document one node over MAX_NODES throws",
     () => {
-      const value = repeatedLeafDoc(1_000_000);
+      const value = repeatedNodeDoc(1_000_000);
       expect(() => doc(value)).toThrow(/node count exceeds the maximum \(1000000\)/);
     },
     20000,

@@ -173,7 +173,6 @@ export function buildNode(
   if (depth > MAX_DEPTH) {
     throw new DocumentError(`${path}: nesting exceeds the maximum depth (${MAX_DEPTH})`);
   }
-  countNode(counter, path);
   if (Array.isArray(value)) {
     throw new DocumentError(
       `${path}: a bare array has no labeled-edge form ` +
@@ -181,6 +180,10 @@ export function buildNode(
     );
   }
   if (isPlainObject(value) || value instanceof Map) {
+    // Only an actual node (an edge list -- spec section 2.2 `node = [ edge, ... ]`)
+    // counts against MAX_NODES; a scalar leaf's target is a `value`,
+    // categorically distinct from `node`, and must not be counted (issue #107).
+    countNode(counter, path);
     if (seen.has(value)) {
       throw new DocumentError(`${path}: cycle detected`);
     }
