@@ -10,18 +10,28 @@
  * *materialized* Document -- they cannot bound work the external library
  * does while producing the intermediate parsed value in the first place.
  * Issue #110's research found that none of the four libraries is a naive
- * stack-recursive parser (V8's JSON.parse does not recurse on the JS
+ * stack-recursive parser: V8's JSON.parse does not recurse on the JS
  * stack for nesting; fast-xml-parser's own maxNestedTags guard -- see
  * src/formats/xml.ts's file-top comment -- already rejects a
  * maliciously-deep document inside its own iterative scan loop, well
- * before this repo's checks would see it; the `yaml` package caps alias
- * expansion via maxAliasCount), so no single demonstrated crash/hang
- * justified per-library structural changes. But none of the four
- * libraries bounds the *size* of the raw input text before starting work
- * on it, so an attacker-controlled, arbitrarily large input (e.g. a
- * multi-gigabyte string) can still force substantial CPU/memory use
- * inside the library before any of this repo's own limits get a chance
- * to apply.
+ * before this repo's checks would see it; smol-toml has its own
+ * mutually-recursive-descent depth cap (`maxDepth`, default 1000,
+ * enforced in extractValue/parseArray/parseInlineTable, throwing
+ * "document contains excessively nested structures" -- this repo's
+ * `parseToml` call doesn't override it, so the library's default guard
+ * is live and unmodified); the `yaml` package caps alias/anchor
+ * expansion via maxAliasCount (default 100), though it has no guard
+ * against a plain deeply-nested document (its own compose-node.js source
+ * comment acknowledges this can stack-overflow). So three of the four
+ * already have *some* structural protection against maliciously deep
+ * input, and no single demonstrated crash/hang justified further
+ * per-library structural changes. But none of the four libraries bounds
+ * the *size* of the raw input text before starting work on it, so an
+ * attacker-controlled, arbitrarily large input (e.g. a multi-gigabyte
+ * string) can still force substantial CPU/memory use inside the library
+ * before any of this repo's own limits get a chance to apply -- that
+ * shared gap, not a lack of any per-library depth protection, is what
+ * this check closes.
  *
  * This check is intentionally coarse: it bounds input *size* in bytes,
  * not structural *depth* the way MAX_DEPTH does -- reproducing MAX_DEPTH's
