@@ -19,6 +19,7 @@ import { ParseError, WriteError } from "../errors.js";
 import { finishWrite, WriteReport } from "../report.js";
 import { dateKind } from "../temporal.js";
 import { materialize } from "../deserialize.js";
+import { checkInputSize } from "./input-size.js";
 import type { Schema } from "../schema.js";
 
 // Matches src/document.ts's own MAX_DEPTH (locally redefined here, same as
@@ -214,6 +215,7 @@ export interface ReadJsonOptions {
 
 /** Parse JSON text into a Document node. */
 export function readJson(text: string, opts: ReadJsonOptions = {}): Node {
+  checkInputSize(text, "JSON");
   checkJsonIntegerDigits(text);
   let parsed: unknown;
   try {

@@ -68,6 +68,7 @@ import { ParseError, WriteError } from "../errors.js";
 import { finishWrite, WriteReport } from "../report.js";
 import { materialize } from "../deserialize.js";
 import type { Schema } from "../schema.js";
+import { checkInputSize } from "./input-size.js";
 
 // Matches src/document.ts's own MAX_DEPTH (locally redefined here, same as
 // src/formats/json.ts's own copy of the same guard constant -- see that
@@ -230,6 +231,7 @@ export interface ReadYamlOptions {
 
 /** Parse YAML text into a Document node. */
 export function readYaml(text: string, opts: ReadYamlOptions = {}): Node {
+  checkInputSize(text, "YAML");
   checkYamlIntegerDigits(text);
   let parsed: unknown;
   try {
