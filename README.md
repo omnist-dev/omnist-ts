@@ -2,6 +2,7 @@
 
 [![test](https://github.com/omnist-dev/omnist-ts/actions/workflows/test.yml/badge.svg)](https://github.com/omnist-dev/omnist-ts/actions/workflows/test.yml)
 [![docs](https://github.com/omnist-dev/omnist-ts/actions/workflows/docs.yml/badge.svg)](https://github.com/omnist-dev/omnist-ts/actions/workflows/docs.yml)
+[![npm](https://img.shields.io/npm/v/@omnist-dev/omnist/alpha.svg)](https://www.npmjs.com/package/@omnist-dev/omnist)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
 TypeScript port of [omnist](https://github.com/omnist-dev/omnist) -- one
@@ -14,9 +15,14 @@ design rationale; this repo mirrors its module boundaries and public API
 [Quickstart](https://ts.omnist.dev/quickstart)).
 
 Status: fully implemented -- library, CLI, and fuzz/oracle test suite are
-complete and at 100% coverage (issues #1-#11). No npm package has been
-published yet; that's a separate, deliberate decision still pending, not
-a sign of incompleteness. Track progress via the issue tracker.
+complete and at 100% coverage (issues #1-#11). Published to npm as
+`@omnist-dev/omnist` under the `alpha` dist-tag:
+
+```bash
+npm install @omnist-dev/omnist@alpha
+```
+
+Track progress via the issue tracker.
 
 ## Model
 
