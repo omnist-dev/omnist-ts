@@ -1249,3 +1249,143 @@ describe("checkWriteDepth is a real, reachable guard (issue #70)", () => {
     expect(() => writeOml(node, { indent: null })).toThrow(/nesting exceeds the maximum depth \(200\)/);
   });
 });
+
+describe("OML parse error codes (spec Sec8.3.1, issue #108)", () => {
+  function errOf(text: string): ParseError {
+    try {
+      readOml(text);
+    } catch (e) {
+      return e as ParseError;
+    }
+    throw new Error(`expected readOml(${JSON.stringify(text)}) to throw`);
+  }
+
+  it("a stray character gets parse.unexpected-token and a line:col path", () => {
+    const err = errOf("a: %");
+    expect(err).toBeInstanceOf(ParseError);
+    expect(err.code).toBe("parse.unexpected-token");
+    expect(err.path).toBe("1:4");
+  });
+
+  it("unexpected token via the array-close site also gets parse.unexpected-token", () => {
+    const err = errOf("a: [1 2]");
+    expect(err.code).toBe("parse.unexpected-token");
+  });
+
+  it("trailing content after the document body gets parse.trailing-content", () => {
+    const err = errOf("1 2");
+    expect(err.code).toBe("parse.trailing-content");
+    expect(err.path).toBe("1:3");
+  });
+
+  it("an unterminated dquote string gets parse.unterminated-string", () => {
+    const err = errOf('a: "ab');
+    expect(err.code).toBe("parse.unterminated-string");
+    expect(err.path).toBe("1:4");
+  });
+
+  it("an unterminated multiline string gets parse.unterminated-string", () => {
+    const err = errOf('a: """ab');
+    expect(err.code).toBe("parse.unterminated-string");
+  });
+
+  it("an unterminated raw string (missing closing ') gets parse.unterminated-string", () => {
+    const err = errOf("a: 'ab");
+    expect(err.code).toBe("parse.unterminated-string");
+  });
+
+  it("a literal control character in a string gets parse.control-character", () => {
+    const err = errOf('a: "a\tb"');
+    expect(err.code).toBe("parse.control-character");
+    // scanStringSlow reports the string's opening-quote position, not the
+    // offending character's own position -- existing (unchanged) behavior,
+    // matching its sibling "unterminated string" errors in this function.
+    expect(err.path).toBe("1:4");
+  });
+
+  it("a literal control character in a multiline string gets parse.control-character", () => {
+    const err = errOf('a: """a\bb"""');
+    expect(err.code).toBe("parse.control-character");
+  });
+
+  it("an unrecognized backslash escape gets parse.invalid-escape", () => {
+    const err = errOf('a: "a\\qb"');
+    expect(err.code).toBe("parse.invalid-escape");
+    expect(err.path).toBe("1:4");
+  });
+
+  it("a truncated \\u escape gets parse.invalid-escape", () => {
+    const err = errOf('a: "\\u12"');
+    expect(err.code).toBe("parse.invalid-escape");
+  });
+
+  it("a trailing backslash right before end of input gets parse.invalid-escape, not a crash", () => {
+    const err = errOf('a: "ab\\');
+    expect(err.code).toBe("parse.invalid-escape");
+  });
+
+  it("an unpaired high surrogate escape gets parse.unpaired-surrogate", () => {
+    const err = errOf('a: "\\uD800"');
+    expect(err.code).toBe("parse.unpaired-surrogate");
+    expect(err.path).toBe("1:4");
+  });
+
+  it("an unpaired low surrogate escape gets parse.unpaired-surrogate", () => {
+    const err = errOf('a: "\\uDE00"');
+    expect(err.code).toBe("parse.unpaired-surrogate");
+  });
+
+  it("a reserved word used as a bare label gets parse.reserved-word-label", () => {
+    const err = errOf("{true: 1}");
+    expect(err.code).toBe("parse.reserved-word-label");
+    expect(err.path).toBe("1:2");
+  });
+
+  it("a bare identifier in value position gets parse.bare-word", () => {
+    const err = errOf("a: foo");
+    expect(err.code).toBe("parse.bare-word");
+    expect(err.path).toBe("1:4");
+  });
+
+  it("an empty array gets parse.empty-array", () => {
+    const err = errOf("a: []");
+    expect(err.code).toBe("parse.empty-array");
+    expect(err.path).toBe("1:4");
+  });
+
+  it("a nested array gets parse.nested-array", () => {
+    const err = errOf("a: [[1]]");
+    expect(err.code).toBe("parse.nested-array");
+    expect(err.path).toBe("1:5");
+  });
+
+  it("an EOF-terminated array (missing ']') still gets parse.unexpected-token, with a real path despite the 'line 0, col 0' message quirk", () => {
+    const err = errOf("a: [1");
+    expect(err.code).toBe("parse.unexpected-token");
+    expect(err.message).toMatch(/^line 0, col 0:/);
+    expect(err.path).toBe("1:6");
+  });
+
+  it("parse.separator-in-array is not reachable: a newline between array elements without a comma still reports parse.unexpected-token", () => {
+    // OML's array loop silently skips SEP tokens between elements before
+    // checking for a comma, so there is no throw site that can tell
+    // "a SEP was used as the separator" apart from any other malformed
+    // array-closing token; both collapse into the generic "expected ','
+    // or ']'" diagnostic. See the file-top comment in src/oml.ts.
+    const err = errOf("a: [1\n2]");
+    expect(err.code).toBe("parse.unexpected-token");
+  });
+
+  it("resource-limit throw sites (MAX_DEPTH) still carry no code/path (out of this issue's scope)", () => {
+    const tooDeep = "a: " + "{ b: ".repeat(201) + "1" + " }".repeat(201);
+    const err = errOf(tooDeep);
+    expect(err.code).toBeUndefined();
+    expect(err.path).toBeUndefined();
+  });
+
+  it("an invalid calendar DATE value still carries no code/path (a value-shape error, not a parse.* grammar error)", () => {
+    const err = errOf("a: 2024-13-01");
+    expect(err.code).toBeUndefined();
+    expect(err.path).toBe("1:14");
+  });
+});

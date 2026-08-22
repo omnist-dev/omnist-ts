@@ -234,6 +234,35 @@ function isSepSpan(text: string): boolean {
  * as `omnist/oml.py`'s `_Scanner`/`_Parser` pair. */
 type Tok = readonly [TokKind, number, number];
 
+// Issue #108: every ParseError raised through Scanner.errorAt/errorFor now
+// carries a `line:col` `path` (Sec8.4) automatically -- both always know
+// the failing position -- and, selectively, a `parse.*` code (omnist-spec
+// Sec8.3.1), following the same "only the codes the real grammar can
+// produce" discipline #105 used for SchemaError/osd.ts. OML's grammar is
+// richer than OSD's (real escape processing, array syntax, reserved
+// words), so ten of the eleven `parse.*` candidates are genuinely
+// reachable here: unexpected-token, trailing-content, unterminated-string,
+// invalid-escape, unpaired-surrogate, control-character,
+// reserved-word-label, bare-word, empty-array, nested-array.
+// `parse.separator-in-array` is NOT wired: this parser's array loop (see
+// parseArray below) does not have a throw site that distinguishes "a SEP
+// was used as an array separator" from every other malformed
+// array-closing token -- both collapse into the same generic "expected
+// ',' or ']'" diagnostic (parse.unexpected-token). Splitting that would
+// mean restructuring parseArray's control flow well past this issue's
+// additive scope, so it stays undifferentiated, the same way #105 left
+// OSD's structurally-unreachable codes uncoded rather than forcing them.
+// Two throw-site families deliberately stay *uncoded* (no `code`, though
+// they may still carry a `path` if they went through errorAt/errorFor):
+// invalid DATE/TIME/DATETIME literal *values* (the token matched the
+// grammar's lexical shape via errorAt; only its calendar value is
+// invalid, which no `parse.*` code describes -- "a token appears where
+// the grammar does not allow it" is about position/kind, not content
+// validity) and, with neither `code` nor `path`,
+// MAX_DEPTH/MAX_NODES/MAX_INT_DIGITS overflow (bare `new ParseError(msg)`
+// calls that never reach errorAt/errorFor at all -- these are resource
+// limits that map to `document.limit.*`, not `parse.*`, and are out of
+// this issue's scope).
 class Scanner {
   readonly s: string;
   readonly n: number;
@@ -259,16 +288,21 @@ class Scanner {
     return [line, col];
   }
 
-  errorAt(pos: number, msg: string): ParseError {
+  errorAt(pos: number, msg: string, code?: string): ParseError {
     const [line, col] = this.lineCol(pos);
-    return new ParseError(`line ${line}, col ${col}: ${msg}`);
+    return new ParseError(`line ${line}, col ${col}: ${msg}`, [], code, `${line}:${col}`);
   }
 
-  errorEof(msg: string): ParseError {
+  errorEof(pos: number, msg: string, code?: string): ParseError {
     // Quirk preserved from the Python scanner: an EOF token carries no
-    // position, so any "got EOF" error names line 0, col 0 rather than the
-    // source's actual end position. See omnist/oml.py's _Scanner.error_eof.
-    return new ParseError(`line 0, col 0: ${msg}`);
+    // position, so any "got EOF" error *message* names line 0, col 0
+    // rather than the source's actual end position. See omnist/oml.py's
+    // _Scanner.error_eof. The structured `path` is new (issue #108) and
+    // is not bound by that message-text quirk, so it reports the real
+    // 1-based line:col of the EOF position, computed from `pos` (the
+    // scanner's actual end-of-input offset).
+    const [line, col] = this.lineCol(pos);
+    return new ParseError(`line 0, col 0: ${msg}`, [], code, `${line}:${col}`);
   }
 
   next(): Tok {
@@ -283,7 +317,7 @@ class Scanner {
       MASTER.lastIndex = pos;
       const m = MASTER.exec(s);
       if (m === null || m.index !== pos) {
-        throw this.errorAt(pos, `stray character ${JSON.stringify(s[pos])}`);
+        throw this.errorAt(pos, `stray character ${JSON.stringify(s[pos])}`, "parse.unexpected-token");
       }
       // MASTER always has named groups (the whole pattern is one alternation
       // of `(?<name>...)` groups), so a successful match always has `.groups`.
@@ -337,7 +371,7 @@ class Scanner {
         return ["STRING", pos, end];
       }
       if (kind === "SQUOTE") {
-        throw this.errorAt(pos, "unterminated raw string (missing closing ')");
+        throw this.errorAt(pos, "unterminated raw string (missing closing ')", "parse.unterminated-string");
       }
       this.pos = end;
       return [kind, pos, end];
@@ -350,7 +384,7 @@ class Scanner {
     let i = start + 1;
     for (;;) {
       if (i >= n) {
-        throw this.errorAt(start, 'unterminated string (missing closing ")');
+        throw this.errorAt(start, 'unterminated string (missing closing ")', "parse.unterminated-string");
       }
       // In-bounds index; see the bounds check just above.
       // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
@@ -364,6 +398,7 @@ class Scanner {
         throw this.errorAt(
           start,
           `control character U+${ch.charCodeAt(0).toString(16).toUpperCase().padStart(4, "0")} in string`,
+          "parse.control-character",
         );
       }
       i += 1;
@@ -384,6 +419,7 @@ class Scanner {
         throw this.errorAt(
           start,
           'unterminated multiline string (missing closing """)',
+          "parse.unterminated-string",
         );
       }
       // In-bounds index; see the bounds check just above.
@@ -411,6 +447,7 @@ class Scanner {
       throw this.errorAt(
         start,
         `control character U+${ch.charCodeAt(0).toString(16).toUpperCase().padStart(4, "0")} in multiline string`,
+        "parse.control-character",
       );
     }
   }
@@ -424,7 +461,7 @@ class Scanner {
     const s = this.s;
     const n = this.n;
     if (i + 1 >= n) {
-      throw this.errorAt(tokStart, "unterminated escape sequence");
+      throw this.errorAt(tokStart, "unterminated escape sequence", "parse.invalid-escape");
     }
     // In-bounds index; see the bounds check just above.
     // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
@@ -433,7 +470,7 @@ class Scanner {
     if (c === "u") {
       const hexs = s.slice(i + 2, i + 6);
       if (hexs.length !== 4 || !HEX4_RE.test(hexs)) {
-        throw this.errorAt(tokStart, "invalid \\u escape (need 4 hex digits)");
+        throw this.errorAt(tokStart, "invalid \\u escape (need 4 hex digits)", "parse.invalid-escape");
       }
       const cp = parseInt(hexs, 16);
       const j = i + 6;
@@ -449,14 +486,15 @@ class Scanner {
           tokStart,
           `unpaired high surrogate \\u${hexs} (needs a following low-surrogate ` +
             "\\uDC00-\\uDFFF escape)",
+          "parse.unpaired-surrogate",
         );
       }
       if (cp >= 0xdc00 && cp <= 0xdfff) {
-        throw this.errorAt(tokStart, `unpaired low surrogate \\u${hexs}`);
+        throw this.errorAt(tokStart, `unpaired low surrogate \\u${hexs}`, "parse.unpaired-surrogate");
       }
       return j;
     }
-    throw this.errorAt(tokStart, `invalid escape \\${c}`);
+    throw this.errorAt(tokStart, `invalid escape \\${c}`, "parse.invalid-escape");
   }
 }
 
@@ -572,9 +610,9 @@ class Parser {
     while (this.kind === "SEP") this.advance();
   }
 
-  private errorFor(kind: TokKind, pos: number, msg: string): ParseError {
-    if (kind === "EOF") return this.sc.errorEof(msg);
-    return this.sc.errorAt(pos, msg);
+  private errorFor(kind: TokKind, pos: number, msg: string, code?: string): ParseError {
+    if (kind === "EOF") return this.sc.errorEof(pos, msg, code);
+    return this.sc.errorAt(pos, msg, code);
   }
 
   parseDocument(): Node {
@@ -597,6 +635,7 @@ class Parser {
         this.start,
         "unexpected trailing content after the document body " +
           `(token ${this.kind} ${JSON.stringify(text)})`,
+        "parse.trailing-content",
       );
     }
     return node;
@@ -636,6 +675,7 @@ class Parser {
           colonKind,
           colonStart,
           `expected ':' after label ${JSON.stringify(label)}, got ${colonKind} ${JSON.stringify(text)}`,
+          "parse.unexpected-token",
         );
       }
       if (this.kind === "LBRACKET") {
@@ -658,6 +698,7 @@ class Parser {
           this.start,
           "expected a separator (newline or ';') or '}' after the value for " +
             `${JSON.stringify(label)}, got ${this.kind} ${JSON.stringify(text)}`,
+          "parse.unexpected-token",
         );
       }
       this.skipSep();
@@ -686,12 +727,13 @@ class Parser {
           start,
           `${JSON.stringify(text)} is a reserved word and cannot be a bare label; ` +
             `quote it: "${text}"`,
+          "parse.reserved-word-label",
         );
       }
       return text;
     }
     const text = this.tokText(kind, start, end);
-    throw this.errorFor(kind, start, `expected a label, got ${kind} ${JSON.stringify(text)}`);
+    throw this.errorFor(kind, start, `expected a label, got ${kind} ${JSON.stringify(text)}`, "parse.unexpected-token");
   }
 
   private parseValue(depth: number): Node {
@@ -712,6 +754,7 @@ class Parser {
           closeKind,
           closeStart,
           `expected '}', got ${closeKind} ${JSON.stringify(text)}`,
+          "parse.unexpected-token",
         );
       }
       return edges;
@@ -728,7 +771,7 @@ class Parser {
     this.advance(); // consume '['
     this.skipSep();
     if (this.kind === "RBRACKET") {
-      throw this.sc.errorAt(openStart, "empty array is not allowed");
+      throw this.sc.errorAt(openStart, "empty array is not allowed", "parse.empty-array");
     }
     const elements: Node[] = [];
     for (;;) {
@@ -737,6 +780,7 @@ class Parser {
           this.start,
           "nested array is not allowed (arrays may only contain scalars, " +
             "null, or brace subtrees)",
+          "parse.nested-array",
         );
       }
       elements.push(this.parseValue(depth));
@@ -757,6 +801,7 @@ class Parser {
         closeKind,
         closeStart,
         `expected ',' or ']' in array, got ${closeKind} ${JSON.stringify(text)}`,
+        "parse.unexpected-token",
       );
     }
     return elements;
@@ -829,11 +874,12 @@ class Parser {
           start,
           `bare word ${JSON.stringify(text)} is not a valid value here; ` +
             "strings must be quoted",
+          "parse.bare-word",
         );
       }
       default: {
         const text = this.tokText(kind, start, end);
-        throw this.errorFor(kind, start, `expected a value, got ${kind} ${JSON.stringify(text)}`);
+        throw this.errorFor(kind, start, `expected a value, got ${kind} ${JSON.stringify(text)}`, "parse.unexpected-token");
       }
     }
   }

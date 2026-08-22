@@ -23,7 +23,15 @@ each group.
   family, omnist-spec Sec8.3.1, extended by spec#46 to cover OSD's own
   lexing stage), with a `line:col` `path` (Sec8.4). Every other throw site
   leaves both `undefined`.
-- `class ParseError extends OmnistError`
+- `class ParseError extends OmnistError` -- `code?: string` and `path?: string`
+  are populated for `oml.ts`'s lexer/parser errors (the `parse.*` family,
+  omnist-spec Sec8.3.1), with a `line:col` `path` (Sec8.4). Ten of the eleven
+  `parse.*` codes are reachable from OML's grammar; `parse.separator-in-array`
+  is not (see `src/oml.ts`'s file-top comment). Every other throw site leaves
+  `code` `undefined` -- some (invalid DATE/TIME/DATETIME literal values) still
+  carry a `path`, since the position is always known there even without a code;
+  resource-limit throw sites (MAX_DEPTH/MAX_NODES/MAX_INT_DIGITS) leave both
+  `undefined`.
 - `class WriteError extends OmnistError`
 - `class DocumentError extends OmnistError`
 - `class DetachedNode extends OmnistError`
