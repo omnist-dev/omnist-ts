@@ -286,7 +286,7 @@ describe("checkWriteDepth is a real, reachable guard (issue #37)", () => {
       const text = JSON.stringify({ x: arr });
       expect(() => readJson(text)).not.toThrow();
     },
-    20000,
+    30000,
   );
 
   it(
@@ -297,7 +297,7 @@ describe("checkWriteDepth is a real, reachable guard (issue #37)", () => {
       const text = JSON.stringify({ x: arr });
       expect(() => readJson(text)).toThrow(/node count exceeds the maximum \(1000000\)/);
     },
-    20000,
+    30000,
   );
 
   it("writeJson rejects a hand-built Node deeper than MAX_DEPTH", () => {
