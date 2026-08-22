@@ -6,6 +6,97 @@ the first documented release of the TypeScript port; the public API
 mirrors the upstream Python package's `__all__` (camelCase names of the
 same functions).
 
+## [v0.1.2-alpha] -- audit-fix cycle: data-corruption bug, spec-conformance fix, hardening
+
+Combines two rounds of work: the security/dependency updates originally
+tagged `v0.1.1-alpha` (never fully released -- that tag's version bump
+only touched `package.json`, missed `src/index.ts`/`test/index.test.ts`,
+so this release also completes it) and a 6-issue audit-fix cycle
+(issues #106-111), all independently reviewed and merged.
+
+**From the incomplete v0.1.1-alpha bump:**
+- `fast-xml-parser` upgraded to 5.x -- stricter `__proto__`/`constructor`/
+  `prototype` rejection and disabled `valueOf`-family renaming
+  (security fix, GHSA-gh4j-gqv2-49f6).
+- `vitest` upgraded 2 -> 4, closing 2 critical + 1 high CVE.
+- Generated TypeDoc API docs added to the docs site, plus two follow-up
+  fixes for a dead content-area link (VitePress's Vue Router intercepts
+  same-origin content links even with `target="_self"` set -- only
+  `target="_blank"` reliably bypasses it).
+
+**Correctness fixes (issues #106, #107):**
+- **`materialize()` silently lost or invented numeric precision on
+  bigint<->number conversions** (issue #106, HIGH severity): a
+  `number`-kinded field materializing from a bigint outside float64's
+  exact range silently rounded (`9007199254740993n` -> `9007199254740992`);
+  an `integer`-kinded field materializing from a float that merely
+  *looked* like a whole number invented digits (`1e25` ->
+  `10000000000000000905969664n`, since `Number.isInteger(1e25)` is
+  `true` but `1e25` isn't a safe integer). Both cases now correctly
+  reject via the same non-value-exact rejection path every other
+  lossy conversion already uses, per spec Sec7.2's "loses nothing and
+  invents nothing" rule.
+- **`MAX_NODES` counted every scalar leaf, not just actual nodes**
+  (issue #107): per the spec's own grammar (`node = [edge, edge, ...]`,
+  a scalar leaf's target is a `value`, not a `node`), a document with
+  1,000,000 scalar fields under one root has exactly one real node --
+  but this port rejected it as exceeding the limit. Fixed across all
+  three construction paths (`buildNode`, XML's `xmlToNode`, OML's
+  parser); all four formats' MAX_NODES boundary tests were rebuilt to
+  test the real, corrected 1,000,000-node boundary rather than a
+  boundary that no longer meant anything under the fix.
+
+**Enhancements (issues #104, #108 -- structured diagnostics, not
+compliance fixes; `omnist-spec`'s Sec8.1 explicitly doesn't require
+this yet):**
+- `SchemaError` gained optional `code`/`path` fields for OSD's lexer
+  (issue #104, 3 of 6 candidate codes reachable given OSD's actual
+  grammar).
+- `ParseError` gained the same for OML's tokenizer/parser (issue #108,
+  10 of 11 candidate codes reachable -- OML's grammar is richer than
+  OSD's; the 11th, `parse.separator-in-array`, is structurally
+  unreachable because the array-parsing loop can't distinguish "a
+  separator token was misused" from any other malformed
+  array-closing token once it's already been silently skipped).
+
+**Hardening:**
+- All four format readers now reject oversized raw input (>256 MiB)
+  before handing it to their underlying parsing library, closing a
+  defense-in-depth gap where a maliciously large input could force
+  substantial work inside JSON.parse/`yaml`/`smol-toml`/
+  `fast-xml-parser` before this port's own safety limits ever got a
+  chance to apply (issue #110). Verified per-library: three of the
+  four already have their own structural depth protection
+  (`fast-xml-parser`'s `maxNestedTags`, `smol-toml`'s `maxDepth`,
+  `yaml`'s `maxAliasCount` for alias expansion specifically) -- none
+  of the four bounded raw input *size*, which is the gap this closes.
+- Documented (not fixed) 3 real `npm audit` vulnerabilities in
+  `esbuild`/`vite`/`vitepress`'s dev-tooling chain (issue #109) --
+  the only resolving version line is an unreleased `vitepress` 2.x
+  pre-release; pinning a docs-only devDependency to an unstable
+  pre-1.0 alpha was judged worse than the accepted risk (dev-server-only,
+  never touches CI or the published package). See `SECURITY.md` for
+  the full rationale and revisit trigger.
+
+**Investigated, no fix needed:**
+- A borderline-flaky XML MAX_NODES boundary test (issue #111) --
+  the timeout had already been fixed incidentally by issue #107's
+  work; a follow-up perf investigation found XML's ~3x slower
+  boundary-test time versus JSON/OML is inherent to `fast-xml-parser`'s
+  own tokenization cost for this input shape (benchmarked directly:
+  ~13s of the ~15-21s total is spent inside the library itself, before
+  this port's own conversion code ever runs), not an inefficiency in
+  this port's own code.
+
+**Process:** every fix independently reviewed by a separate agent that
+reproduced red/green itself; two PRs (#115, #116) needed a second review
+round after the first round caught real issues (a claimed conformance
+vector count that needed independent re-verification, and a factually
+wrong library-capability claim in a code comment -- `smol-toml` does
+have its own depth guard, contrary to the first draft's claim). Full
+suite (1153+ tests), 100% coverage, `tsc --noEmit`/`eslint`/doc-example
+gate all clean throughout.
+
 ## [v0.1.0-alpha] -- own conformance harness against omnist-spec
 
 The first minor-version milestone: this port now has its own
