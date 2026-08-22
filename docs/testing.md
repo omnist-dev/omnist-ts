@@ -126,6 +126,38 @@ npm run conformance:vectors    # Track 2, the JSON-vector suite
 See `tools/conformance/README.md` for the submodule layout and the
 pin-bump procedure.
 
+## Safety limits
+
+This port hardcodes four compile-time safety limits that bound the work
+done against untrusted input, each documented alongside the code that
+enforces it:
+
+| Limit | Value | Enforced in | Bounds |
+|---|---|---|---|
+| `MAX_DEPTH` | 200 | `src/document.ts` (`buildNode`), and locally redefined per the same convention in `src/oml.ts`, `src/infer.ts`, `src/schema.ts`, and each of `src/formats/{json,yaml,toml,xml}.ts` | Levels of node nesting in a materialized Document |
+| `MAX_NODES` | 1,000,000 | `src/document.ts` (`buildNode`), `src/formats/xml.ts` (`xmlToNode`) | Total nodes materialized while building one Document |
+| `MAX_INT_DIGITS` | 4,300 | `src/document.ts`, and a raw-text pre-parse scan in each of `src/formats/{json,yaml,toml,xml}.ts` | Decimal digits in an `integer` literal |
+| `MAX_INPUT_BYTES` | 256 MiB (268,435,456 UTF-16 code units) | `src/formats/input-size.ts` (`checkInputSize`), called first thing in each of `readJson`/`readYaml`/`readToml`/`readXml` | Raw input text size, before any external parsing library runs |
+
+`MAX_DEPTH`/`MAX_NODES`/`MAX_INT_DIGITS` match the reference defaults in
+`omnist-spec`'s [`02-document-model.md` Sec2.4](https://github.com/omnist-dev/omnist-spec/blob/master/docs/02-document-model.md#24-safety-limits).
+None of the three is spec-required to have a runtime-configurable
+surface (see the Conformance testing section above), and this port
+doesn't expose one.
+
+`MAX_INPUT_BYTES` is not a spec-defined limit -- it's specific to this
+port's four external-library-backed format codecs (issue #110). Those
+codecs each hand raw input text to an external parsing library (native
+`JSON.parse`, the `yaml` package, `smol-toml`, `fast-xml-parser`)
+*before* `buildNode`'s `MAX_DEPTH`/`MAX_NODES` checks ever run --
+those checks bound the materialized Document, not the work the external
+library does while producing the intermediate parsed value in the first
+place. `checkInputSize` closes the coarse but cheap case (an
+attacker-controlled, arbitrarily large raw input) ahead of any library
+call. See `src/formats/input-size.ts`'s file-top comment for the full
+reasoning, including why 256 MiB was chosen (a large margin over what
+even a maximally-verbose, `MAX_NODES`-sized document actually needs).
+
 ## What CI runs
 
 `.github/workflows/test.yml` runs `npm test` / `npm run test:coverage` /

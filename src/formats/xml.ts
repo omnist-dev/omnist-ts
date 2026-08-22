@@ -55,6 +55,7 @@ import { finishWrite, WriteReport } from "../report.js";
 import { dateKind } from "../temporal.js";
 import { materialize } from "../deserialize.js";
 import { recordField, type FieldType, type Schema, type ScalarType } from "../schema.js";
+import { checkInputSize } from "./input-size.js";
 
 const MAX_DEPTH = 200;
 
@@ -143,6 +144,7 @@ export interface ReadXmlOptions {
 
 /** Parses XML text into a Document node (spec §4). */
 export function readXml(text: string, opts: ReadXmlOptions = {}): Node {
+  checkInputSize(text, "XML");
   const valid = XMLValidator.validate(text);
   if (valid !== true) {
     throw new ParseError("invalid XML: " + valid.err.msg);
