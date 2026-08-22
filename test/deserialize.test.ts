@@ -52,6 +52,35 @@ describe("materialize: iso strings become Date / numeric exactness", () => {
     expect(() => readOml("i: 4.5\n", { schema: s })).toThrow(ParseError);
   });
 
+  it("inexact bigint-to-number conversion raises (issue #106)", () => {
+    const s = parseSchema('record R { "n": number }\nroot R');
+    // 2**53 + 1 -- not representable exactly as a float64.
+    expect(() => materialize([e("n", 9007199254740993n)], s)).toThrow(ParseError);
+    expect(() => materialize([e("n", 9007199254740993n)], s)).toThrow(
+      /not a value-exact conversion/,
+    );
+  });
+
+  it("inexact number-to-bigint conversion raises even when Number.isInteger is true (issue #106)", () => {
+    const s = parseSchema('record R { "i": integer }\nroot R');
+    // 1e25 passes Number.isInteger but is far outside the safe-integer
+    // range -- converting it to BigInt invents low-order digits that were
+    // never in the source value.
+    expect(() => materialize([e("i", 1e25)], s)).toThrow(ParseError);
+    expect(() => materialize([e("i", 1e25)], s)).toThrow(/not a value-exact conversion/);
+  });
+
+  it("Number.MAX_SAFE_INTEGER round-trips exactly both directions (issue #106 boundary)", () => {
+    const s = parseSchema('record R { "n": number, "i": integer }\nroot R');
+    const node = materialize(
+      [e("n", BigInt(Number.MAX_SAFE_INTEGER)), e("i", Number.MAX_SAFE_INTEGER)],
+      s,
+    ) as Edge[];
+    const values = new Map(node.map((edge) => [edge.label, edge.target]));
+    expect(values.get("n")).toBe(Number.MAX_SAFE_INTEGER);
+    expect(values.get("i")).toBe(BigInt(Number.MAX_SAFE_INTEGER));
+  });
+
   it("unparseable value raises", () => {
     const s = parseSchema(SCHEMA);
     expect(() =>

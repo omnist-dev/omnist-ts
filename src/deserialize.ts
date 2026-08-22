@@ -187,7 +187,15 @@ function materializeScalar(
       // case already accepts bigint directly (Sec6.3 subtyping), so
       // it never reaches materializeScalar's upgrade logic in the
       // first place -- see this file's own top comment.
-      if (typeof value === "number" && Number.isInteger(value)) return BigInt(value);
+      // Number.isSafeInteger, not Number.isInteger: a whole-looking float
+      // outside the safe-integer range (e.g. 1e25) rounds when converted
+      // to BigInt, inventing low-order digits that were never present in
+      // the source value -- not value-exact (spec Sec7.2's "loses nothing
+      // and invents nothing"). Number.isInteger(1e25) is true but 1e25 is
+      // not exact; falling through to the shared rejection below matches
+      // how the "n" branch just below rejects a non-exact bigint->number
+      // conversion (issue #106).
+      if (typeof value === "number" && Number.isSafeInteger(value)) return BigInt(value);
       break;
     case "number":
       if (typeof value === "number") return value;
@@ -199,13 +207,25 @@ function materializeScalar(
       // matchesKind's "number" case (src/schema.ts), which lets an
       // integer satisfy a number-typed field *without* materializing
       // (Sec6.3 subtyping, so validate never reaches this code at all).
-      // materialize, unlike validate, always normalizes representation:
-      // an out-of-range bigint converting to a non-finite/rounded
-      // Number is accepted here the same way Python's int -> float
-      // upgrade is (float overflow to Infinity is defined behavior, not
-      // an error, elsewhere in this port -- see oml.ts's "overflow/
-      // underflow are defined, not errors" test).
-      if (typeof value === "bigint") return Number(value);
+      // materialize, unlike validate, always normalizes representation --
+      // but only when the conversion is value-exact (spec Sec7.2: "loses
+      // nothing and invents nothing"). `BigInt(Number(v)) === v` is the
+      // exactness check: convert to a float and back, and the round-trip
+      // must reproduce the original bigint exactly. A bigint just outside
+      // the safe-integer range (e.g. 2**53 + 1) silently rounds to its
+      // nearest representable float otherwise -- a wrong value, invented
+      // by the conversion, not merely lost precision on an already-huge
+      // number (issue #106). Non-exact conversions fall through to the
+      // shared rejection below, the same path the "i" branch above uses.
+      if (typeof value === "bigint") {
+        const asNumber = Number(value);
+        // Guard BigInt(asNumber) with Number.isFinite: a bigint far
+        // outside float64 range converts to Infinity, and BigInt(Infinity)
+        // throws RangeError rather than returning a comparable value --
+        // that overflow is not value-exact either, so it must fall through
+        // to the shared rejection below same as any other non-exact case.
+        if (Number.isFinite(asNumber) && BigInt(asNumber) === value) return asNumber;
+      }
       break;
     case "date":
     case "time":
