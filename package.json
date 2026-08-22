@@ -1,6 +1,6 @@
 {
   "name": "@omnist-dev/omnist",
-  "version": "0.1.2-alpha",
+  "version": "0.2.0-alpha",
   "description": "One data model, many formats: read, validate, and write JSON, YAML, TOML, XML, and OML. (TypeScript port of https://github.com/omnist-dev/omnist)",
   "type": "module",
   "license": "Apache-2.0",
