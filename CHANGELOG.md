@@ -6,6 +6,20 @@ the first documented release of the TypeScript port; the public API
 mirrors the upstream Python package's `__all__` (camelCase names of the
 same functions).
 
+## [v0.2.0-alpha] -- version alignment with sibling ports
+
+Minor-version bump, not a new feature milestone on its own -- the
+aggregate scope since v0.1.1-alpha (structured `SchemaError`/`ParseError`
+diagnostics, the full issues #106-111 audit-fix cycle covering a real
+data-corruption fix, a real spec-conformance fix, and new input-size
+hardening) matches the shape of change that triggered the identical
+0.1.x -> 0.2.0-alpha bump on both `omnist-j` and `omnist-go`'s own
+audit cycles. Brings this port's version number in line with its
+siblings, which were understating the comparison at 0.1.2-alpha.
+
+No code changes in this release beyond the version bump itself --
+v0.1.2-alpha's content (below) is the real substance.
+
 ## [v0.1.2-alpha] -- audit-fix cycle: data-corruption bug, spec-conformance fix, hardening
 
 Combines two rounds of work: the security/dependency updates originally
