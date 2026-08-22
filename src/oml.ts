@@ -763,7 +763,9 @@ class Parser {
   }
 
   private parseScalar(): Scalar {
-    this.countNode();
+    // A scalar leaf's target is a `value` (spec section 2.2), categorically
+    // distinct from `node` -- it must not count against MAX_NODES (issue #107).
+    // Only parseNodeEdges() (an actual edge-list node) counts.
     const [kind, start, end] = this.advance();
     switch (kind) {
       case "STRING":

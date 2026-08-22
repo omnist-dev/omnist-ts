@@ -1180,6 +1180,27 @@ describe("checkWriteDepth is a real, reachable guard (issue #70)", () => {
   // issue #77: MAX_NODES boundary, mirroring the MAX_DEPTH boundary tests
   // above -- a shallow-but-wide document (one label repeated many times)
   // must still be rejected once its total node count exceeds the limit.
+  //
+  // issue #107: only actual `node`-typed values (edge lists, spec section
+  // 2.2) count against MAX_NODES -- a scalar leaf's target is a `value`,
+  // categorically distinct from `node`. A bare scalar array element (e.g.
+  // `1`) parses to a scalar and does NOT count as a node; the boundary
+  // fixtures below use `{}` elements instead, each a genuine (empty)
+  // edge-list node.
+  //
+  // A huge number of scalar array elements is still just ONE node (the
+  // root's edge list) -- this is the issue #107 repro itself.
+  it(
+    "readOml accepts 1,000,000 scalar array elements under one root (issue #107)",
+    () => {
+      const parts: string[] = [];
+      for (let i = 0; i < 1_000_000; i++) parts.push(String(i));
+      const text = `x: [${parts.join(",")}]`;
+      expect(() => readOml(text)).not.toThrow();
+    },
+    30000,
+  );
+
   // Explicit longer timeout: genuinely just slow (parsing a million-node
   // OML document), not a hang -- bumped when vitest 2 -> 4 (#103) pushed
   // this past the 5000ms default in a full-suite run.
@@ -1188,11 +1209,11 @@ describe("checkWriteDepth is a real, reachable guard (issue #70)", () => {
     () => {
       const k = 999_999;
       const parts: string[] = [];
-      for (let i = 0; i < k; i++) parts.push(String(i));
+      for (let i = 0; i < k; i++) parts.push("{}");
       const text = `x: [${parts.join(",")}]`;
       expect(() => readOml(text)).not.toThrow();
     },
-    20000,
+    90000,
   );
 
   it(
@@ -1200,11 +1221,11 @@ describe("checkWriteDepth is a real, reachable guard (issue #70)", () => {
     () => {
       const k = 1_000_000;
       const parts: string[] = [];
-      for (let i = 0; i < k; i++) parts.push(String(i));
+      for (let i = 0; i < k; i++) parts.push("{}");
       const text = `x: [${parts.join(",")}]`;
       expect(() => readOml(text)).toThrow(/node count exceeds the maximum \(1000000\)/);
     },
-    20000,
+    90000,
   );
 
   it("writeOml rejects a hand-built Node deeper than MAX_DEPTH, in pretty mode", () => {

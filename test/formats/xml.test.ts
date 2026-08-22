@@ -148,7 +148,27 @@ describe("readXml", () => {
   // issue #77: MAX_NODES boundary, mirroring the depth-guard tests below --
   // a shallow-but-wide document (many sibling elements, not deep nesting)
   // must still be rejected once its total node count exceeds the limit.
+  //
+  // issue #107: only actual `node`-typed values (edge lists, spec section
+  // 2.2) count against MAX_NODES -- a scalar leaf's target is a `value`,
+  // categorically distinct from `node`. `<x>text</x>` parses to a scalar
+  // (no child elements), so it does NOT count as a node; the boundary
+  // fixtures below use `<x><y/></x>` instead, where each `<x>` is a
+  // genuine one-edge node (its own child `<y/>` is the scalar leaf).
   describe("node-count guard", () => {
+    // A huge number of scalar-valued sibling elements is still just ONE
+    // node (the root's edge list) -- this is the issue #107 repro itself.
+    it(
+      "parses 1,000,000 scalar-valued sibling elements under one root (issue #107)",
+      () => {
+        const parts: string[] = [];
+        for (let i = 0; i < 1_000_000; i++) parts.push("<x>" + String(i) + "</x>");
+        const s = "<root>" + parts.join("") + "</root>";
+        expect(() => readXml(s)).not.toThrow();
+      },
+      90000,
+    );
+
     // Explicit longer timeout: genuinely just slow (parsing a million-node
     // XML document), not a hang -- bumped when vitest 2 -> 4 (#103) pushed
     // this past the 5000ms default in a full-suite run.
@@ -157,11 +177,11 @@ describe("readXml", () => {
       () => {
         const k = 999_999;
         const parts: string[] = [];
-        for (let i = 0; i < k; i++) parts.push("<x>" + String(i) + "</x>");
+        for (let i = 0; i < k; i++) parts.push("<x><y/></x>");
         const s = "<root>" + parts.join("") + "</root>";
         expect(() => readXml(s)).not.toThrow();
       },
-      20000,
+      90000,
     );
 
     it(
@@ -169,7 +189,7 @@ describe("readXml", () => {
       () => {
         const k = 1_000_000;
         const parts: string[] = [];
-        for (let i = 0; i < k; i++) parts.push("<x>" + String(i) + "</x>");
+        for (let i = 0; i < k; i++) parts.push("<x><y/></x>");
         const s = "<root>" + parts.join("") + "</root>";
         // Single parse, asserted on the one caught error -- parsing this
         // input twice (once per expect(...).toThrow(...) call) doubled an
@@ -184,7 +204,7 @@ describe("readXml", () => {
         expect(caught).toBeInstanceOf(DocumentError);
         expect((caught as Error).message).toMatch(/node count exceeds the maximum \(1000000\)/);
       },
-      20000,
+      90000,
     );
   });
 

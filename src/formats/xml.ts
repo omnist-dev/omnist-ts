@@ -198,15 +198,18 @@ function xmlToNode(
   if (depth > MAX_DEPTH) {
     throw new DocumentError(path + ": nesting exceeds the maximum depth (" + String(MAX_DEPTH) + ")");
   }
-  counter.count++;
-  if (counter.count > MAX_NODES) {
-    throw new DocumentError(path + ": node count exceeds the maximum (" + String(MAX_NODES) + ")");
-  }
   const elementEntries = entries.filter((e) => !("#text" in e));
   if (elementEntries.length === 0) {
     /* v8 ignore next */
     const text = entries.map((e) => String(e["#text"] ?? "")).join("");
     return text;
+  }
+  // Only an actual node (an edge list -- spec section 2.2 `node = [ edge, ... ]`)
+  // counts against MAX_NODES; a scalar leaf's target is a `value`,
+  // categorically distinct from `node`, and must not be counted (issue #107).
+  counter.count++;
+  if (counter.count > MAX_NODES) {
+    throw new DocumentError(path + ": node count exceeds the maximum (" + String(MAX_NODES) + ")");
   }
   let ownText = "";
   let sawFirstElement = false;
