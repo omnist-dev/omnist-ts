@@ -182,6 +182,19 @@ describe("OSD error paths (TestOsdErrors)", () => {
   it("a missing root name after the 'root' keyword is a plain-kind expectation error", () => {
     expect(() => parseSchema('record R { "a": integer }\nroot')).toThrow(/expected "name"/);
   });
+
+  it("a second 'root' declaration is schema.duplicate-root at $ (spec Sec5.8, D-2, issue #121)", () => {
+    const text = 'record R {\n    "a": string,\n}\nrecord S {\n    "b": string,\n}\nroot R\nroot S\n';
+    let err: SchemaError | undefined;
+    try {
+      parseSchema(text);
+    } catch (e) {
+      err = e as SchemaError;
+    }
+    expect(err).toBeInstanceOf(SchemaError);
+    expect(err?.code).toBe("schema.duplicate-root");
+    expect(err?.path).toBe("$");
+  });
 });
 
 describe("OSD lexical error codes (spec Sec8.3.1, extended by spec#46 to cover OSD)", () => {
