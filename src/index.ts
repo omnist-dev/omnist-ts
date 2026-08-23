@@ -152,35 +152,35 @@ import { readYaml as _readYaml, writeYaml as _writeYaml, checkYaml as _checkYaml
 
 _registerFormat({
   name: "json",
-  read: _readJson,
+  read: _readJson as (text: string, opts?: unknown) => unknown,
   write: _writeJson as (node: unknown, opts?: unknown) => string,
   check: _checkJson as (node: unknown) => _WriteReport,
 });
 
 _registerFormat({
   name: "oml",
-  read: _readOml,
+  read: _readOml as (text: string, opts?: unknown) => unknown,
   write: _writeOml as (node: unknown, opts?: unknown) => string,
   check: _checkOml as unknown as (node: unknown) => _WriteReport,
 });
 
 _registerFormat({
   name: "xml",
-  read: _readXml,
+  read: _readXml as (text: string, opts?: unknown) => unknown,
   write: _writeXml as (node: unknown, opts?: unknown) => string,
   check: _checkXml as (node: unknown) => _WriteReport,
 });
 
 _registerFormat({
   name: "toml",
-  read: _readToml,
+  read: _readToml as (text: string, opts?: unknown) => unknown,
   write: _writeToml as (node: unknown, opts?: unknown) => string,
   check: _checkToml as (node: unknown) => _WriteReport,
 });
 
 _registerFormat({
   name: "yaml",
-  read: _readYaml,
+  read: _readYaml as (text: string, opts?: unknown) => unknown,
   write: _writeYaml as (node: unknown, opts?: unknown) => string,
   check: _checkYaml as (node: unknown) => _WriteReport,
 });

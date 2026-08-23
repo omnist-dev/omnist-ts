@@ -242,9 +242,16 @@ function runParse(v: Vector): Result {
   const expect = v.expect;
   const fmt = inp.format as string;
   const text = inp.text as string;
+  // Read-time codec diagnostics (issue #123/D-3: format.attribute-dropped/
+  // format.namespace-dropped) are only ever emitted by readXml today, via
+  // this same WriteReport-shaped accumulator readXml's ReadXmlOptions.report
+  // expects -- passed unconditionally here since every other reader simply
+  // ignores an opts object it doesn't recognize (registry.ts's Format.read
+  // takes `opts?: unknown`, format-specific).
+  const report = new WriteReport();
   let node: Node;
   try {
-    node = getFormat(fmt).read(text) as Node;
+    node = getFormat(fmt).read(text, { report }) as Node;
   } catch (e) {
     if (expect.ok === false) {
       if (expect.diagnostics !== undefined) {
@@ -258,8 +265,17 @@ function runParse(v: Vector): Result {
     return fail("expected failure, parse succeeded");
   }
   const expected = decodeDocument(expect.document as EncodedNode);
-  if (new Doc(node).equals(new Doc(expected))) return pass();
-  return fail("parsed document does not match expected");
+  if (!new Doc(node).equals(new Doc(expected))) {
+    return fail("parsed document does not match expected");
+  }
+  if (expect.diagnostics !== undefined) {
+    const expPaths = paths(asDiagnostics(expect.diagnostics));
+    const actPaths = paths(report.adjustments as unknown as Diagnostic[]);
+    if (!setsEqual(expPaths, actPaths)) {
+      return fail(`diagnostic paths differ: expected ${setStr(expPaths)}, got ${setStr(actPaths)}`);
+    }
+  }
+  return pass();
 }
 
 function runParseSchema(v: Vector): Result {

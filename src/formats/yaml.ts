@@ -63,7 +63,7 @@
  */
 
 import YAML from "yaml";
-import { buildNode, grouped, unwrapTimeValues, type Node, type Scalar } from "../document.js";
+import { buildNode, grouped, hasInterleaving, unwrapTimeValues, type Node, type Scalar } from "../document.js";
 import { ParseError, WriteError } from "../errors.js";
 import { finishWrite, WriteReport } from "../report.js";
 import { materialize } from "../deserialize.js";
@@ -324,6 +324,12 @@ function scanYaml(node: Node): WriteReport {
         "warning",
       );
     }
+  }
+  // Sec8.3.8/D-3 (issue #123): same grouping rule as JSON's (grouped(),
+  // document.ts) -- YAML mappings collapse same-label edges regardless of
+  // position, so genuine cross-label interleaving is lost unless reported.
+  if (hasInterleaving(node)) {
+    rep.add("$", "format.interleaving-lost", "cross-label interleaving lost: YAML's grouping rule collapses same-label edges together regardless of position", "warning");
   }
   return rep;
 }

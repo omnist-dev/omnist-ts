@@ -77,10 +77,18 @@ describeIfVendored("main() against the real vendor/omnist-spec/test-suite", () =
     // (osd-grammar/root/duplicate-root-is-an-error, 153 vs 152); it SKIPs
     // under the same "syntax-level SchemaError carries no structured
     // path/code" category as every other osd-grammar diagnostics vector
-    // (37 skips now).
+    // (37 skips now). Bumped again to 7f7690c (issue #123, D-3: XML
+    // attribute/namespace drops and JSON-family cross-label interleaving
+    // MUST be reported), which adds 2 more vectors -- one new
+    // (formats-xml/basic/namespace-prefix-is-dropped-on-read) plus one
+    // updated in place (formats-xml/basic/attributes-are-dropped-on-read,
+    // still counted once) and one new
+    // (formats-json/basic/cross-label-interleaving-lost-and-reported) --
+    // 155 vs 153, all passing for real (no new skips: parse/write both
+    // carry structured diagnostics already).
     expect(exitCode).toBe(0);
     expect(logs.at(-1)).toBe(
-      "\n116 passed, 0 failed, 37 skipped (of 153 vectors) -- " +
+      "\n118 passed, 0 failed, 37 skipped (of 155 vectors) -- " +
         "diagnostics compared in code-agnostic mode (Sec8.5.2 rule 4)",
     );
   });
@@ -98,8 +106,8 @@ describeIfVendored("main() against the real vendor/omnist-spec/test-suite", () =
     }
   });
 
-  it("iterVectors discovers all 153 real vectors", () => {
-    expect(iterVectors(REAL_SUITE_DIR).length).toBe(153);
+  it("iterVectors discovers all 155 real vectors", () => {
+    expect(iterVectors(REAL_SUITE_DIR).length).toBe(155);
   });
 });
 
@@ -319,6 +327,39 @@ describe("parse", () => {
     // An empty OML document (`""`) round-trips as an edgeless root node,
     // matching `decodeDocument({})`'s `edges ?? []` fallback.
     expect(r).toEqual({ status: "pass", message: "ok" });
+  });
+
+  it("passes a successful XML parse with matching read-side diagnostics", () => {
+    // format.attribute-dropped (Sec8.3.8, D-3): a *successful* parse can
+    // still carry warning-severity diagnostics.
+    const r = runVector(
+      vec(
+        "parse",
+        { format: "xml", text: '<a x="1"><b>hi</b></a>' },
+        {
+          ok: true,
+          document: { edges: [["a", { edges: [["b", { scalar: { kind: "string", value: "hi" } }]] }]] },
+          diagnostics: [{ path: "$.a", code: "format.attribute-dropped" }],
+        },
+      ),
+    );
+    expect(r).toEqual({ status: "pass", message: "ok" });
+  });
+
+  it("fails a successful parse when read-side diagnostic paths mismatch", () => {
+    const r = runVector(
+      vec(
+        "parse",
+        { format: "xml", text: '<a x="1"><b>hi</b></a>' },
+        {
+          ok: true,
+          document: { edges: [["a", { edges: [["b", { scalar: { kind: "string", value: "hi" } }]] }]] },
+          diagnostics: [{ path: "$.wrong", code: "format.attribute-dropped" }],
+        },
+      ),
+    );
+    expect(r.status).toBe("fail");
+    expect(r.message).toContain("diagnostic paths differ");
   });
 });
 

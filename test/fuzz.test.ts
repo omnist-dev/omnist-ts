@@ -251,10 +251,15 @@ describe("OML round-trip fuzzing", () => {
 // 2. Lossy-format round-trip -- exact modulo documented adjustments
 // ---------------------------------------------------------------------------
 
+// format.interleaving-lost (issue #123/D-3) added to json/yaml/toml: the
+// fuzzer's boundedNodes() generator can produce a same-label-repeated-but-
+// not-contiguous edge list (e.g. [(H,...),( ,...),(H,...)]), which
+// grouped() (document.ts) always collapses regardless of position -- now
+// reported like every other lossy adjustment, not a new kind of loss.
 const ALLOWED_CODES: Record<string, ReadonlySet<string>> = {
-  json: new Set(["temporal.stringified", "float.special"]),
-  yaml: new Set(["temporal.stringified"]),
-  toml: new Set(["null.omitted"]),
+  json: new Set(["temporal.stringified", "float.special", "format.interleaving-lost"]),
+  yaml: new Set(["temporal.stringified", "format.interleaving-lost"]),
+  toml: new Set(["null.omitted", "format.interleaving-lost"]),
   xml: new Set([
     "null.omitted",
     "temporal.stringified",
@@ -277,7 +282,11 @@ describe("JSON round-trip fuzzing (modulo documented adjustments)", () => {
         for (const c of codes) expect((ALLOWED_CODES.json as ReadonlySet<string>).has(c)).toBe(true);
         const text = writeJson(node);
         const back = readJson(text);
-        if (!codes.has("temporal.stringified") && !codes.has("float.special")) {
+        if (
+          !codes.has("temporal.stringified") &&
+          !codes.has("float.special") &&
+          !codes.has("format.interleaving-lost")
+        ) {
           expect(nanSafeEqualGrouped(back, node)).toBe(true);
         }
       }),

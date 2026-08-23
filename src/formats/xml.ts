@@ -113,11 +113,24 @@ const XML_ILLEGAL_CHAR_G = new RegExp(XML_ILLEGAL_CHAR.source, "g");
 // different label than it was given). Disabled by returning the name
 // unchanged; verified this doesn't reopen a real pollution path via this
 // file's own "does not pollute Object.prototype" tests below.
+// ignoreAttributes was `true` until issue #123 (D-3): omnist-spec Sec8.3.8
+// now requires readXml to REPORT a dropped attribute (format.attribute-
+// dropped) rather than silently discard it, which means the parser has to
+// hand attributes back at all. With preserveOrder: true, an element's
+// attributes surface as a sibling ":@" key on that element's own object
+// (e.g. `{ a: [...children], ":@": { "@_x": "1" } }`) -- verified directly
+// against the installed fast-xml-parser -- never as a live object property
+// keyed by the attribute's own name, so this still can't reopen the
+// prototype-pollution surface onDangerousProperty guards against below.
+// Attribute *values* are never used for anything (the data-XML profile has
+// nowhere to put them) -- only whether ":@" is present/non-empty, to decide
+// whether to emit the diagnostic -- so parseAttributeValue is left at its
+// default (raw text, no coercion).
 const PARSER = new XMLParser({
   preserveOrder: true,
   trimValues: false,
   parseTagValue: false,
-  ignoreAttributes: true,
+  ignoreAttributes: false,
   maxNestedTags: PARSER_MAX_NESTED_TAGS,
   onDangerousProperty: (name: string) => name,
 });
@@ -140,6 +153,14 @@ function checkWriteDepth(depth: number): void {
 export interface ReadXmlOptions {
   /** Optional {@link Schema} for schema-directed materialization (spec §4). */
   schema?: Schema;
+  /** Optional {@link WriteReport} accumulator to collect read-time codec
+   * diagnostics into (issue #123/D-3): `format.attribute-dropped` and
+   * `format.namespace-dropped`, one per element an attribute or a
+   * namespace prefix was discarded from. Reused from write.ts's
+   * WriteReport rather than a parallel "ReadReport" type -- both are the
+   * same shape (path/code/message/severity), and this is the only reader
+   * in the port that has anything to report yet. */
+  report?: WriteReport;
 }
 
 /** Parses XML text into a Document node (spec §4). */
@@ -181,14 +202,57 @@ export function readXml(text: string, opts: ReadXmlOptions = {}): Node {
   }
   /* v8 ignore stop */
   const root = roots[0] as XmlEntry;
-  const tag = Object.keys(root)[0] as string;
+  const tag = tagKeyOf(root);
+  const rootLabel = local(tag);
+  const rootPath = "$." + rootLabel;
+  reportDroppedAttributesAndNamespace(root, tag, rootPath, opts.report);
   const nodeCounter = { count: 0 };
   const node: Node = [
-    { label: local(tag), target: xmlToNode(root[tag] as XmlEntry[], "$", 0, nodeCounter) },
+    { label: rootLabel, target: xmlToNode(root[tag] as XmlEntry[], rootPath, 0, nodeCounter, opts.report) },
   ];
   if (opts.schema === undefined) return node;
   const pretyped = xmlPretype(node, opts.schema, opts.schema.root);
   return materialize(pretyped, opts.schema) as Node;
+}
+
+/** The element's own tag key inside a preserveOrder entry object -- the
+ * one key that isn't ":@" (attributes) or "#text". */
+function tagKeyOf(entry: XmlEntry): string {
+  // v8 ignore next -- every entry reaching this helper (the document root,
+  // or a non-#text entry inside xmlToNode's loop) always has a real tag
+  // key; XMLValidator.validate/the parser itself reject a bare ":@" with
+  // no element.
+  /* v8 ignore next */
+  return (Object.keys(entry).find((k) => k !== ":@") ?? "") as string;
+}
+
+/** Reports `format.attribute-dropped` / `format.namespace-dropped`
+ * (Sec8.3.8, issue #123/D-3) for one parsed element, if `report` is given.
+ * `path` is the element's own Document path -- the same convention
+ * `format.float-special` uses for the value it substituted (Sec8.3.8's
+ * comment on the attribute-dropped vector). Attributes are discarded
+ * unconditionally by this reader (the data-XML profile has no
+ * attribute-carrying place in the Document model); a namespace prefix is
+ * discarded by `local()` the same way, both silently before this issue. */
+function reportDroppedAttributesAndNamespace(
+  entry: XmlEntry,
+  tag: string,
+  path: string,
+  report: WriteReport | undefined,
+): void {
+  if (report === undefined) return;
+  if (tag.includes(":")) {
+    report.add(
+      path,
+      "format.namespace-dropped",
+      "namespace prefix discarded on read; the element reads as its local name only",
+      "warning",
+    );
+  }
+  const attrs = entry[":@"];
+  if (attrs !== undefined && typeof attrs === "object" && attrs !== null && Object.keys(attrs).length > 0) {
+    report.add(path, "format.attribute-dropped", "XML attribute(s) discarded on read", "warning");
+  }
 }
 
 function xmlToNode(
@@ -196,6 +260,7 @@ function xmlToNode(
   path: string,
   depth: number,
   counter: { count: number },
+  report: WriteReport | undefined,
 ): Node {
   if (depth > MAX_DEPTH) {
     throw new DocumentError(path + ": nesting exceeds the maximum depth (" + String(MAX_DEPTH) + ")");
@@ -236,12 +301,14 @@ function xmlToNode(
     }
     tailText = "";
     sawFirstElement = true;
-    const childTag = Object.keys(entry)[0] as string;
+    const childTag = tagKeyOf(entry);
     const childLabel = local(childTag);
     lastElementLabel = childLabel;
+    const childPath = path + "." + childLabel;
+    reportDroppedAttributesAndNamespace(entry, childTag, childPath, report);
     out.push({
       label: childLabel,
-      target: xmlToNode(entry[childTag] as XmlEntry[], path + "." + childLabel, depth + 1, counter),
+      target: xmlToNode(entry[childTag] as XmlEntry[], childPath, depth + 1, counter, report),
     });
   }
   if (ownText.trim() !== "") {
