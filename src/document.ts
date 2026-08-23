@@ -533,6 +533,53 @@ export function grouped(node: Node, depth = 0): unknown {
   return out;
 }
 
+/**
+ * True iff `grouped()` writing this Document would lose cross-label
+ * interleaving anywhere in the tree -- i.e. some label's edges are not
+ * all contiguous within their own node, so grouping them together
+ * changes the relative order they had against the other labels around
+ * them (omnist-spec Sec8.3.8, `format.interleaving-lost`, issue #123/D-3).
+ *
+ * A label repeated but already contiguous (e.g. `[(m,A),(m,B),(x,X)]`)
+ * is NOT interleaving loss -- grouping doesn't move anything relative to
+ * `x`, so nothing about the order is actually lost. Only a label whose
+ * occurrences straddle a different label (e.g. `[(m,A),(x,X),(m,B)]`,
+ * where `x` sits between the two `m`s) counts: for that label, the span
+ * from its first to its last occurrence is wider than its occurrence
+ * count, meaning something else is interleaved inside that span.
+ *
+ * Recurses into every nested node, since the loss can occur at any
+ * depth -- but callers report a single `$`-rooted diagnostic regardless
+ * of where in the tree it was found (Sec8.3.8: "Path is $, the whole
+ * document, since the loss isn't localized to one label's edges").
+ */
+export function hasInterleaving(node: Node, depth = 0): boolean {
+  if (!Array.isArray(node)) return false;
+  if (depth > MAX_DEPTH) {
+    throw new DocumentError(`nesting exceeds the maximum depth (${MAX_DEPTH})`);
+  }
+  const positions = new Map<string, number[]>();
+  node.forEach(({ label }, i) => {
+    const arr = positions.get(label);
+    if (arr) {
+      arr.push(i);
+    } else {
+      positions.set(label, [i]);
+    }
+  });
+  for (const idxs of positions.values()) {
+    if (idxs.length > 1) {
+      const first = idxs[0] as number;
+      const last = idxs[idxs.length - 1] as number;
+      if (last - first + 1 !== idxs.length) return true;
+    }
+  }
+  for (const { target } of node) {
+    if (hasInterleaving(target, depth + 1)) return true;
+  }
+  return false;
+}
+
 function nodeEquals(a: Node, b: Node, depth = 0): boolean {
   if (Array.isArray(a) !== Array.isArray(b)) return false;
   if (Array.isArray(a) && Array.isArray(b)) {

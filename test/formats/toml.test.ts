@@ -174,6 +174,32 @@ describe("adjustment reports", () => {
     expect(caught).toBeInstanceOf(WriteError);
     expect(rep.adjustments.map((a) => a.code)).toEqual(["null.omitted"]);
   });
+
+  // Sec8.3.8/D-3 (issue #123): same grouping rule as JSON's -- see
+  // test/formats/json.test.ts's "format.interleaving-lost" describe block
+  // for the full positive/negative/nested coverage; this is just the
+  // TOML-specific smoke test.
+  it("reports format.interleaving-lost when a label's occurrences are not contiguous", () => {
+    const node = [
+      { label: "m", target: "A" },
+      { label: "x", target: "X" },
+      { label: "m", target: "B" },
+    ];
+    const rep = checkToml(node);
+    expect(rep.adjustments.map((a) => [a.path, a.code, a.severity])).toEqual([
+      ["$", "format.interleaving-lost", "warning"],
+    ]);
+  });
+
+  it("does not report format.interleaving-lost for a contiguous repeated label", () => {
+    const node = [
+      { label: "m", target: "A" },
+      { label: "m", target: "B" },
+      { label: "x", target: "X" },
+    ];
+    const rep = checkToml(node);
+    expect(rep.adjustments).toEqual([]);
+  });
 });
 
 describe("unsupported scalar", () => {

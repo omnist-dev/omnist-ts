@@ -17,8 +17,9 @@ import type { WriteReport } from "./report.js";
 export interface Format {
   /** Registered format name identifier (e.g. `"json"`, `"yaml"`, `"oml"`). */
   readonly name: string;
-  /** text -> node */
-  readonly read: (text: string) => unknown;
+  /** text -> node. `opts` is format-specific (e.g. XML's `{ report }` for
+   * read-time codec diagnostics, issue #123/D-3); most formats ignore it. */
+  readonly read: (text: string, opts?: unknown) => unknown;
   /** (node, opts?) -> text */
   readonly write: (node: unknown, opts?: unknown) => string;
   /** node -> WriteReport; simulates a write without producing output. */

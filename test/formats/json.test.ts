@@ -86,6 +86,60 @@ describe("temporal and special-float handling", () => {
   });
 });
 
+// Sec8.3.8/D-3 (issue #123): JSON's grouping rule (grouped(), document.ts)
+// collapses same-label edges together regardless of position -- always
+// has. What's new is reporting the loss when it actually reorders
+// anything. Matches the conformance vector
+// formats-json/basic/cross-label-interleaving-lost-and-reported.
+describe("format.interleaving-lost", () => {
+  it("is reported once, at $, when a label's occurrences are not contiguous", () => {
+    const node: Node = [
+      { label: "m", target: "A" },
+      { label: "x", target: "X" },
+      { label: "m", target: "B" },
+    ];
+    const rep = checkJson(node);
+    expect(rep.adjustments.map((a) => [a.path, a.code, a.severity])).toEqual([
+      ["$", "format.interleaving-lost", "warning"],
+    ]);
+    expect(writeJson(node)).toBe('{"m": ["A", "B"], "x": "X"}');
+  });
+
+  it("is NOT reported when a repeated label is merely contiguous (nothing reordered)", () => {
+    const node: Node = [
+      { label: "m", target: "A" },
+      { label: "m", target: "B" },
+      { label: "x", target: "X" },
+    ];
+    const rep = checkJson(node);
+    expect(rep.adjustments).toEqual([]);
+  });
+
+  it("is NOT reported when there is only one distinct label", () => {
+    const node: Node = [
+      { label: "m", target: "A" },
+      { label: "m", target: "B" },
+    ];
+    const rep = checkJson(node);
+    expect(rep.adjustments).toEqual([]);
+  });
+
+  it("is reported once even when the loss is nested, not at the top level", () => {
+    const node: Node = [
+      {
+        label: "outer",
+        target: [
+          { label: "m", target: "A" },
+          { label: "x", target: "X" },
+          { label: "m", target: "B" },
+        ],
+      },
+    ];
+    const rep = checkJson(node);
+    expect(rep.adjustments.map((a) => [a.path, a.code])).toEqual([["$", "format.interleaving-lost"]]);
+  });
+});
+
 describe("check_json parity with write_json", () => {
   it("a clean write has an empty report and is truthy (ok)", () => {
     const node = doc({ a: 1 }).toData();

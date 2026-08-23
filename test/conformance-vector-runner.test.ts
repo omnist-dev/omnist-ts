@@ -77,10 +77,18 @@ describeIfVendored("main() against the real vendor/omnist-spec/test-suite", () =
     // (osd-grammar/root/duplicate-root-is-an-error, 153 vs 152); it SKIPs
     // under the same "syntax-level SchemaError carries no structured
     // path/code" category as every other osd-grammar diagnostics vector
-    // (37 skips now).
+    // (37 skips now). Bumped again to 7f7690c (issue #123, D-3: XML
+    // attribute/namespace drops and JSON-family cross-label interleaving
+    // MUST be reported), which adds 2 more vectors -- one new
+    // (formats-xml/basic/namespace-prefix-is-dropped-on-read) plus one
+    // updated in place (formats-xml/basic/attributes-are-dropped-on-read,
+    // still counted once) and one new
+    // (formats-json/basic/cross-label-interleaving-lost-and-reported) --
+    // 155 vs 153, all passing for real (no new skips: parse/write both
+    // carry structured diagnostics already).
     expect(exitCode).toBe(0);
     expect(logs.at(-1)).toBe(
-      "\n116 passed, 0 failed, 37 skipped (of 153 vectors) -- " +
+      "\n118 passed, 0 failed, 37 skipped (of 155 vectors) -- " +
         "diagnostics compared in code-agnostic mode (Sec8.5.2 rule 4)",
     );
   });
@@ -98,8 +106,8 @@ describeIfVendored("main() against the real vendor/omnist-spec/test-suite", () =
     }
   });
 
-  it("iterVectors discovers all 153 real vectors", () => {
-    expect(iterVectors(REAL_SUITE_DIR).length).toBe(153);
+  it("iterVectors discovers all 155 real vectors", () => {
+    expect(iterVectors(REAL_SUITE_DIR).length).toBe(155);
   });
 });
 

@@ -13,7 +13,7 @@
  * strict: true to throw on any adjustment. See src/report.ts.
  */
 
-import { buildNode, grouped, type Node, type Scalar } from "../document.js";
+import { buildNode, grouped, hasInterleaving, type Node, type Scalar } from "../document.js";
 import { TimeValue } from "../temporal.js";
 import { ParseError, WriteError } from "../errors.js";
 import { finishWrite, WriteReport } from "../report.js";
@@ -266,6 +266,15 @@ function scanJson(node: Node): WriteReport {
     } else if (typeof v === "number" && !Number.isFinite(v)) {
       rep.add(path, "float.special", String(v) + " is not valid JSON; wrote null", "error");
     }
+  }
+  // Sec8.3.8/D-3 (issue #123): JSON's grouping rule (grouped(), document.ts)
+  // collapses same-label edges together regardless of position, so a
+  // Document with genuine cross-label interleaving ([(m,A),(x,X),(m,B)])
+  // loses that ordering info silently unless reported here. One
+  // whole-document diagnostic, not one per occurrence -- the loss isn't
+  // localized to any single label's edges.
+  if (hasInterleaving(node)) {
+    rep.add("$", "format.interleaving-lost", "cross-label interleaving lost: JSON's grouping rule collapses same-label edges together regardless of position", "warning");
   }
   return rep;
 }

@@ -48,6 +48,58 @@ describe("readXml", () => {
     ]);
   });
 
+  // Sec8.3.8/D-3 (issue #123): an attribute has no place in the Document
+  // model -- it's always been dropped -- but that drop is now reported via
+  // format.attribute-dropped rather than silent. Matches the conformance
+  // vector formats-xml/basic/attributes-are-dropped-on-read.
+  it("reports format.attribute-dropped for a discarded attribute, at the element it was on", () => {
+    const report = new WriteReport();
+    const d = readXml('<a x="1"><b>hi</b></a>', { report });
+    expect(d).toEqual([{ label: "a", target: [{ label: "b", target: "hi" }] }]);
+    const codes = report.adjustments.map((a) => [a.path, a.code, a.severity]);
+    expect(codes).toEqual([["$.a", "format.attribute-dropped", "warning"]]);
+  });
+
+  it("does not report format.attribute-dropped when no report is passed, and no attribute is present", () => {
+    expect(() => readXml('<a x="1"><b>hi</b></a>')).not.toThrow();
+    const report = new WriteReport();
+    readXml("<a><b>hi</b></a>", { report });
+    expect(report.adjustments).toEqual([]);
+  });
+
+  it("reports format.attribute-dropped for an attribute on a non-root element", () => {
+    const report = new WriteReport();
+    const d = readXml('<a><b y="1">hi</b></a>', { report });
+    expect(d).toEqual([{ label: "a", target: [{ label: "b", target: "hi" }] }]);
+    expect(report.adjustments.map((a) => [a.path, a.code])).toEqual([["$.a.b", "format.attribute-dropped"]]);
+  });
+
+  // Sec8.3.8/D-3: a namespace-prefixed tag reads as its local name only
+  // (local() already stripped the prefix before this issue); now reported
+  // via format.namespace-dropped. Matches the conformance vector
+  // formats-xml/basic/namespace-prefix-is-dropped-on-read.
+  it("reports format.namespace-dropped for a discarded namespace prefix, at the element itself", () => {
+    const report = new WriteReport();
+    const d = readXml("<a><ns:b>hi</ns:b></a>", { report });
+    expect(d).toEqual([{ label: "a", target: [{ label: "b", target: "hi" }] }]);
+    const codes = report.adjustments.map((a) => [a.path, a.code, a.severity]);
+    expect(codes).toEqual([["$.a.b", "format.namespace-dropped", "warning"]]);
+  });
+
+  it("reports both format.namespace-dropped and format.attribute-dropped when both are lost on the same element", () => {
+    const report = new WriteReport();
+    readXml('<a><ns:b y="1">hi</ns:b></a>', { report });
+    const codes = new Set(report.adjustments.map((a) => a.code));
+    expect(codes).toEqual(new Set(["format.namespace-dropped", "format.attribute-dropped"]));
+    expect(report.adjustments.every((a) => a.path === "$.a.b")).toBe(true);
+  });
+
+  it("does not report format.namespace-dropped for an unprefixed root or child", () => {
+    const report = new WriteReport();
+    readXml("<a><b>hi</b></a>", { report });
+    expect(report.adjustments).toEqual([]);
+  });
+
   it("issue #88: never coerces element text by shape on a schema-less read -- everything stays a string", () => {
     // #288-equivalent fix. XML has no native typed literals (unlike
     // YAML/TOML, which have real typed scalar syntax), so a schema-less

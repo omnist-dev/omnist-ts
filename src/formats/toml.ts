@@ -29,7 +29,7 @@
  */
 
 import { parse as parseToml, stringify as stringifyToml, TomlDate, type TomlError } from "smol-toml";
-import { buildNode, grouped, type Node } from "../document.js";
+import { buildNode, grouped, hasInterleaving, type Node } from "../document.js";
 import { TimeValue } from "../temporal.js";
 import { ParseError, WriteError } from "../errors.js";
 import { finishWrite, WriteReport } from "../report.js";
@@ -364,6 +364,14 @@ export interface WriteTomlOptions {
 export function writeToml(node: Node, opts: WriteTomlOptions = {}): string {
   const { strict = false, report } = opts;
   const rep = new WriteReport();
+  // Sec8.3.8/D-3 (issue #123): same grouping rule as JSON's/YAML's
+  // (grouped(), document.ts) -- TOML's array-of-tables collapsing loses
+  // genuine cross-label interleaving unless reported. Checked against the
+  // original node, before stripNulls: null-dropping is an unrelated
+  // adjustment and must not change whether interleaving is detected.
+  if (hasInterleaving(node)) {
+    rep.add("$", "format.interleaving-lost", "cross-label interleaving lost: TOML's grouping rule collapses same-label edges together regardless of position", "warning");
+  }
   const stripped = stripNulls(node, "$", rep);
   const grp = grouped(stripped);
   if (!isPlainObject(grp)) {
@@ -387,6 +395,9 @@ export function writeToml(node: Node, opts: WriteTomlOptions = {}): string {
 /** Report what writing TOML would adjust, without producing output. */
 export function checkToml(node: Node): WriteReport {
   const rep = new WriteReport();
+  if (hasInterleaving(node)) {
+    rep.add("$", "format.interleaving-lost", "cross-label interleaving lost: TOML's grouping rule collapses same-label edges together regardless of position", "warning");
+  }
   stripNulls(node, "$", rep);
   return rep;
 }
