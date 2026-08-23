@@ -71,10 +71,16 @@ describeIfVendored("main() against the real vendor/omnist-spec/test-suite", () =
     // vendor/omnist-spec bumped past v0.2.2-alpha to f93c569 (issue #98),
     // which adds 6 new vectors (152 vs 146) and includes the fix that
     // closed D-6, so the D-6 skip that used to sit in this tally is gone
-    // (36 skips either way -- see the skip-category test below).
+    // (36 skips either way -- see the skip-category test below). Bumped
+    // again to 964af7b (issue #121, D-2: duplicate root is now a
+    // normative error), which adds 1 more vector
+    // (osd-grammar/root/duplicate-root-is-an-error, 153 vs 152); it SKIPs
+    // under the same "syntax-level SchemaError carries no structured
+    // path/code" category as every other osd-grammar diagnostics vector
+    // (37 skips now).
     expect(exitCode).toBe(0);
     expect(logs.at(-1)).toBe(
-      "\n116 passed, 0 failed, 36 skipped (of 152 vectors) -- " +
+      "\n116 passed, 0 failed, 37 skipped (of 153 vectors) -- " +
         "diagnostics compared in code-agnostic mode (Sec8.5.2 rule 4)",
     );
   });
@@ -82,7 +88,7 @@ describeIfVendored("main() against the real vendor/omnist-spec/test-suite", () =
   it("every skip cites an explicit, reasoned category", () => {
     const { logs } = withCapturedConsole(() => main());
     const skipLines = logs.filter((l) => l.startsWith("[SKIP]"));
-    expect(skipLines.length).toBe(36);
+    expect(skipLines.length).toBe(37);
     for (const line of skipLines) {
       // D-6 (integer/number kind collapse) is CLOSED as of issue #98 --
       // no vector cites it anymore (see tools/conformance/vectorRunner.ts).
@@ -92,8 +98,8 @@ describeIfVendored("main() against the real vendor/omnist-spec/test-suite", () =
     }
   });
 
-  it("iterVectors discovers all 152 real vectors", () => {
-    expect(iterVectors(REAL_SUITE_DIR).length).toBe(152);
+  it("iterVectors discovers all 153 real vectors", () => {
+    expect(iterVectors(REAL_SUITE_DIR).length).toBe(153);
   });
 });
 

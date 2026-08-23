@@ -195,7 +195,20 @@ class Parser {
         this.define(env, name, rec, namePos);
       } else if (tk.kind === "name" && tk.text === "root") {
         this.next();
-        root = this.expect("name").text;
+        const rootTok = this.expect("name");
+        if (root !== null) {
+          // omnist-spec Sec5.8 (D-2, issue #121): a second `root` declaration
+          // is a normative error, not an implementation-defined override --
+          // a schema must declare exactly one root. `path` is `$` (not a
+          // specific record) because the schema itself is malformed, same
+          // rationale as the missing-root case below.
+          throw new SchemaError(
+            `duplicate root declaration at ${rootTok.pos}: root is already ${JSON.stringify(root)}`,
+            "schema.duplicate-root",
+            "$",
+          );
+        }
+        root = rootTok.text;
       } else {
         throw new SchemaError(`expected 'record' or 'root' at ${tk.pos}, got ${JSON.stringify(tk.text)}`);
       }
