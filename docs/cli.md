@@ -386,6 +386,7 @@ $ echo '{not valid json' | omnist validate - --from json --schema examples/cli/p
 {"ok": false, "message": "invalid JSON: ...", "errors": []}
 # exit 2
 ```
+<!-- verified-by: test/cli-examples.test.ts::validate examples invalid-person.json --json -->
 
 (The exact JSON-syntax-error wording after `"invalid JSON: "` comes from the
 JS engine's own `JSON.parse` and isn't part of the stability contract --
@@ -524,6 +525,7 @@ inventory alone never fails. `--json` prints
 $ omnist schema lint examples/cli/duplicate-records.osd
 warning: lint.duplicate-record: Customer, Employee: records "Employee" are structurally identical to "Customer"; merge them with `schema normalize`
 ```
+<!-- verified-by: test/cli-examples.test.ts::schema lint example duplicate-records.osd -->
 
 A clean schema prints `no findings` and exits `0`.
 
