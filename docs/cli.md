@@ -362,8 +362,8 @@ input or schema, printed to stderr as `error: ...`).
 A separate, more detailed machine-readable mode for scripts/CI that need
 more than `--result-format json`'s `{path, message}` pairs -- each entry also
 carries the stable, machine-readable `code` from the underlying validation
-result (`unexpected-field`, `cardinality`, `type-mismatch`, `null-not-allowed`,
-`shape-mismatch`). Unlike `--result-format`, `--json` also captures read/parse
+result (`validate.unexpected-field`, `validate.cardinality`, `validate.type-mismatch`, `validate.null-not-allowed`,
+`validate.shape-mismatch`). Unlike `--result-format`, `--json` also captures read/parse
 errors -- normally a bare `error: ...` on stderr with exit `2` -- as the same
 `{ok, message, errors}` shape on stdout, so a caller never has to string-match
 stderr. Exit codes are unchanged in every case; only where the result is
@@ -379,7 +379,7 @@ $ omnist validate examples/cli/person.json --from json --schema examples/cli/per
 {"ok": true}
 
 $ omnist validate examples/cli/invalid-person.json --from json --schema examples/cli/person.osd --json
-{"ok": false, "message": "invalid:\n  at $.person.age: expected integer, got string (\"thirty\")\n  at $.person: field \"name\" occurs 0 time(s), expected exactly 1", "errors": [{"path": "$.person.age", "code": "type-mismatch", "message": "expected integer, got string (\"thirty\")"}, {"path": "$.person", "code": "cardinality", "message": "field \"name\" occurs 0 time(s), expected exactly 1"}]}
+{"ok": false, "message": "invalid:\n  at $.person.age: expected integer, got string (\"thirty\")\n  at $.person: field \"name\" occurs 0 time(s), expected exactly 1", "errors": [{"path": "$.person.age", "code": "validate.type-mismatch", "message": "expected integer, got string (\"thirty\")"}, {"path": "$.person", "code": "validate.cardinality", "message": "field \"name\" occurs 0 time(s), expected exactly 1"}]}
 # exit 1
 
 $ echo '{not valid json' | omnist validate - --from json --schema examples/cli/person.osd --json
@@ -509,20 +509,20 @@ fix these problems, `lint` only surfaces them. Four checks:
 
 | Code | Severity | Meaning |
 |---|---|---|
-| `unsatisfiable-record` | `warning` | a reachable record no finite document can match (e.g. a mandatory ref cycle) |
-| `unreachable-record` | `warning` | a record defined in `env` but never reachable from `root` |
-| `duplicate-record` | `warning` | two+ structurally identical records under different names |
-| `any-field` | `info` | an inventory of every `any`-typed field, for a human to audit |
+| `lint.unsatisfiable-record` | `warning` | a reachable record no finite document can match (e.g. a mandatory ref cycle) |
+| `lint.unreachable-record` | `warning` | a record defined in `env` but never reachable from `root` |
+| `lint.duplicate-record` | `warning` | two+ structurally identical records under different names |
+| `lint.any-field` | `info` | an inventory of every `any`-typed field, for a human to audit |
 
 Findings are sorted by `(code, location)`. Exit `0` if no `warning`-severity
-finding survives the `--severity` filter, `1` otherwise -- an `any-field`
+finding survives the `--severity` filter, `1` otherwise -- a `lint.any-field`
 inventory alone never fails. `--json` prints
 `{"ok": bool, "findings": [{"code","severity","location","message"}, ...]}`;
-`--severity warning` suppresses the `info`-level `any-field` inventory.
+`--severity warning` suppresses the `info`-level `lint.any-field` inventory.
 
 ```sh
 $ omnist schema lint examples/cli/duplicate-records.osd
-warning: duplicate-record: Customer, Employee: records "Employee" are structurally identical to "Customer"; merge them with `schema normalize`
+warning: lint.duplicate-record: Customer, Employee: records "Employee" are structurally identical to "Customer"; merge them with `schema normalize`
 ```
 
 A clean schema prints `no findings` and exits `0`.

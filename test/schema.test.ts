@@ -194,7 +194,7 @@ describe("validate: scalar kinds and cardinality", () => {
     const r = sch.validate(doc({ a: 1, b: 2 }));
     expect(r.ok).toBe(false);
     expect(r.errors.some((e) => e.message.includes("unexpected field"))).toBe(true);
-    expect(r.errors.some((e) => e.code === "unexpected-field")).toBe(true);
+    expect(r.errors.some((e) => e.code === "validate.unexpected-field")).toBe(true);
   });
 
   it("array cardinality", () => {
@@ -249,7 +249,7 @@ describe("validate: scalar kinds and cardinality", () => {
     const r = sch.validate(doc({ a: { nested: 1 } }));
     expect(r.ok).toBe(false);
     expect(r.errors.some((e) => e.message.includes("got an object"))).toBe(true);
-    expect(r.errors.some((e) => e.code === "shape-mismatch")).toBe(true);
+    expect(r.errors.some((e) => e.code === "validate.shape-mismatch")).toBe(true);
   });
 
   it("null against a non-nullable scalar -- null-not-allowed", () => {
@@ -257,7 +257,7 @@ describe("validate: scalar kinds and cardinality", () => {
     const r = sch.validate(doc({ a: null }));
     expect(r.ok).toBe(false);
     expect(r.errors.some((e) => e.message.includes("null not allowed here"))).toBe(true);
-    expect(r.errors.some((e) => e.code === "null-not-allowed")).toBe(true);
+    expect(r.errors.some((e) => e.code === "validate.null-not-allowed")).toBe(true);
   });
 
   it("scalar where a record was expected -- shape mismatch", () => {
@@ -301,7 +301,7 @@ describe("validate: the `any` type -- unchecked leaf", () => {
     const sch = schema("R", { R: record(field("data", t.any, 1, 1)) });
     expect(sch.validate(doc({})).ok).toBe(false);
     const r = sch.validate(doc({}));
-    expect(r.errors.some((e) => e.code === "cardinality")).toBe(true);
+    expect(r.errors.some((e) => e.code === "validate.cardinality")).toBe(true);
   });
 
   it("does not descend into an any subtree: unexpected-field errors inside it are never raised", () => {

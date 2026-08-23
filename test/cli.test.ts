@@ -447,8 +447,8 @@ describe("validate", () => {
     expect(payload.message.length).toBeGreaterThan(0);
     const errors: Record<string, string> = {};
     for (const e of payload.errors) errors[`${e.path}|${e.code}`] = e.message;
-    expect(errors["$.b|unexpected-field"]).toBe("unexpected field");
-    expect(errors["$|cardinality"]).toBe('field "a" occurs 0 time(s), expected exactly 1');
+    expect(errors["$.b|validate.unexpected-field"]).toBe("unexpected field");
+    expect(errors["$|validate.cardinality"]).toBe('field "a" occurs 0 time(s), expected exactly 1');
     expect(payload.errors.length).toBe(2);
   });
 
@@ -881,7 +881,7 @@ describe("schema lint", () => {
     const p = writeTmp("in.osd", 'record R { "x": integer }\nrecord Orphan { "y": string }\nroot R\n');
     const { code, out } = run(["schema", "lint", p]);
     expect(code).toBe(1);
-    expect(out).toContain("unreachable-record");
+    expect(out).toContain("lint.unreachable-record");
     expect(out).toContain("Orphan");
   });
 
@@ -891,7 +891,7 @@ describe("schema lint", () => {
     expect(code).toBe(1);
     const payload = JSON.parse(out);
     expect(payload.ok).toBe(false);
-    expect(payload.findings[0].code).toBe("unreachable-record");
+    expect(payload.findings[0].code).toBe("lint.unreachable-record");
     expect(new Set(Object.keys(payload.findings[0]))).toEqual(new Set(["code", "severity", "location", "message"]));
   });
 
@@ -901,7 +901,7 @@ describe("schema lint", () => {
     expect(code).toBe(0);
     const payload = JSON.parse(out);
     expect(payload.ok).toBe(true);
-    expect(payload.findings[0].code).toBe("any-field");
+    expect(payload.findings[0].code).toBe("lint.any-field");
   });
 
   it("severity warning filters out info", () => {
@@ -1181,7 +1181,7 @@ describe("global --json machine mode", () => {
     expect(code).toBe(1);
     expect(out).toBe(
       '{"ok": false, "message": "invalid:\\n  at $.b: unexpected field", ' +
-        '"errors": [{"path": "$.b", "code": "unexpected-field", "message": "unexpected field"}]}\n',
+        '"errors": [{"path": "$.b", "code": "validate.unexpected-field", "message": "unexpected field"}]}\n',
     );
   });
 

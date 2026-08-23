@@ -19,7 +19,7 @@ describe("lint", () => {
   it("reports unsatisfiable-record for a mandatory ref cycle", () => {
     const s = parseSchema('record A { "b": B }\nrecord B { "a": A }\nroot A');
     const findings = lint(s);
-    const unsat = findings.filter((f) => f.code === "unsatisfiable-record");
+    const unsat = findings.filter((f) => f.code === "lint.unsatisfiable-record");
     expect(new Set(unsat.map((f) => f.location))).toEqual(new Set(["A", "B"]));
     expect(unsat.every((f) => f.severity === "warning")).toBe(true);
   });
@@ -27,7 +27,7 @@ describe("lint", () => {
   it("reports unreachable-record", () => {
     const s = parseSchema('record R { "x": integer }\nrecord Orphan { "y": string }\nroot R');
     const findings = lint(s);
-    const unreach = findings.filter((f) => f.code === "unreachable-record");
+    const unreach = findings.filter((f) => f.code === "lint.unreachable-record");
     const first = only(unreach);
     expect(first.location).toBe("Orphan");
     expect(first.severity).toBe("warning");
@@ -38,7 +38,7 @@ describe("lint", () => {
       'record Addr { "c": string }\nrecord Location { "c": string }\nrecord R { "a": Addr, "l": Location }\nroot R',
     );
     const findings = lint(s);
-    const dup = findings.filter((f) => f.code === "duplicate-record");
+    const dup = findings.filter((f) => f.code === "lint.duplicate-record");
     const first = only(dup);
     expect(first.location).toBe("Addr, Location");
     expect(first.severity).toBe("warning");
@@ -48,7 +48,7 @@ describe("lint", () => {
   it("inventories any-fields", () => {
     const s = parseSchema('record R { "id": string, "data": any }\nroot R');
     const findings = lint(s);
-    const anys = findings.filter((f) => f.code === "any-field");
+    const anys = findings.filter((f) => f.code === "lint.any-field");
     const first = only(anys);
     expect(first.location).toBe("R.data");
     expect(first.severity).toBe("info");
@@ -70,7 +70,7 @@ describe("lint", () => {
   it("an any-only schema has no warning-severity findings", () => {
     const s = parseSchema('record R { "data": any }\nroot R');
     const findings = lint(s);
-    expect(codes(findings)).toEqual(["any-field"]);
+    expect(codes(findings)).toEqual(["lint.any-field"]);
     expect(findings.some((f) => f.severity === "warning")).toBe(false);
   });
 
@@ -108,7 +108,7 @@ describe("lint: sort comparator branch coverage", () => {
       'record R { "a": string }\nrecord aaa { "b": string }\nrecord B { "c": string }\nroot R',
     );
     const locations = lint(s)
-      .filter((f) => f.code === "unreachable-record")
+      .filter((f) => f.code === "lint.unreachable-record")
       .map((f) => f.location);
     expect(locations).toEqual(["B", "aaa"]);
   });

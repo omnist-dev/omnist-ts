@@ -353,7 +353,7 @@ describe("main() against a scratch fixtures directory", () => {
       "input.osd": 'record R {\n    "a": any,\n}\nroot R\n',
       "expected.json": JSON.stringify({
         ok: false,
-        findings: [{ code: "any-field", severity: "info", location: "R.a", message: "anything at all" }],
+        findings: [{ code: "lint.any-field", severity: "info", location: "R.a", message: "anything at all" }],
       }),
     });
     const { logs } = withCapturedConsole(() => main(["lint"], dir));
