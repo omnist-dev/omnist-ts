@@ -328,6 +328,39 @@ describe("parse", () => {
     // matching `decodeDocument({})`'s `edges ?? []` fallback.
     expect(r).toEqual({ status: "pass", message: "ok" });
   });
+
+  it("passes a successful XML parse with matching read-side diagnostics", () => {
+    // format.attribute-dropped (Sec8.3.8, D-3): a *successful* parse can
+    // still carry warning-severity diagnostics.
+    const r = runVector(
+      vec(
+        "parse",
+        { format: "xml", text: '<a x="1"><b>hi</b></a>' },
+        {
+          ok: true,
+          document: { edges: [["a", { edges: [["b", { scalar: { kind: "string", value: "hi" } }]] }]] },
+          diagnostics: [{ path: "$.a", code: "format.attribute-dropped" }],
+        },
+      ),
+    );
+    expect(r).toEqual({ status: "pass", message: "ok" });
+  });
+
+  it("fails a successful parse when read-side diagnostic paths mismatch", () => {
+    const r = runVector(
+      vec(
+        "parse",
+        { format: "xml", text: '<a x="1"><b>hi</b></a>' },
+        {
+          ok: true,
+          document: { edges: [["a", { edges: [["b", { scalar: { kind: "string", value: "hi" } }]] }]] },
+          diagnostics: [{ path: "$.wrong", code: "format.attribute-dropped" }],
+        },
+      ),
+    );
+    expect(r.status).toBe("fail");
+    expect(r.message).toContain("diagnostic paths differ");
+  });
 });
 
 // ---------------------------------------------------------------------------

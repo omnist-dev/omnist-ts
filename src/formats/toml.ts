@@ -43,15 +43,22 @@ import { checkInputSize } from "./input-size.js";
 const MAX_DEPTH = 200;
 
 function checkWriteDepth(depth: number): void {
-  // NOT unreachable (issue #37): writeToml takes a raw `Node`, a publicly
-  // exported type -- a caller can hand-build one (or splice a subtree in
-  // via Doc.add()/Doc.set()) that exceeds MAX_DEPTH without ever going
-  // through buildNode()'s own guard. This branch is a real, exercised
-  // backstop, not a dormant one; see test/formats/toml.test.ts's
-  // depth-guard test.
+  // Originally a real, exercised backstop (issue #37): writeToml takes a
+  // raw `Node`, a publicly exported type -- a caller can hand-build one
+  // (or splice a subtree in via Doc.add()/Doc.set()) that exceeds
+  // MAX_DEPTH without ever going through buildNode()'s own guard.
+  //
+  // Shadowed since D-3 (issue #123): writeToml/checkToml now call
+  // hasInterleaving(node) -- document.ts, same MAX_DEPTH=200 threshold --
+  // before stripNulls/toTomlValue ever run, and it must run against the
+  // pre-strip node for correctness (see writeToml's own comment), so this
+  // guard can no longer observably fire first. Kept anyway as defense in
+  // depth against future refactors that change that ordering.
+  /* v8 ignore start -- shadowed by hasInterleaving's identical guard, see above */
   if (depth > MAX_DEPTH) {
     throw new WriteError("nesting exceeds the maximum depth (" + String(MAX_DEPTH) + ")");
   }
+  /* v8 ignore stop */
 }
 
 // ---------------------------------------------------------------------------

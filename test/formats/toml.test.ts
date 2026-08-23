@@ -200,6 +200,19 @@ describe("adjustment reports", () => {
     const rep = checkToml(node);
     expect(rep.adjustments).toEqual([]);
   });
+
+  it("writeToml itself (not just checkToml) reports format.interleaving-lost", () => {
+    const node = [
+      { label: "m", target: "A" },
+      { label: "x", target: "X" },
+      { label: "m", target: "B" },
+    ];
+    const rep = new WriteReport();
+    writeToml(node, { report: rep });
+    expect(rep.adjustments.map((a) => [a.path, a.code, a.severity])).toEqual([
+      ["$", "format.interleaving-lost", "warning"],
+    ]);
+  });
 });
 
 describe("unsupported scalar", () => {
