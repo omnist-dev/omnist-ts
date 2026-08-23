@@ -76,7 +76,7 @@ export function lint(s: Schema): LintFinding[] {
   // unsatisfiable-record: reachable but not satisfiable
   for (const name of setDifference(reach, sat).sort()) {
     findings.push({
-      code: "unsatisfiable-record",
+      code: "lint.unsatisfiable-record",
       severity: "warning",
       location: name,
       message: `record ${JSON.stringify(name)} is reachable but unsatisfiable -- no finite document can match it (e.g. a mandatory ref cycle)`,
@@ -86,7 +86,7 @@ export function lint(s: Schema): LintFinding[] {
   // unreachable-record: defined in env but not reachable from root
   for (const name of setDifference(new Set(s.env.keys()), reach).sort()) {
     findings.push({
-      code: "unreachable-record",
+      code: "lint.unreachable-record",
       severity: "warning",
       location: name,
       message: `record ${JSON.stringify(name)} is defined but never reachable from the root; drop it with \`schema prune\``,
@@ -101,7 +101,7 @@ export function lint(s: Schema): LintFinding[] {
       const keep = group[0] as string;
       const others = group.slice(1).map((n) => JSON.stringify(n)).join(", ");
       findings.push({
-        code: "duplicate-record",
+        code: "lint.duplicate-record",
         severity: "warning",
         location,
         message: `records ${others} are structurally identical to ${JSON.stringify(keep)}; merge them with \`schema normalize\``,
@@ -115,7 +115,7 @@ export function lint(s: Schema): LintFinding[] {
     for (const f of rec.fields) {
       if (f.type.tag === "any") {
         findings.push({
-          code: "any-field",
+          code: "lint.any-field",
           severity: "info",
           location: `${name}.${f.label}`,
           message: `field ${JSON.stringify(f.label)} of record ${JSON.stringify(name)} is typed \`any\` (accepts any value unchecked)`,

@@ -59,8 +59,8 @@ exactly:
   issue-#14 kind tag.
 
 Cardinality validation, closed-record enforcement, and the five error codes
-(`unexpected-field`, `cardinality`, `type-mismatch`, `null-not-allowed`,
-`shape-mismatch`) fire in the same situations with the same codes. `any`
+(`validate.unexpected-field`, `validate.cardinality`, `validate.type-mismatch`, `validate.null-not-allowed`,
+`validate.shape-mismatch`) fire in the same situations with the same codes. `any`
 resolves to itself and short-circuits conformance on both sides, and
 `nullable(t.any)` raises on both.
 
@@ -227,7 +227,7 @@ necessity -- it satisfies whichever of `date`/`datetime` a field declares.
 
 One knock-on not previously written down: `valueKind` returns `"datetime"`
 even for a `date`-tagged `Date`, where Python returns `"date"`. This affects
-only the type name inside a `type-mismatch` message, never a verdict.
+only the type name inside a `validate.type-mismatch` message, never a verdict.
 
 ### 3. `time` is a `TimeValue` wrapper, not a bare JS primitive
 

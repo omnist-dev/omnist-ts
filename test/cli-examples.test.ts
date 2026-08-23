@@ -323,9 +323,9 @@ describe("validate examples", () => {
         '  at $.person.age: expected integer, got string (\\"thirty\\")\\n' +
         '  at $.person: field \\"name\\" occurs 0 time(s), expected exactly 1", ' +
         '"errors": [' +
-        '{"path": "$.person.age", "code": "type-mismatch", ' +
+        '{"path": "$.person.age", "code": "validate.type-mismatch", ' +
         '"message": "expected integer, got string (\\"thirty\\")"}, ' +
-        '{"path": "$.person", "code": "cardinality", ' +
+        '{"path": "$.person", "code": "validate.cardinality", ' +
         '"message": "field \\"name\\" occurs 0 time(s), expected exactly 1"}' +
         "]}\n",
     );
@@ -389,7 +389,7 @@ describe("schema lint example", () => {
     const { code, out } = run(["schema", "lint", "examples/cli/duplicate-records.osd"]);
     expect(code).toBe(1);
     expect(out).toBe(
-      "warning: duplicate-record: Customer, Employee: records " +
+      "warning: lint.duplicate-record: Customer, Employee: records " +
         '"Employee" are structurally identical to "Customer"; ' +
         "merge them with `schema normalize`\n",
     );

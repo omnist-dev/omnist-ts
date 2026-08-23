@@ -571,13 +571,13 @@ export class Schema {
 
   private conformScalar(d: Doc, s: ScalarType, errors: OmnistIssue[]): void {
     if (!d.isLeaf) {
-      errors.push({ path: d.path, message: `expected a ${s.scalarKind} value, got an object`, code: "shape-mismatch" });
+      errors.push({ path: d.path, message: `expected a ${s.scalarKind} value, got an object`, code: "validate.shape-mismatch" });
       return;
     }
     const v = d.value;
     if (v === null) {
       if (!s.nullable) {
-        errors.push({ path: d.path, message: "null not allowed here", code: "null-not-allowed" });
+        errors.push({ path: d.path, message: "null not allowed here", code: "validate.null-not-allowed" });
       }
       return;
     }
@@ -590,14 +590,14 @@ export class Schema {
       errors.push({
         path: d.path,
         message: `expected ${s.scalarKind}, got ${typeName(v)} (${shown})`,
-        code: "type-mismatch",
+        code: "validate.type-mismatch",
       });
     }
   }
 
   private conformRecord(d: Doc, rec: Record, errors: OmnistIssue[], depth: number): void {
     if (d.isLeaf) {
-      errors.push({ path: d.path, message: "expected an object, got a value", code: "shape-mismatch" });
+      errors.push({ path: d.path, message: "expected an object, got a value", code: "validate.shape-mismatch" });
       return;
     }
     const counts = new Map<string, number>();
@@ -605,7 +605,7 @@ export class Schema {
       counts.set(label, (counts.get(label) ?? 0) + 1);
       const f = recordField(rec, label);
       if (f === undefined) {
-        errors.push({ path: child.path, message: "unexpected field", code: "unexpected-field" });
+        errors.push({ path: child.path, message: "unexpected field", code: "validate.unexpected-field" });
       } else {
         this.conform(child, f.type, errors, depth + 1);
       }
@@ -616,7 +616,7 @@ export class Schema {
         errors.push({
           path: d.path,
           message: `field ${JSON.stringify(f.label)} occurs ${c} time(s), expected ${cardinalityStr(f)}`,
-          code: "cardinality",
+          code: "validate.cardinality",
         });
       }
     }
