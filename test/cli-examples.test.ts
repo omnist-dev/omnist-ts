@@ -366,7 +366,7 @@ describe("schema prune example", () => {
   it("prune via stdin", () => {
     const { code, out } = run(
       ["schema", "prune", "-"],
-      'record R { "x": integer, "ghost" [0,0]: string }\nrecord Orphan { "y": string }\nroot R\n',
+      'record R { "x": integer, "ghost" [0,1]: Dead }\nrecord Dead { "d": Dead }\nrecord Orphan { "y": string }\nroot R\n',
     );
     expect(code).toBe(0);
     expect(out).toBe('record R {\n    "x": integer,\n}\nroot R\n');

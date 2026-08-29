@@ -473,7 +473,7 @@ fields, and optional fields whose type is an unsatisfiable record. Unlike
 `normalize` it never merges records -- it only deletes dead weight:
 
 ```sh
-$ printf 'record R { "x": integer, "ghost" [0,0]: string }\nrecord Orphan { "y": string }\nroot R\n' \
+$ printf 'record R { "x": integer, "ghost" [0,1]: Dead }\nrecord Dead { "d": Dead }\nrecord Orphan { "y": string }\nroot R\n' \
     | omnist schema prune -
 record R {
     "x": integer,

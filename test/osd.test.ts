@@ -113,6 +113,29 @@ describe("OSD parser robustness (TestOsdRobustness)", () => {
     expect(() => parseSchema('record R { "a" [1.5,3]: integer }\nroot R')).toThrow(SchemaError);
   });
 
+  // Matches osd-grammar/cardinality/zero-max-is-invalid-redundant-with-absence
+  // in vendor/omnist-spec/test-suite/osd-grammar/grammar.json (issue #125).
+  it("[0,0] cardinality is rejected -- redundant with not declaring the field", () => {
+    expect(() => parseSchema('record R { "a" [0,0]: string }\nroot R')).toThrow(SchemaError);
+    expect(() => parseSchema('record R { "a" [0,0]: string }\nroot R')).toThrow(/invalid cardinality/);
+  });
+
+  // Matches osd-grammar/labels/empty-label-is-rejected (issue #130).
+  it("an empty-string field label is rejected", () => {
+    expect(() => parseSchema('record R { "": string }\nroot R')).toThrow(SchemaError);
+    expect(() => parseSchema('record R { "": string }\nroot R')).toThrow(/empty-label/);
+  });
+
+  // Matches osd-grammar/labels/bracket-in-label-is-rejected and
+  // osd-grammar/labels/closing-bracket-alone-in-label-is-rejected
+  // (issue #133) -- the rule is about the character vocabulary, not a
+  // specific matched [i] pattern.
+  it("a field label containing '[' or ']' is rejected", () => {
+    expect(() => parseSchema('record R { "a[1]": string }\nroot R')).toThrow(SchemaError);
+    expect(() => parseSchema('record R { "a[1]": string }\nroot R')).toThrow(/bracket-in-label/);
+    expect(() => parseSchema('record R { "total]": string }\nroot R')).toThrow(/bracket-in-label/);
+  });
+
   it("many flat (non-nested) definitions are not falsely depth-rejected", () => {
     let flat = "";
     for (let i = 0; i < 150; i++) flat += `record R${i} { "a": integer }\n`;

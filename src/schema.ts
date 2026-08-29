@@ -211,10 +211,31 @@ export function field(
     min < 0 ||
     (max !== null && max < min) ||
     !Number.isInteger(min) ||
-    (max !== null && !Number.isInteger(max))
+    (max !== null && !Number.isInteger(max)) ||
+    (min === 0 && max === 0)
   ) {
+    // min === 0 && max === 0 (issue #125, omnist-spec Sec5.5): a field that
+    // must occur zero times is indistinguishable from a field never
+    // declared at all -- records are closed by default, so this is folded
+    // into the same schema.invalid-cardinality error as negative/inverted
+    // bounds, not a separate code.
     throw new SchemaError(
       `field ${JSON.stringify(label)} has an invalid cardinality [${min},${max ?? ""}]`,
+    );
+  }
+  if (label === "") {
+    // issue #130, omnist-spec Sec5.4: an empty-string label names nothing a
+    // caller could ever reference. Path is the enclosing record, per the
+    // same convention used for "the label itself is the problem".
+    throw new SchemaError("field label must not be the empty string (schema.empty-label)");
+  }
+  if (label.includes("[") || label.includes("]")) {
+    // issue #133, omnist-spec Sec5.4: '[' and ']' are reserved for the
+    // diagnostic-path repeated-label convention ($.a, $.a[1], ...) -- a
+    // label containing either character could collide with a synthesized
+    // path for a different field.
+    throw new SchemaError(
+      `field label ${JSON.stringify(label)} must not contain '[' or ']' (schema.bracket-in-label)`,
     );
   }
   return { label, type, min, max };

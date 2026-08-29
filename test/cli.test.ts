@@ -797,7 +797,7 @@ describe("schema prune", () => {
   it("drops unreachable and dead", () => {
     const p = writeTmp(
       "in.osd",
-      'record R { "x": integer, "ghost" [0,0]: string }\nrecord Orphan { "y": string }\nroot R\n',
+      'record R { "x": integer, "ghost" [0,1]: Dead }\nrecord Dead { "d": Dead }\nrecord Orphan { "y": string }\nroot R\n',
     );
     const { code, out } = run(["schema", "prune", p]);
     expect(code).toBe(0);

@@ -206,12 +206,15 @@ function cartesianProduct(pool: readonly Scalar[], count: number): Scalar[][] {
 // ---------------------------------------------------------------------------
 
 const SCALARS = [t.string, t.integer, t.number, t.boolean, t.date, t.time, t.datetime] as const;
+// [0,0] is no longer a legal cardinality (issue #125, omnist-spec Sec5.5 --
+// redundant with not declaring the field at all); field() rejects it at
+// construction time, so it's excluded here rather than fuzzed as a valid
+// shape.
 const CARDS: ReadonlyArray<[number, number | null]> = [
   [1, 1],
   [0, 1],
   [0, 2],
   [1, null],
-  [0, 0],
   [2, 2],
 ];
 const ANY_FIELD_PROB = 1 / 6;
