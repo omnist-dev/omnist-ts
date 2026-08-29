@@ -99,6 +99,17 @@ const MAX_INT_DIGITS = 4300;
 // below) across the whole parse.
 const MAX_NODES = 1_000_000;
 
+// omnist-spec Sec4.2.3 (issue #131): int-part = "0" / (nonzero-digit
+// *DIGIT) -- a leading zero followed by more digits is a lexical error
+// for INTEGER and for NUMDEC/NUMEXP's integer part alike. A bare "0" is
+// never a leading zero (int-part = "0" is its own valid alternative).
+function leadingZeroIntPart(text: string): boolean {
+  const body = text[0] === "-" ? text.slice(1) : text;
+  const m = /^\d+/.exec(body);
+  const intPart = m ? m[0] : body;
+  return intPart.length > 1 && intPart[0] === "0";
+}
+
 // ---------------------------------------------------------------------------
 // Tokenizer
 // ---------------------------------------------------------------------------
@@ -817,6 +828,13 @@ class Parser {
         return this.stringValue(start, end);
       case "INTEGER": {
         const text = this.sc.s.slice(start, end);
+        if (leadingZeroIntPart(text)) {
+          throw this.sc.errorAt(
+            start,
+            `integer literal ${JSON.stringify(text)} has a leading zero`,
+            "parse.leading-zero",
+          );
+        }
         const digits = text[0] === "-" ? text.slice(1) : text;
         if (digits.length > MAX_INT_DIGITS) {
           throw this.sc.errorAt(
@@ -829,8 +847,17 @@ class Parser {
         return BigInt(text);
       }
       case "NUMDEC":
-      case "NUMEXP":
-        return Number(this.sc.s.slice(start, end));
+      case "NUMEXP": {
+        const text = this.sc.s.slice(start, end);
+        if (leadingZeroIntPart(text)) {
+          throw this.sc.errorAt(
+            start,
+            `numeric literal ${JSON.stringify(text)} has a leading zero in its integer part`,
+            "parse.leading-zero",
+          );
+        }
+        return Number(text);
+      }
       case "NANLIT":
         return NaN;
       case "POSINF":

@@ -124,6 +124,14 @@ function identifier(s: string): string {
 }
 
 function unique(base: string, used: Set<string>): string {
+  // identifier(base) is "" only when base itself is "" (see identifier()
+  // above: a non-empty base always yields a non-empty `out`, even when
+  // every character gets replaced). Since issue #130, field() rejects an
+  // empty-string label before this function's only call site (line below)
+  // is ever reached with one -- unique("", ...) is now unreachable through
+  // the public infer()/inferWithReport() API, so the "Rec" fallback is
+  // dead code kept only as defense in depth.
+  /* v8 ignore next */
   let name = identifier(base) || "Rec";
   name = name.charAt(0).toUpperCase() + name.slice(1);
   let cand = name;

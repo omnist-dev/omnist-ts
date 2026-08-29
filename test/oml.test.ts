@@ -486,6 +486,84 @@ describe("numeric edge cases", () => {
     const node2 = readOml("a: 1e-400") as Edge[];
     expect(at(node2, 0).target).toBe(0);
   });
+
+  // Matches oml-grammar/numbers/leading-zero-integer-is-an-error and
+  // oml-grammar/numbers/leading-zero-in-decimal-is-an-error in
+  // vendor/omnist-spec/test-suite/oml-grammar/grammar.json (issue #131).
+  it("a leading zero in an integer literal is an error", () => {
+    expect(() => readOml("n: 01")).toThrow(ParseError);
+    expect(() => readOml("n: 01")).toThrow(/leading zero/);
+  });
+
+  it("a leading zero in a decimal literal's integer part is an error", () => {
+    expect(() => readOml("n: 00.5")).toThrow(ParseError);
+    expect(() => readOml("n: 00.5")).toThrow(/leading zero/);
+  });
+
+  it("a leading zero in an exponent literal's integer part is an error", () => {
+    expect(() => readOml("n: 01e10")).toThrow(ParseError);
+  });
+
+  // Matches oml-grammar/numbers/single-zero-and-negative-forms-are-valid --
+  // a bare 0 alone is never a "leading zero".
+  it("single-zero and negative forms are still valid", () => {
+    expect((readOml("n: 0") as Edge[])[0]?.target).toBe(0n);
+    expect((readOml("n: -0") as Edge[])[0]?.target).toBe(0n);
+    expect((readOml("n: 0.5") as Edge[])[0]?.target).toBe(0.5);
+    expect((readOml("n: -12") as Edge[])[0]?.target).toBe(-12n);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// DATE/TIME/DATETIME/tz-offset value-range validation (spec Sec4.2.4,
+// issue #132) -- already correctly enforced by parseDateToken/parseTimeToken
+// in src/temporal.ts prior to this issue; these tests close the issue by
+// pinning the exact vector shapes against the real parser, including the
+// tz-offset case (a tz-offset with an out-of-range minute component, e.g.
+// +00:60, must be REJECTED, not silently normalized -- confirmed this port
+// already shares TIME's minute-range check for tz-offset rather than
+// implementing a separate, looser one).
+// ---------------------------------------------------------------------------
+
+describe("DATE/TIME/DATETIME/tz-offset value-range validation (issue #132)", () => {
+  it("a month outside 01-12 is an error", () => {
+    expect(() => readOml("d: 2024-13-01")).toThrow(ParseError);
+  });
+
+  it("a day invalid for its month is an error", () => {
+    expect(() => readOml("d: 2024-02-30")).toThrow(ParseError);
+  });
+
+  it("February 29 in a non-leap year is an error", () => {
+    expect(() => readOml("d: 1900-02-29")).toThrow(ParseError);
+  });
+
+  it("February 29 in a leap year is valid", () => {
+    expect(() => readOml("d: 2000-02-29")).not.toThrow();
+  });
+
+  it("an hour outside 00-23 or minute/second outside 00-59 is an error", () => {
+    expect(() => readOml("t: 24:00:00")).toThrow(ParseError);
+    expect(() => readOml("t: 00:60:00")).toThrow(ParseError);
+    expect(() => readOml("t: 00:00:60")).toThrow(ParseError);
+  });
+
+  it("a leap-second spelling (23:59:60) is an error -- no leap seconds", () => {
+    expect(() => readOml("t: 23:59:60")).toThrow(ParseError);
+  });
+
+  it("a tz-offset with an out-of-range minute component is rejected, not normalized", () => {
+    // The historical bug (fixed independently of this issue, per the
+    // Python reference's pre-fix behavior cited in #132): "+00:60" used to
+    // silently normalize to "+01:00" instead of being rejected. Confirm
+    // this port's tz-offset validation shares TIME's exact minute-range
+    // check rather than a separately implemented, looser one.
+    expect(() => readOml("d: 2024-01-01T10:30+00:60")).toThrow(ParseError);
+  });
+
+  it("a tz-offset within range is valid", () => {
+    expect(() => readOml("d: 2024-01-01T10:30+01:00")).not.toThrow();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -1264,6 +1342,13 @@ describe("OML parse error codes (spec Sec8.3.1, issue #108)", () => {
     const err = errOf("a: %");
     expect(err).toBeInstanceOf(ParseError);
     expect(err.code).toBe("parse.unexpected-token");
+    expect(err.path).toBe("1:4");
+  });
+
+  it("a leading-zero numeric literal gets parse.leading-zero and a line:col path", () => {
+    const err = errOf("n: 01");
+    expect(err).toBeInstanceOf(ParseError);
+    expect(err.code).toBe("parse.leading-zero");
     expect(err.path).toBe("1:4");
   });
 
