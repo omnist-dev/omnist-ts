@@ -6,6 +6,41 @@ the first documented release of the TypeScript port; the public API
 mirrors the upstream Python package's `__all__` (camelCase names of the
 same functions).
 
+## [v0.3.0-alpha] -- spec-correctness audit: 9-issue "fail, don't invent" cycle
+
+`vendor/omnist-spec` bumped to `0ac1eac`+, bringing in a batch of grammar
+and format-write corrections; all 9 resulting issues (#125-133) landed
+together in a single PR (#134) because the submodule bump is atomic
+upstream and the conformance-vector CI gate requires every new vector
+to pass, not just a subset.
+
+Real behavior changes:
+
+- `[0,0]` field cardinality is now rejected (`schema.invalid-cardinality`)
+  -- redundant with simply not declaring the field, and was silently
+  accepted before.
+- Empty-string (`schema.empty-label`) and bracket-containing
+  (`schema.bracket-in-label`) field labels are now rejected at schema
+  construction.
+- Leading-zero numeric literals in OML (e.g. `01`, `0.5` written as
+  `00.5`) are now a tokenizer error (`parse.leading-zero`).
+- DATE/TIME/DATETIME/timezone-offset range validation was audited
+  against the spec's new explicit value ranges; this port was already
+  correct, including the specific case of a timezone offset with an
+  out-of-range minute component (e.g. `+00:60`) silently normalizing
+  instead of being rejected.
+- Writes that previously succeeded by silently substituting a lossy
+  fallback now fail outright, since the fallback could collide two
+  distinct inputs into the same output: JSON `NaN`/`Infinity`, XML
+  labels/strings with no legal character representation, XML
+  empty-internal-node ambiguity, and TOML null leaves.
+- XML now escapes a literal carriage return as `&#13;` on write instead
+  of emitting it raw, so it round-trips losslessly instead of being
+  silently dropped or corrupted on re-read.
+
+Verified with 100% test coverage, the full conformance-vector suite,
+the fuzz suite, and the semantic oracle, all against real CI.
+
 ## [v0.2.0-alpha] -- version alignment with sibling ports
 
 Minor-version bump, not a new feature milestone on its own -- the
