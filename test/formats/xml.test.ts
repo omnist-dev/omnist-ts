@@ -569,14 +569,20 @@ describe("writeXml", () => {
     expect(() => writeXml([{ label: "a", target: 1 }, { label: "b", target: 2 }])).toThrow(WriteError);
   });
 
-  it("sanitizes a label that isn't a valid XML name", () => {
-    const out = writeXml([{ label: "a b", target: "1" }]);
-    expect(out).toContain("<a_b>");
+  // issue #126: no single well-defined substitute exists for a label XML's
+  // own name syntax can't represent -- sanitizing invents content, and two
+  // different labels can sanitize to the same tag (confirmed collision:
+  // "my label" and "my_label" both become <my_label>), silently producing
+  // an indistinguishable-from-legitimate repeated-label Document on
+  // read-back. Writing one now fails unconditionally instead of
+  // sanitizing and succeeding.
+  it("a label that isn't a valid XML name fails unconditionally, not sanitized", () => {
+    expect(() => writeXml([{ label: "a b", target: "1" }])).toThrow(WriteError);
+    expect(() => writeXml([{ label: "a b", target: "1" }])).toThrow(/isn't a valid XML name/);
   });
 
-  it("prefixes an underscore when a label starts with a digit", () => {
-    const out = writeXml([{ label: "1tag", target: "x" }]);
-    expect(out).toContain("<_1tag>");
+  it("a label starting with a digit also fails unconditionally, not prefixed", () => {
+    expect(() => writeXml([{ label: "1tag", target: "x" }])).toThrow(WriteError);
   });
 
   it("round-trips bool/null/date leaves as text", () => {
@@ -633,12 +639,9 @@ describe("checkXml", () => {
     expect(rep.adjustments.map((a) => a.code)).toEqual(["null.omitted"]);
   });
 
-  it("reports key.sanitized and temporal.stringified together", () => {
+  it("an invalid label fails unconditionally even alongside an otherwise-adjustable sibling", () => {
     const node = doc({ r: { "a b": 1, d: new Date(Date.UTC(2024, 0, 1)) } }).toData();
-    const rep = checkXml(node);
-    const codes = new Set(rep.adjustments.map((a) => a.code));
-    expect(codes.has("key.sanitized")).toBe(true);
-    expect(codes.has("temporal.stringified")).toBe(true);
+    expect(() => checkXml(node)).toThrow(WriteError);
   });
 
   it("issue #88: a numeric-looking string leaf is no longer flagged -- it round-trips as a string", () => {
@@ -660,59 +663,95 @@ describe("checkXml", () => {
     expect(readXml(writeXml(boolNode))).toEqual([{ label: "a", target: "true" }]);
   });
 
-  it("reports shape.empty_ambiguous for an empty internal node", () => {
+  // issue #128: an empty internal node and an empty-string leaf have no
+  // distinct XML spelling -- both would write as the same self-closing
+  // <tag />, and confirmed live that reading it back always produces the
+  // empty-string leaf, never the empty internal node, with no diagnostic
+  // distinguishing the two collided cases. Writing an empty internal node
+  // now fails unconditionally; an empty-string leaf (never ambiguous on
+  // its own) is untouched.
+  it("an empty internal node fails unconditionally; an empty-string leaf still writes fine", () => {
     const emptyInternal = [{ label: "A", target: [] }];
     const emptyLeaf = [{ label: "A", target: "" }];
-    expect(writeXml(emptyInternal)).toBe(writeXml(emptyLeaf));
-    const repInternal = checkXml(emptyInternal);
-    expect(repInternal.adjustments.map((a) => a.code)).toEqual(["shape.empty_ambiguous"]);
-    expect(readXml(writeXml(emptyInternal))).toEqual([{ label: "A", target: "" }]);
+    expect(() => writeXml(emptyInternal)).toThrow(WriteError);
+    expect(() => writeXml(emptyInternal)).toThrow(/no XML spelling/);
+    expect(() => checkXml(emptyInternal)).toThrow(WriteError);
+
+    expect(writeXml(emptyLeaf)).toBe("<A />");
     const repLeaf = checkXml(emptyLeaf);
     expect(repLeaf.adjustments.length).toBe(0);
     expect(readXml(writeXml(emptyLeaf))).toEqual(emptyLeaf);
   });
 
-  it("reports string.illegal_xml_char with error severity and substitutes U+FFFD on write", () => {
+  // issue #126 (the "string" half of "a label or string XML's own syntax
+  // can't represent at all"): U+FFFD is a different, invented value, not
+  // a lossless representation of the original character -- writing one
+  // now fails unconditionally instead of substituting and succeeding.
+  it("a string containing an XML-illegal character fails unconditionally, not substituted", () => {
     const node = [{ label: "a", target: "x\x01y" }];
-    const rep = checkXml(node);
-    expect(rep.adjustments.map((a) => a.code)).toEqual(["string.illegal_xml_char"]);
-    expect(rep.errors.length).toBe(1);
-    const out = writeXml(node);
-    expect(out).toContain("x�y");
+    expect(() => checkXml(node)).toThrow(WriteError);
+    expect(() => writeXml(node)).toThrow(WriteError);
   });
 
-  it("replaces ALL illegal XML characters on write, not just the first (issue #36)", () => {
-    // Regression test: XML_ILLEGAL_CHAR has no `g` flag (it doubles as a
-    // .test() predicate in scanXmlNode), so passing it directly to
-    // .replace() only substituted the FIRST illegal character and left
-    // every subsequent one as a raw byte in the output. fast-xml-parser
-    // reads that malformed output back without complaint, but a
-    // conformant parser (e.g. Python's xml.etree.ElementTree, which the
-    // omnist Python port uses) rejects it as not well-formed.
+  // issue #126 superseded issue #36's original "sanitize every illegal
+  // character, not just the first" fix -- the write now fails
+  // unconditionally the moment any illegal character is found, so there
+  // is no longer a partially-sanitized string to inspect. The underlying
+  // XML_ILLEGAL_CHAR-has-no-g-flag lesson (a bug in a .replace() call
+  // that only substitutes the first match) is now moot for this code
+  // path since scanXmlNode's `.test()` throws before any `.replace()`
+  // in elementXml is reached.
+  it("a string with multiple illegal XML characters fails unconditionally (issue #36 lineage, superseded by #126)", () => {
     const bad = "a" + String.fromCharCode(1) + "b" + String.fromCharCode(2) + "c";
     const node = [{ label: "r", target: [{ label: "v", target: bad }] }];
-    const out = writeXml(node);
-
-    const illegal = [...out]
-      .map((c) => c.charCodeAt(0))
-      .filter((n) => n < 0x20 && n !== 9 && n !== 10 && n !== 13);
-    expect(illegal).toEqual([]);
-    expect(out).toContain("a�b�c");
-
-    // Bonus verification: the sanitized output round-trips through
-    // readXml (fast-xml-parser) and, more importantly, contains no raw
-    // control characters at all -- the property a strict, conformant XML
-    // 1.0 parser (like Python's ElementTree) requires to accept it.
-    expect(readXml(out)).toEqual([
-      { label: "r", target: [{ label: "v", target: "a�b�c" }] },
-    ]);
+    expect(() => writeXml(node)).toThrow(WriteError);
+    expect(() => writeXml(node)).toThrow(/\$\.r\.v/);
   });
 
-  it("reports string.cr_normalized as a warning, leaving \\r as-is on write", () => {
+  // issue #129: a literal '\r' is no longer reported as a lossy
+  // adjustment at all -- it's now escaped as the numeric character
+  // reference '&#13;', which (unlike a raw '\r') is exempt from XML's
+  // mandatory line-ending normalization on parse and round-trips intact.
+  // See the "escapes a carriage return" describe block below for the
+  // exact-output-bytes coverage.
+  it("a carriage return is no longer a reported adjustment (fixed by escaping, see below)", () => {
     const node = [{ label: "a", target: "x\ry" }];
     const rep = checkXml(node);
-    expect(rep.adjustments.map((a) => a.code)).toEqual(["string.cr_normalized"]);
-    expect(rep.warnings.length).toBe(1);
+    expect(rep.adjustments.map((a) => a.code)).toEqual([]);
+  });
+});
+
+// Matches formats-xml/basic/carriage-return-written-as-numeric-character-reference
+// in vendor/omnist-spec/test-suite/formats-xml/xml.json (issue #129) --
+// a happy-path fix, not an error case: a literal '\r' is escaped as the
+// numeric character reference '&#13;' rather than written raw, since XML
+// normalizes a raw '\r'/'\r\n' to '\n' on parse and would otherwise make
+// a genuine '\r' indistinguishable from a genuine '\n' on read-back.
+describe("carriage return escaping (issue #129)", () => {
+  it("escapes a literal carriage return as the numeric character reference &#13;", () => {
+    const node = [{ label: "root", target: [{ label: "x", target: "a\rb" }] }];
+    const out = writeXml(node);
+    expect(out).toBe("<root>\n  <x>a&#13;b</x>\n</root>\n");
+  });
+
+  it("escapes only the \\r in a \\r\\n pair, leaving \\n raw", () => {
+    const node = [{ label: "root", target: [{ label: "x", target: "a\r\nb" }] }];
+    const out = writeXml(node);
+    expect(out).toContain("a&#13;\nb");
+  });
+
+  it("round-trips a numeric-character-reference-escaped carriage return through readXml", () => {
+    const node = [{ label: "root", target: [{ label: "x", target: "a\rb" }] }];
+    const out = writeXml(node);
+    expect(readXml(out)).toEqual(node);
+  });
+
+  it("also decodes a hex numeric character reference on read, not just decimal", () => {
+    // writeXml only ever emits the decimal form (&#13;), but readXml's
+    // decodeNumericCharRefs() supports both forms XML itself defines --
+    // confirm the hex branch (&#xHH;) independently, not just decimal.
+    const out = "<root>\n  <x>a&#x41;b</x>\n</root>\n";
+    expect(readXml(out)).toEqual([{ label: "root", target: [{ label: "x", target: "aAb" }] }]);
   });
 });
 

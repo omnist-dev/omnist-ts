@@ -248,7 +248,11 @@ export interface WriteJsonOptions {
 export function writeJson(node: Node, opts: WriteJsonOptions = {}): string {
   const { indent = null, strict = false, report } = opts;
   const rep = scanJson(node);
-  const prepared = strict ? node : prepareJson(node);
+  // issue #128: scanJson() above already throws for any non-finite
+  // number before this line, so prepareJson()'s substitution branch can
+  // never actually fire here -- prepareJson(node) is just node, walked
+  // for depth-checking. See prepareJson's own comment.
+  const prepared = prepareJson(node);
   const text = serializeTop(grouped(prepared), indent);
   return finishWrite(text, rep, report === undefined ? { strict } : { strict, report });
 }
@@ -264,7 +268,14 @@ function scanJson(node: Node): WriteReport {
     if (v instanceof Date) {
       rep.add(path, "temporal.stringified", "temporal value written as an ISO-8601 string", "warning");
     } else if (typeof v === "number" && !Number.isFinite(v)) {
-      rep.add(path, "float.special", String(v) + " is not valid JSON; wrote null", "error");
+      // issue #128: NaN/Infinity has no JSON token at all -- substituting
+      // null is not a lossless fallback, it's a different, genuinely valid
+      // value (writing a real null to the same position produces the
+      // identical "null" token, indistinguishable from a substituted NaN
+      // on read-back). Unconditional failure, not a strict-only adjustment.
+      throw new WriteError(
+        "path " + path + ": " + String(v) + " has no JSON representation and no safe substitute",
+      );
     }
   }
   // Sec8.3.8/D-3 (issue #123): JSON's grouping rule (grouped(), document.ts)
@@ -279,15 +290,18 @@ function scanJson(node: Node): WriteReport {
   return rep;
 }
 
-/** Lenient-mode substitution: a NaN/Infinity leaf becomes null so the
- * written text is always valid JSON (mirrors XML's illegal-char -> U+FFFD
- * substitution). strict: true skips this and refuses via WriteError
- * instead, so it never sees the substituted value. */
+/** Depth-checking identity walk over a Node tree. Historically also
+ * substituted a NaN/Infinity leaf with null in lenient mode; since issue
+ * #128, scanJson() above throws unconditionally for a non-finite number
+ * before writeJson ever calls this function, so that branch is provably
+ * unreachable through the public writeJson()/checkJson() API -- kept as
+ * defense in depth rather than removed outright. */
 function prepareJson(node: Node, depth = 0): Node {
   if (Array.isArray(node)) {
     checkWriteDepth(depth);
     return node.map(({ label, target }) => ({ label, target: prepareJson(target, depth + 1) }));
   }
+  /* v8 ignore next 3 -- unreachable: scanJson() always throws first, see above */
   if (typeof node === "number" && !Number.isFinite(node)) {
     return null;
   }
@@ -343,9 +357,15 @@ function serialize(value: unknown, indent: number | null, level: number): string
   if (typeof value === "boolean") return value ? "true" : "false";
   if (typeof value === "bigint") return value.toString();
   if (typeof value === "number") {
+    // issue #128: unreachable through writeJson()'s public API -- scanJson()
+    // always throws for a non-finite number before serialize() is ever
+    // called with one. Kept as defense in depth (serialize() has no
+    // non-finite-input precondition of its own to enforce that here).
+    /* v8 ignore start */
     if (Number.isNaN(value)) return "NaN";
     if (value === Infinity) return "Infinity";
     if (value === -Infinity) return "-Infinity";
+    /* v8 ignore stop */
     const text = String(value);
     // Since issue #98, a bare digit-only token (no "." and no "e"/"E")
     // parses back as a bigint (via tagIntegerLiterals/bigintReviver

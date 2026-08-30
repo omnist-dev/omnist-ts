@@ -106,6 +106,12 @@ const MAX_NODES = 1_000_000;
 function leadingZeroIntPart(text: string): boolean {
   const body = text[0] === "-" ? text.slice(1) : text;
   const m = /^\d+/.exec(body);
+  // Every caller passes only INTEGER/NUMDEC/NUMEXP token text, which the
+  // MASTER tokenizer regex guarantees starts with a digit (after an
+  // optional leading '-') -- so /^\d+/ always matches and `m` is never
+  // null; the `: body` fallback is unreachable defense in depth, not a
+  // real alternative path.
+  /* v8 ignore next */
   const intPart = m ? m[0] : body;
   return intPart.length > 1 && intPart[0] === "0";
 }

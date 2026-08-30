@@ -46,43 +46,40 @@ describe("temporal and special-float handling", () => {
     expect(writeJson(node)).toBe('{"d": "2024-01-01"}');
   });
 
-  it("NaN is reported as float.special (error severity)", () => {
+  // issue #128: NaN/Infinity has no JSON token at all -- substituting
+  // null is not a lossless fallback (a genuine null and a substituted NaN
+  // both write and read back as the identical "null" token, with no way
+  // to tell them apart afterward), so writing one now fails
+  // unconditionally, the same as the label/null cases in xml.ts/toml.ts.
+  it("NaN fails unconditionally, not just as a reported adjustment", () => {
     const node = [{ label: "x", target: NaN }];
-    const rep = checkJson(node);
-    expect(rep.adjustments.map((a) => a.code)).toEqual(["float.special"]);
-    expect(rep.errors.length).toBe(1);
+    expect(() => checkJson(node)).toThrow(WriteError);
+    expect(() => checkJson(node)).toThrow(/no JSON representation/);
   });
 
-  it("lenient write substitutes null for NaN/Infinity/-Infinity and stays valid JSON", () => {
+  it("Infinity/-Infinity/NaN all fail unconditionally on write, not just under strict", () => {
     for (const value of [Infinity, -Infinity, NaN]) {
       const node = [{ label: "a", target: value }];
-      const text = writeJson(node);
-      expect(text).toBe('{"a": null}');
-      expect(() => JSON.parse(text)).not.toThrow();
-      const rep = checkJson(node);
-      expect(rep.adjustments.map((a) => a.code)).toEqual(["float.special"]);
-      expect(rep.errors.length).toBe(1);
-      expect(rep.adjustments[0]?.message).toContain("null");
+      expect(() => writeJson(node)).toThrow(WriteError);
+      expect(() => writeJson(node, { strict: true })).toThrow(WriteError);
     }
   });
 
-  it("strict still refuses special floats instead of substituting", () => {
+  it("strict and non-strict fail identically on a special float", () => {
     const node = [{ label: "a", target: Infinity }];
     expect(() => writeJson(node, { strict: true })).toThrow(WriteError);
+    expect(() => writeJson(node)).toThrow(WriteError);
   });
 
-  it("substitution walks nested structure, not just top-level leaves", () => {
+  it("the failure is detected walking nested structure, not just top-level leaves", () => {
     const node = [
       { label: "r", target: [
         { label: "x", target: Infinity },
         { label: "y", target: 1 },
       ] },
     ];
-    // "y" is a plain JS `number` (not bigint), so it writes with a
-    // decimal point since issue #98 -- see oml.ts's writeScalar for
-    // why a bare digit token would otherwise read back as a
-    // different kind (bigint).
-    expect(writeJson(node)).toBe('{"r": {"x": null, "y": 1.0}}');
+    expect(() => writeJson(node)).toThrow(WriteError);
+    expect(() => writeJson(node)).toThrow(/\$\.r\.x/);
   });
 });
 

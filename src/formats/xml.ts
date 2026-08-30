@@ -97,6 +97,24 @@ const XML_ILLEGAL_CHAR = new RegExp("[\\x00-\\x08\\x0B\\x0C\\x0E-\\x1F\\uD800-\\
 // stateful lastIndex that would silently skip matches across repeated calls.
 const XML_ILLEGAL_CHAR_G = new RegExp(XML_ILLEGAL_CHAR.source, "g");
 
+// issue #129: fast-xml-parser's default config (no `htmlEntities`) decodes
+// only the 5 predefined XML entities (&amp; &lt; &gt; &apos; &quot;), not
+// numeric character references -- confirmed live, `<x>a&#13;b</x>` reads
+// back with the literal text "a&#13;b" unless `htmlEntities: true`, which
+// would also decode the full named HTML entity set (&nbsp;, &copy;, ...),
+// far wider than this port's narrow data-XML profile wants to silently
+// interpret. Decode only the two numeric forms XML itself defines
+// (decimal &#NNN; and hex &#xHHH;) as a narrow post-processing step
+// instead, so writeXml's &#13; escape (and any other numeric reference a
+// well-formed input happens to contain) round-trips exactly.
+const NUMERIC_CHAR_REF = /&#(\d+);|&#x([0-9A-Fa-f]+);/g;
+
+function decodeNumericCharRefs(text: string): string {
+  return text.replace(NUMERIC_CHAR_REF, (_m, dec: string | undefined, hex: string | undefined) =>
+    String.fromCodePoint(Number.parseInt((dec ?? hex) as string, dec !== undefined ? 10 : 16)),
+  );
+}
+
 // fast-xml-parser 5.x (GHSA-gh4j-gqv2-49f6) added a second, *configurable*
 // prototype-pollution guard beyond the hard-rejected __proto__/constructor/
 // prototype trio (see the "prototype-pollution hardening" tests below): by
@@ -268,7 +286,7 @@ function xmlToNode(
   const elementEntries = entries.filter((e) => !("#text" in e));
   if (elementEntries.length === 0) {
     /* v8 ignore next */
-    const text = entries.map((e) => String(e["#text"] ?? "")).join("");
+    const text = decodeNumericCharRefs(entries.map((e) => String(e["#text"] ?? "")).join(""));
     return text;
   }
   // Only an actual node (an edge list -- spec section 2.2 `node = [ edge, ... ]`)
@@ -286,7 +304,7 @@ function xmlToNode(
   for (const entry of entries) {
     if ("#text" in entry) {
       /* v8 ignore next */
-      const t = String(entry["#text"] ?? "");
+      const t = decodeNumericCharRefs(String(entry["#text"] ?? ""));
       if (!sawFirstElement) {
         ownText += t;
       } else {
@@ -441,13 +459,16 @@ function scanXmlNode(node: Node, path: string, rep: WriteReport, depth: number):
   if (Array.isArray(node)) {
     checkWriteDepth(depth);
     if (node.length === 0) {
-      rep.add(
-        path,
-        "shape.empty_ambiguous",
-        "empty internal node (no edges) written as <tag /> and reads back as the empty-string leaf '', not []",
-        "warning",
+      // issue #128: an empty internal node and an empty-string leaf have
+      // no distinct XML spelling -- both would write as the self-closing
+      // <tag />, and read back identically (always as the empty-string
+      // leaf), with no diagnostic distinguishing the two cases that
+      // collided. Unconditional failure, not a strict-only adjustment.
+      throw new WriteError(
+        "path " + path + ": an empty internal node (no edges) has no XML spelling -- " +
+          "it would write as the same <tag /> as an empty-string leaf and be " +
+          "indistinguishable from one on read-back",
       );
-      return;
     }
     const counts = new Map<string, number>();
     for (const { label, target } of node) {
@@ -455,7 +476,15 @@ function scanXmlNode(node: Node, path: string, rep: WriteReport, depth: number):
       counts.set(label, i + 1);
       const p = i === 0 ? path + "." + label : path + "." + label + "[" + String(i) + "]";
       if (!XML_NAME.test(label)) {
-        rep.add(p, "key.sanitized", "label " + JSON.stringify(label) + " isn't a valid XML name; written sanitized", "warning");
+        // issue #126: no single well-defined substitute exists for a label
+        // XML's own name syntax can't represent -- sanitizing invents
+        // content, and two different labels (e.g. "my label" and
+        // "my_label") can sanitize to the same tag, silently producing an
+        // indistinguishable-from-legitimate repeated-label Document on
+        // read-back. Unconditional failure, not a strict-only adjustment.
+        throw new WriteError(
+          "path " + p + ": label " + JSON.stringify(label) + " isn't a valid XML name and has no safe substitute",
+        );
       }
       scanXmlNode(target, p, rep, depth + 1);
     }
@@ -483,27 +512,30 @@ function scanXmlNode(node: Node, path: string, rep: WriteReport, depth: number):
   const vText = v instanceof TimeValue ? v.text : v;
   if (typeof vText === "string") {
     if (XML_ILLEGAL_CHAR.test(vText)) {
-      rep.add(
-        path,
-        "string.illegal_xml_char",
-        "string contains a character XML 1.0 cannot represent (e.g. a C0 control other than tab/LF/CR); it is replaced with U+FFFD on write so the output stays well-formed",
-        "error",
+      // issue #126: same "no safe substitute" principle as the label case
+      // above -- U+FFFD is a different, made-up value, not a lossless
+      // representation of the original string. Unconditional failure.
+      throw new WriteError(
+        "path " + path + ": string contains a character XML 1.0 cannot represent " +
+          "(e.g. a C0 control other than tab/LF/CR) and has no safe substitute",
       );
     }
-    if (vText.includes("\r")) {
-      rep.add(
-        path,
-        "string.cr_normalized",
-        "string contains a carriage return ('\\r'); XML mandates line-ending normalization on parse, so '\\r' (and '\\r\\n') read back as '\\n'",
-        "warning",
-      );
-    }
+    // issue #129: a literal '\r' is NOT reported as lossy any more --
+    // elementXml now escapes it as the numeric character reference
+    // '&#13;', which (unlike a raw '\r') is exempt from XML's mandatory
+    // line-ending normalization on parse and survives intact. Genuinely
+    // lossless, so there is nothing to report here.
   }
 }
 
 function elementXml(tag: string, node: Node, level: number): string {
   if (Array.isArray(node)) {
     checkWriteDepth(level);
+    // issue #128: unreachable -- scanXml() always throws first for an
+    // empty internal node anywhere in the tree, before elementXml ever
+    // runs. Kept as defense in depth (elementXml is also reachable from
+    // a hand-rolled internal call that bypasses scanXml's validation).
+    /* v8 ignore next */
     if (node.length === 0) return "<" + tag + " />";
     const childPad = "  ".repeat(level + 1);
     const parts = node.map(({ label, target }) => childPad + elementXml(xmlName(label), target, level + 1));
@@ -512,14 +544,31 @@ function elementXml(tag: string, node: Node, level: number): string {
   }
   const text = xmlSanitize(xmlText(node));
   if (text === "") return "<" + tag + " />";
-  return "<" + tag + ">" + escapeXmlText(text) + "</" + tag + ">";
+  // issue #129: escape a literal '\r' as the numeric character reference
+  // '&#13;' (not written raw) -- XML normalizes raw '\r'/'\r\n' line
+  // endings to '\n' on parse, so a raw '\r' and a raw '\n' are otherwise
+  // indistinguishable on read-back; '&#13;' is exempt from that
+  // normalization and round-trips exactly. Applied after escapeXmlText so
+  // the '#'/';' in the reference itself is never re-escaped.
+  return "<" + tag + ">" + escapeXmlText(text).replace(/\r/g, "&#13;") + "</" + tag + ">";
 }
 
+// issue #126: scanXmlNode (always run first, via scanXml(), by both
+// writeXml() and checkXml()) already rejects every invalid label with an
+// unconditional WriteError before elementXml/xmlName is ever called on
+// one -- so the sanitization fallback below is unreachable through the
+// public API any more. Kept (not deleted) as defense in depth: xmlName is
+// also reachable from a hand-rolled internal call that bypasses
+// scanXmlNode's validation, and this function's job is exactly to
+// guarantee a *safe* result regardless of caller discipline.
 function xmlName(name: string): string {
+  /* v8 ignore start -- the false branch (an invalid name) is
+   * unreachable through the public API, see the comment above */
   if (XML_NAME.test(name)) return name;
   let safe = name.replace(/[^A-Za-z0-9_.-]/g, "_");
   if (safe === "" || !XML_NAME.test(safe)) safe = "_" + safe;
   return safe;
+  /* v8 ignore stop */
 }
 
 function isoOf(d: Date): string {

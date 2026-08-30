@@ -56,7 +56,13 @@ describe("version and help example", () => {
 });
 
 describe("machine mode --json examples", () => {
-  it("check lossy --json", () => {
+  // issue #127: a null-valued leaf writing to TOML now fails
+  // unconditionally (it has no TOML representation and no safe
+  // substitute), not just under --strict -- so this is now a genuine
+  // command error (exit 2, the same bucket as a structural failure like
+  // multi-root XML), not an exit-0-with-a-warning-report or an
+  // exit-1-strict-refusal.
+  it("check lossy --json (now a hard failure, not a reported adjustment)", () => {
     const { code, out, err } = run([
       "check",
       "examples/cli/lossy.json",
@@ -66,15 +72,14 @@ describe("machine mode --json examples", () => {
       "toml",
       "--json",
     ]);
-    expect(code).toBe(0);
+    expect(code).toBe(2);
     expect(err).toBe("");
     expect(out).toBe(
-      '[{"path": "$.age", "code": "null.omitted", ' +
-        '"message": "null value dropped (TOML has no null)", "severity": "warning"}]\n',
+      '{"ok": false, "message": "path $.age: a null-valued leaf has no TOML representation and no safe substitute (TOML has no null token, and silently dropping the edge is unrecoverable data loss)", "errors": []}\n',
     );
   });
 
-  it("convert --strict lossy --json", () => {
+  it("convert --strict lossy --json (fails identically to non-strict)", () => {
     const { code, out, err } = run([
       "convert",
       "examples/cli/lossy.json",
@@ -85,10 +90,10 @@ describe("machine mode --json examples", () => {
       "--strict",
       "--json",
     ]);
-    expect(code).toBe(1);
+    expect(code).toBe(2);
     expect(err).toBe("");
     expect(out).toBe(
-      '{"ok": false, "message": "warning: $.age: null value dropped (TOML has no null)", "errors": []}\n',
+      '{"ok": false, "message": "path $.age: a null-valued leaf has no TOML representation and no safe substitute (TOML has no null token, and silently dropping the edge is unrecoverable data loss)", "errors": []}\n',
     );
   });
 
@@ -155,7 +160,10 @@ describe("convert examples", () => {
     expect(out).toBe('{"person": {"name": "Ann", "age": 30}}\n');
   });
 
-  it("report on lossy json to toml", () => {
+  // issue #127: null-to-TOML is now an unconditional hard failure (exit
+  // 2, no write happens at all), not a reported-and-succeeded adjustment
+  // -- --report has nothing to report because the write never completes.
+  it("report on lossy json to toml (now a hard failure, nothing written)", () => {
     const { code, out, err } = run([
       "convert",
       "examples/cli/lossy.json",
@@ -165,12 +173,12 @@ describe("convert examples", () => {
       "toml",
       "--report",
     ]);
-    expect(code).toBe(0);
-    expect(out).toBe('name = "Ann"\n');
-    expect(err).toBe("warning: $.age: null value dropped (TOML has no null)\n");
+    expect(code).toBe(2);
+    expect(out).toBe("");
+    expect(err).toBe("error: path $.age: a null-valued leaf has no TOML representation and no safe substitute (TOML has no null token, and silently dropping the edge is unrecoverable data loss)\n");
   });
 
-  it("strict on lossy json to toml", () => {
+  it("strict on lossy json to toml (fails identically to non-strict)", () => {
     const { code, out, err } = run([
       "convert",
       "examples/cli/lossy.json",
@@ -180,21 +188,22 @@ describe("convert examples", () => {
       "toml",
       "--strict",
     ]);
-    expect(code).toBe(1);
+    expect(code).toBe(2);
     expect(out).toBe("");
-    expect(err).toBe("error: warning: $.age: null value dropped (TOML has no null)\n");
+    expect(err).toBe("error: path $.age: a null-valued leaf has no TOML representation and no safe substitute (TOML has no null token, and silently dropping the edge is unrecoverable data loss)\n");
   });
 });
 
 describe("check examples", () => {
-  it("lossy json to toml", () => {
-    const { code, out } = run(["check", "examples/cli/lossy.json", "--from", "json", "--to", "toml"]);
-    expect(code).toBe(0);
-    expect(out).toBe("warning: $.age: null value dropped (TOML has no null)\n");
+  it("lossy json to toml (now a hard failure, not a reported adjustment)", () => {
+    const { code, out, err } = run(["check", "examples/cli/lossy.json", "--from", "json", "--to", "toml"]);
+    expect(code).toBe(2);
+    expect(out).toBe("");
+    expect(err).toBe("error: path $.age: a null-valued leaf has no TOML representation and no safe substitute (TOML has no null token, and silently dropping the edge is unrecoverable data loss)\n");
   });
 
-  it("lossy json to toml strict", () => {
-    const { code, out } = run([
+  it("lossy json to toml strict (fails identically to non-strict)", () => {
+    const { code, out, err } = run([
       "check",
       "examples/cli/lossy.json",
       "--from",
@@ -203,8 +212,9 @@ describe("check examples", () => {
       "toml",
       "--strict",
     ]);
-    expect(code).toBe(1);
-    expect(out).toBe("warning: $.age: null value dropped (TOML has no null)\n");
+    expect(code).toBe(2);
+    expect(out).toBe("");
+    expect(err).toBe("error: path $.age: a null-valued leaf has no TOML representation and no safe substitute (TOML has no null token, and silently dropping the edge is unrecoverable data loss)\n");
   });
 });
 

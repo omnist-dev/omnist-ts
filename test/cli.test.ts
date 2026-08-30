@@ -223,8 +223,8 @@ describe("convert", () => {
 describe("convert report/strict", () => {
   it("report writes and prints adjustment to stderr", () => {
     const p = writeTmp("in.json", '{"a": null}');
-    const dst = p + ".toml";
-    const { code, out, err } = run(["convert", p, "--from", "json", "--to", "toml", "--report", "-o", dst]);
+    const dst = p + ".xml";
+    const { code, out, err } = run(["convert", p, "--from", "json", "--to", "xml", "--report", "-o", dst]);
     expect(code).toBe(0);
     expect(out).toBe("");
     expect(err).toContain("null");
@@ -240,7 +240,7 @@ describe("convert report/strict", () => {
 
   it("report result-format json", () => {
     const p = writeTmp("in.json", '{"a": null}');
-    const { code, err } = run(["convert", p, "--from", "json", "--to", "toml", "--report", "--result-format", "json"]);
+    const { code, err } = run(["convert", p, "--from", "json", "--to", "xml", "--report", "--result-format", "json"]);
     expect(code).toBe(0);
     expect(err.startsWith("[{")).toBe(true);
     expect(err).toContain('"code"');
@@ -248,15 +248,15 @@ describe("convert report/strict", () => {
 
   it("result-format without report has no effect", () => {
     const p = writeTmp("in.json", '{"a": null}');
-    const { code, err } = run(["convert", p, "--from", "json", "--to", "toml", "--result-format", "json"]);
+    const { code, err } = run(["convert", p, "--from", "json", "--to", "xml", "--result-format", "json"]);
     expect(code).toBe(0);
     expect(err).toBe("");
   });
 
   it("strict refuses lossy write, exit 1", () => {
     const p = writeTmp("in.json", '{"a": null}');
-    const dst = p + ".toml";
-    const { code, out, err } = run(["convert", p, "--from", "json", "--to", "toml", "--strict", "-o", dst]);
+    const dst = p + ".xml";
+    const { code, out, err } = run(["convert", p, "--from", "json", "--to", "xml", "--strict", "-o", dst]);
     expect(code).toBe(1);
     expect(out).toBe("");
     expect(fs.existsSync(dst)).toBe(false);
@@ -271,7 +271,7 @@ describe("convert report/strict", () => {
   });
 
   it("strict to oml never fails since oml is always lossless", () => {
-    const p = writeTmp("in.json", '{"a": null}');
+    const p = writeTmp("in.json", '{"a": 1}');
     const { code } = run(["convert", p, "--from", "json", "--to", "oml", "--strict"]);
     expect(code).toBe(0);
   });
@@ -287,7 +287,7 @@ describe("convert report/strict", () => {
 describe("check", () => {
   it("reports without writing, exit always 0 by default", () => {
     const p = writeTmp("in.json", '{"a": null}');
-    const { code, out, err } = run(["check", p, "--from", "json", "--to", "toml"]);
+    const { code, out, err } = run(["check", p, "--from", "json", "--to", "xml"]);
     expect(code).toBe(0);
     expect(out).toContain("null");
     expect(err).toBe("");
@@ -295,7 +295,7 @@ describe("check", () => {
 
   it("report result-format oml", () => {
     const p = writeTmp("in.json", '{"a": null}');
-    const { code, out } = run(["check", p, "--from", "json", "--to", "toml", "--result-format", "oml"]);
+    const { code, out } = run(["check", p, "--from", "json", "--to", "xml", "--result-format", "oml"]);
     expect(code).toBe(0);
     expect(out).toContain("adjustments");
     expect(out).toContain("null");
@@ -317,25 +317,28 @@ describe("check", () => {
 
   it("strict exits 1 when something would adjust", () => {
     const p = writeTmp("in.json", '{"a": null}');
-    const { code } = run(["check", p, "--from", "json", "--to", "toml", "--strict"]);
+    const { code } = run(["check", p, "--from", "json", "--to", "xml", "--strict"]);
     expect(code).toBe(1);
   });
 
   it("strict exits 0 when nothing would adjust", () => {
-    const p = writeTmp("in.json", '{"a": 1}');
-    const { code } = run(["check", p, "--from", "json", "--to", "toml", "--strict"]);
+    // A plain string leaf writes to XML with zero adjustment (unlike a
+    // number, which XML always reports value.stringified for -- XML has
+    // no native typed literals).
+    const p = writeTmp("in.json", '{"a": "x"}');
+    const { code } = run(["check", p, "--from", "json", "--to", "xml", "--strict"]);
     expect(code).toBe(0);
   });
 
   it("without strict always exits 0 even with adjustments", () => {
     const p = writeTmp("in.json", '{"a": null}');
-    const { code } = run(["check", p, "--from", "json", "--to", "toml"]);
+    const { code } = run(["check", p, "--from", "json", "--to", "xml"]);
     expect(code).toBe(0);
   });
 
   it("result-format json", () => {
     const p = writeTmp("in.json", '{"a": null}');
-    const { code, out } = run(["check", p, "--from", "json", "--to", "toml", "--result-format", "json"]);
+    const { code, out } = run(["check", p, "--from", "json", "--to", "xml", "--result-format", "json"]);
     expect(code).toBe(0);
     expect(out.startsWith("[{")).toBe(true);
   });
@@ -1037,8 +1040,8 @@ describe("global --json machine mode", () => {
 
   it("convert WriteError under strict json exit 1", () => {
     const p = writeTmp("in.json", '{"a": null}');
-    const dst = p + ".toml";
-    const { code, out, err } = run(["convert", p, "--from", "json", "--to", "toml", "--strict", "-o", dst, "--json"]);
+    const dst = p + ".xml";
+    const { code, out, err } = run(["convert", p, "--from", "json", "--to", "xml", "--strict", "-o", dst, "--json"]);
     assertJsonError(out, err, code, 1);
     expect(fs.existsSync(dst)).toBe(false);
   });
@@ -1089,8 +1092,8 @@ describe("global --json machine mode", () => {
 
   it("check success json matches result-format", () => {
     const p = writeTmp("in.json", '{"a": null}');
-    const ref = run(["check", p, "--from", "json", "--to", "toml", "--result-format", "json"]);
-    const { code, out, err } = run(["check", p, "--from", "json", "--to", "toml", "--json"]);
+    const ref = run(["check", p, "--from", "json", "--to", "xml", "--result-format", "json"]);
+    const { code, out, err } = run(["check", p, "--from", "json", "--to", "xml", "--json"]);
     expect(code).toBe(0);
     expect(err).toBe("");
     expect(out).toBe(ref.out);
