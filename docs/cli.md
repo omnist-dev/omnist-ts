@@ -115,6 +115,7 @@ $ omnist check examples/cli/lossy.json --from json --to toml --json
 $ omnist schema compatible-with examples/cli/v1.osd examples/cli/v2.osd --json
 {"compatible": true}
 ```
+<!-- verified-by: test/cli-examples.test.ts::check lossy --json (now a hard failure, not a reported adjustment); test/cli-examples.test.ts::compatible-with --json -->
 
 ### Scripting `omnist`
 
@@ -244,6 +245,7 @@ $ omnist convert examples/cli/lossy.json --from json --to toml --strict
 # exit 2, nothing written, stderr (identical to --report's failure above):
 error: path $.age: a null-valued leaf has no TOML representation and no safe substitute (TOML has no null token, and silently dropping the edge is unrecoverable data loss)
 ```
+<!-- verified-by: test/cli-examples.test.ts::report on lossy json to toml (now a hard failure, nothing written); test/cli-examples.test.ts::strict on lossy json to toml (fails identically to non-strict) -->
 
 ## `omnist check`
 
@@ -270,6 +272,7 @@ $ omnist check examples/cli/lossy.json --from json --to toml --strict
 # representation regardless of --strict), stderr:
 error: path $.age: a null-valued leaf has no TOML representation and no safe substitute (TOML has no null token, and silently dropping the edge is unrecoverable data loss)
 ```
+<!-- verified-by: test/cli-examples.test.ts::lossy json to toml (now a hard failure, not a reported adjustment); test/cli-examples.test.ts::lossy json to toml strict (fails identically to non-strict) -->
 
 ## `omnist infer`
 
@@ -483,6 +486,7 @@ record R {
 }
 root R
 ```
+<!-- verified-by: test/cli-examples.test.ts::prune via stdin -->
 
 ## `omnist schema is-empty`
 
