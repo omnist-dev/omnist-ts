@@ -256,16 +256,21 @@ describe("OML round-trip fuzzing", () => {
 // not-contiguous edge list (e.g. [(H,...),( ,...),(H,...)]), which
 // grouped() (document.ts) always collapses regardless of position -- now
 // reported like every other lossy adjustment, not a new kind of loss.
+// float.special (json), null.omitted (toml), key.sanitized and
+// shape.empty_ambiguous (xml) are removed from these sets: since issues
+// #126-#128, each is an unconditional write failure, not a reported
+// adjustment any more -- see the input-shape exclusions right below,
+// which filter fuzzer-generated nodes that would now hit one of those
+// failures out of this round-trip property (the exact failure behavior
+// for each is covered directly in test/formats/*.test.ts instead).
 const ALLOWED_CODES: Record<string, ReadonlySet<string>> = {
-  json: new Set(["temporal.stringified", "float.special", "format.interleaving-lost"]),
+  json: new Set(["temporal.stringified", "format.interleaving-lost"]),
   yaml: new Set(["temporal.stringified", "format.interleaving-lost"]),
-  toml: new Set(["null.omitted", "format.interleaving-lost"]),
+  toml: new Set(["format.interleaving-lost"]),
   xml: new Set([
     "null.omitted",
     "temporal.stringified",
     "value.stringified",
-    "key.sanitized",
-    "shape.empty_ambiguous",
   ]),
 };
 
@@ -273,20 +278,28 @@ function codesOf(rep: Iterable<{ code: string }>): Set<string> {
   return new Set([...rep].map((a) => a.code));
 }
 
+// issue #128: a non-finite (NaN/Infinity/-Infinity) number leaf has no
+// JSON token and no safe substitute any more -- writing one now throws
+// unconditionally instead of being reported as float.special and
+// substituted with null. Excluded here (like hasNel/hasMergeKeyLabel
+// below) so this property exercises the *documented* adjustments only;
+// the exact failure is covered directly in test/formats/json.test.ts.
+function hasNonFiniteNumber(node: Node): boolean {
+  if (Array.isArray(node)) return node.some(({ target }) => hasNonFiniteNumber(target));
+  return typeof node === "number" && !Number.isFinite(node);
+}
+
 describe("JSON round-trip fuzzing (modulo documented adjustments)", () => {
   it("only ever reports documented adjustment codes, and round-trips when unadjusted", () => {
     fc.assert(
       fc.property(boundedNodes(), (node) => {
+        fc.pre(!hasNonFiniteNumber(node));
         const rep = checkJson(node);
         const codes = codesOf(rep);
         for (const c of codes) expect((ALLOWED_CODES.json as ReadonlySet<string>).has(c)).toBe(true);
         const text = writeJson(node);
         const back = readJson(text);
-        if (
-          !codes.has("temporal.stringified") &&
-          !codes.has("float.special") &&
-          !codes.has("format.interleaving-lost")
-        ) {
+        if (!codes.has("temporal.stringified") && !codes.has("format.interleaving-lost")) {
           expect(nanSafeEqualGrouped(back, node)).toBe(true);
         }
       }),
@@ -350,10 +363,21 @@ describe("YAML round-trip fuzzing (modulo documented adjustments)", () => {
   });
 });
 
+// issue #127: a null-valued leaf has no TOML representation and no safe
+// substitute any more -- writing one now throws unconditionally instead
+// of being reported as null.omitted and silently dropped. Excluded here
+// so this property exercises the *documented* adjustments only; the
+// exact failure is covered directly in test/formats/toml.test.ts.
+function hasNullLeaf(node: Node): boolean {
+  if (Array.isArray(node)) return node.some(({ target }) => hasNullLeaf(target));
+  return node === null;
+}
+
 describe("TOML round-trip fuzzing (modulo documented adjustments)", () => {
   it("only ever reports documented adjustment codes, and round-trips when unadjusted", () => {
     fc.assert(
       fc.property(boundedNodes(), (node) => {
+        fc.pre(!hasNullLeaf(node));
         const rep = checkToml(node);
         const codes = codesOf(rep);
         for (const c of codes) expect((ALLOWED_CODES.toml as ReadonlySet<string>).has(c)).toBe(true);
@@ -406,6 +430,18 @@ function hasCriticalLabel(node: Node): boolean {
   return node.some(({ label, target }) => CRITICAL_XML_LABELS.has(label) || hasCriticalLabel(target));
 }
 
+// issue #126: a label that isn't a valid XML name has no safe substitute
+// any more -- writing one now throws unconditionally instead of being
+// sanitized and reported as key.sanitized. Excluded here (both the root
+// label, checked at the call site below, and every nested label) so this
+// property exercises the *documented* adjustments only; the exact
+// failure is covered directly in test/formats/xml.test.ts.
+const XML_NAME_RE = /^[A-Za-z_][A-Za-z0-9_.-]*$/;
+function hasInvalidXmlLabel(node: Node): boolean {
+  if (!Array.isArray(node)) return false;
+  return node.some(({ label, target }) => !XML_NAME_RE.test(label) || hasInvalidXmlLabel(target));
+}
+
 describe("XML round-trip fuzzing (modulo documented adjustments)", () => {
   it("only ever reports documented adjustment codes, and round-trips when unadjusted", () => {
     fc.assert(
@@ -413,6 +449,7 @@ describe("XML round-trip fuzzing (modulo documented adjustments)", () => {
         fc.pre(xmlSafeNode(node));
         const rooted: Node = [{ label, target: node }];
         fc.pre(!CRITICAL_XML_LABELS.has(label) && !hasCriticalLabel(node));
+        fc.pre(XML_NAME_RE.test(label) && !hasInvalidXmlLabel(node));
         const rep = checkXml(rooted);
         const codes = codesOf(rep);
         for (const c of codes) expect((ALLOWED_CODES.xml as ReadonlySet<string>).has(c)).toBe(true);

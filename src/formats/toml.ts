@@ -276,8 +276,16 @@ export function readToml(text: string, opts: ReadTomlOptions = {}): Node {
 // Writing
 // ---------------------------------------------------------------------------
 
-/** Drop edges whose value is null (TOML can't hold null), recording each --
- * mirrors formats.py's _strip_nulls. */
+/** issue #127: writing a null-valued leaf to TOML (which has no null
+ * token) now fails unconditionally, rather than silently dropping the
+ * edge and warning -- unlike every other codec adjustment, there is no
+ * substitute value to fall back to for a dropped edge, only its absence,
+ * and reading the output back leaves zero trace the edge ever existed
+ * (the same "no safe substitute" principle as the label/NaN fixes in
+ * src/formats/xml.ts and json.ts). Name kept from the pre-fix
+ * "drop and report" behavior (mirrors formats.py's old _strip_nulls)
+ * since it still walks the tree the same way; it now throws instead of
+ * stripping. */
 function stripNulls(node: Node, path: string, rep: WriteReport, depth = 0): Node {
   if (!Array.isArray(node)) return node;
   checkWriteDepth(depth);
@@ -288,8 +296,10 @@ function stripNulls(node: Node, path: string, rep: WriteReport, depth = 0): Node
     counts.set(label, i + 1);
     const p = i === 0 ? path + "." + label : path + "." + label + "[" + String(i) + "]";
     if (target === null) {
-      rep.add(p, "null.omitted", "null value dropped (TOML has no null)", "warning");
-      continue;
+      throw new WriteError(
+        "path " + p + ": a null-valued leaf has no TOML representation and no safe substitute " +
+          "(TOML has no null token, and silently dropping the edge is unrecoverable data loss)",
+      );
     }
     out.push({ label, target: stripNulls(target, p, rep, depth + 1) });
   }

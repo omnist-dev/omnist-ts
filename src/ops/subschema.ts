@@ -102,6 +102,13 @@ function recordSub(
   // Every label A may emit must be allowed by B, with a cardinality range
   // B's covers and a type B accepts.
   for (const fa of a.fields) {
+    // fa.max === 0 implies fa.min === 0 too (min <= max, min >= 0), and
+    // issue #125 made [0,0] itself a rejected cardinality at field()
+    // construction time -- a genuine max===0 field can no longer exist on
+    // any Schema built through the public API. Kept as defense in depth
+    // (this function also runs over hand-built Records that could bypass
+    // field()'s validation).
+    /* v8 ignore next */
     if (fa.max === 0) continue; // A never emits this label
     if (fa.min === 0 && fa.type.tag === "ref" && !satA.has(fa.type.name)) continue; // A never actually emits this label either
     const fb = recordField(b, fa.label);

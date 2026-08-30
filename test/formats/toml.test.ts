@@ -140,16 +140,20 @@ describe("writing", () => {
 });
 
 describe("adjustment reports", () => {
-  it("drops a null value with a null.omitted warning", () => {
+  // issue #127: a null-valued leaf has no TOML representation and no safe
+  // substitute (there's no way to distinguish "the writer dropped a null
+  // edge" from "the edge never existed" on read-back), so writing one now
+  // fails unconditionally -- not a lenient-mode "drop and warn" adjustment
+  // any more, and not something strict:true changes either way.
+  it("a null value fails unconditionally, not just under strict", () => {
     const node = doc({ a: 1, b: null }).toData();
-    const rep = checkToml(node);
-    expect(rep.adjustments.map((a) => a.code)).toEqual(["null.omitted"]);
-    expect(rep.warnings.length).toBe(1);
-    expect(rep.errors.length).toBe(0);
-    expect(writeToml(node)).not.toContain("b");
+    expect(() => checkToml(node)).toThrow(WriteError);
+    expect(() => checkToml(node)).toThrow(/no TOML representation/);
+    expect(() => writeToml(node)).toThrow(WriteError);
+    expect(() => writeToml(node, { strict: true })).toThrow(WriteError);
   });
 
-  it("strict raises WriteError on null", () => {
+  it("strict raises WriteError on null (same failure as non-strict)", () => {
     const node = doc({ a: 1, b: null }).toData();
     expect(() => writeToml(node, { strict: true })).toThrow(WriteError);
   });
@@ -162,7 +166,7 @@ describe("adjustment reports", () => {
     expect(rep.ok).toBe(true);
   });
 
-  it("report arg and strict share the same events", () => {
+  it("a null value throws before either report or strict handling ever sees an adjustment", () => {
     const node = doc({ a: 1, b: null }).toData();
     const rep = new WriteReport();
     let caught: unknown;
@@ -172,7 +176,7 @@ describe("adjustment reports", () => {
       caught = exc;
     }
     expect(caught).toBeInstanceOf(WriteError);
-    expect(rep.adjustments.map((a) => a.code)).toEqual(["null.omitted"]);
+    expect(rep.adjustments).toEqual([]);
   });
 
   // Sec8.3.8/D-3 (issue #123): same grouping rule as JSON's -- see

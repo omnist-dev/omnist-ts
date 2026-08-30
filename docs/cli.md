@@ -108,15 +108,14 @@ exits `2`, `--json` or not.
 
 ```sh
 $ omnist check examples/cli/lossy.json --from json --to toml --json
-[{"path": "$.age", "code": "null.omitted", "message": "null value dropped (TOML has no null)", "severity": "warning"}]
-
-$ omnist convert examples/cli/lossy.json --from json --to toml --strict --json
-{"ok": false, "message": "warning: $.age: null value dropped (TOML has no null)", "errors": []}
-# exit 1
+{"ok": false, "message": "path $.age: a null-valued leaf has no TOML representation and no safe substitute (TOML has no null token, and silently dropping the edge is unrecoverable data loss)", "errors": []}
+# exit 2 -- a null-valued leaf has no TOML representation at all (issue #127); a
+# hard failure, not a reported-and-still-successful adjustment
 
 $ omnist schema compatible-with examples/cli/v1.osd examples/cli/v2.osd --json
 {"compatible": true}
 ```
+<!-- verified-by: test/cli-examples.test.ts::check lossy --json (now a hard failure, not a reported adjustment); test/cli-examples.test.ts::compatible-with --json -->
 
 ### Scripting `omnist`
 
@@ -230,19 +229,23 @@ $ cat examples/cli/person.toml | omnist convert - --from toml --to json
 {"person": {"name": "Ann", "age": 30}}
 ```
 
-`--report`/`--strict`, on a document TOML can't hold losslessly
-(`examples/cli/lossy.json` is `{"name": "Ann", "age": null}`):
+On a document TOML can't hold at all
+(`examples/cli/lossy.json` is `{"name": "Ann", "age": null}`) -- a null
+leaf has no TOML representation and no safe substitute (issue #127), so
+the write fails unconditionally; `--report`/`--strict` don't change the
+outcome, only whether there was ever a lossy-but-successful write to
+report on (there isn't, here):
 
 ```sh
 $ omnist convert examples/cli/lossy.json --from json --to toml --report
-name = "Ann"
-# stderr:
-warning: $.age: null value dropped (TOML has no null)
+# exit 2, nothing written, stderr:
+error: path $.age: a null-valued leaf has no TOML representation and no safe substitute (TOML has no null token, and silently dropping the edge is unrecoverable data loss)
 
 $ omnist convert examples/cli/lossy.json --from json --to toml --strict
-# exit 1, nothing written, stderr:
-error: warning: $.age: null value dropped (TOML has no null)
+# exit 2, nothing written, stderr (identical to --report's failure above):
+error: path $.age: a null-valued leaf has no TOML representation and no safe substitute (TOML has no null token, and silently dropping the edge is unrecoverable data loss)
 ```
+<!-- verified-by: test/cli-examples.test.ts::report on lossy json to toml (now a hard failure, nothing written); test/cli-examples.test.ts::strict on lossy json to toml (fails identically to non-strict) -->
 
 ## `omnist check`
 
@@ -261,12 +264,15 @@ adjusting, `1` if anything would.
 
 ```sh
 $ omnist check examples/cli/lossy.json --from json --to toml
-warning: $.age: null value dropped (TOML has no null)
+# exit 2, stderr:
+error: path $.age: a null-valued leaf has no TOML representation and no safe substitute (TOML has no null token, and silently dropping the edge is unrecoverable data loss)
 
 $ omnist check examples/cli/lossy.json --from json --to toml --strict
-warning: $.age: null value dropped (TOML has no null)
-# exit 1
+# exit 2 (identical to non-strict -- a null leaf has no TOML
+# representation regardless of --strict), stderr:
+error: path $.age: a null-valued leaf has no TOML representation and no safe substitute (TOML has no null token, and silently dropping the edge is unrecoverable data loss)
 ```
+<!-- verified-by: test/cli-examples.test.ts::lossy json to toml (now a hard failure, not a reported adjustment); test/cli-examples.test.ts::lossy json to toml strict (fails identically to non-strict) -->
 
 ## `omnist infer`
 
@@ -473,13 +479,14 @@ fields, and optional fields whose type is an unsatisfiable record. Unlike
 `normalize` it never merges records -- it only deletes dead weight:
 
 ```sh
-$ printf 'record R { "x": integer, "ghost" [0,0]: string }\nrecord Orphan { "y": string }\nroot R\n' \
+$ printf 'record R { "x": integer, "ghost" [0,1]: Dead }\nrecord Dead { "d": Dead }\nrecord Orphan { "y": string }\nroot R\n' \
     | omnist schema prune -
 record R {
     "x": integer,
 }
 root R
 ```
+<!-- verified-by: test/cli-examples.test.ts::prune via stdin -->
 
 ## `omnist schema is-empty`
 

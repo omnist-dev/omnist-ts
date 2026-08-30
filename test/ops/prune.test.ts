@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { parseSchema } from "../../src/osd.js";
-import { recordField, type Record as OmnistRecord, type Schema } from "../../src/schema.js";
+import { recordField, ref, Schema, t, type Record as OmnistRecord } from "../../src/schema.js";
 import { isEmpty, prune, satisfiableSet } from "../../src/ops/prune.js";
 import { equivalent } from "../../src/ops/subschema.js";
 
@@ -48,7 +48,22 @@ describe("prune", () => {
   });
 
   it("drops max=0 fields", () => {
-    const s = parseSchema('record R { "dead" [0,0]: integer, "live": integer }\nroot R');
+    // [0,0] is rejected at construction time as of issue #125 (redundant
+    // with not declaring the field at all), so the public parseSchema/field
+    // API can no longer produce a max===0 field to exercise prune's dead-field
+    // branch through. Build the Record directly, bypassing field()'s
+    // validation, to keep that internal-defense-in-depth branch covered.
+    const s = new Schema(ref("R"), new Map([
+      [
+        "R",
+        {
+          fields: [
+            { label: "dead", type: t.integer, min: 0, max: 0 },
+            { label: "live", type: t.integer, min: 1, max: 1 },
+          ],
+        },
+      ],
+    ]));
     const p = prune(s);
     expect(recordField(getRec(p, "R"), "dead")).toBeUndefined();
     expect(recordField(getRec(p, "R"), "live")).not.toBeUndefined();
@@ -63,14 +78,14 @@ describe("prune", () => {
 
   it("is equivalent to the original", () => {
     const s = parseSchema(
-      'record R { "dead" [0,0]: integer, "live": integer }\nrecord Unused { "z": integer }\nroot R',
+      'record R { "dead" [0,1]: Dead, "live": integer }\nrecord Dead { "d": Dead }\nrecord Unused { "z": integer }\nroot R',
     );
     expect(equivalent(prune(s), s)).toBe(true);
   });
 
   it("is idempotent", () => {
     const s = parseSchema(
-      'record R { "dead" [0,0]: integer, "live": integer }\nrecord Unused { "z": integer }\nroot R',
+      'record R { "dead" [0,1]: Dead, "live": integer }\nrecord Dead { "d": Dead }\nrecord Unused { "z": integer }\nroot R',
     );
     const once = prune(s);
     const twice = prune(once);

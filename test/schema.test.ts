@@ -84,6 +84,24 @@ describe("Field / Record construction errors", () => {
     expect(() => field("x", t.string, 1, null)).not.toThrow();
   });
 
+  it("field() rejects [0,0] cardinality (issue #125) -- redundant with not declaring the field", () => {
+    expect(() => field("x", t.string, 0, 0)).toThrow(/invalid cardinality/);
+    // [0,1] and [1,1] stay legal -- only the exact [0,0] pair is new.
+    expect(() => field("x", t.string, 0, 1)).not.toThrow();
+  });
+
+  it("field() rejects an empty-string label (issue #130)", () => {
+    expect(() => field("", t.string)).toThrow(SchemaError);
+    expect(() => field("", t.string)).toThrow(/empty-label/);
+  });
+
+  it("field() rejects '[' or ']' anywhere in a label (issue #133)", () => {
+    expect(() => field("a[1]", t.string)).toThrow(/bracket-in-label/);
+    expect(() => field("total]", t.string)).toThrow(/bracket-in-label/);
+    expect(() => field("[x", t.string)).toThrow(/bracket-in-label/);
+    expect(() => field("ok", t.string)).not.toThrow();
+  });
+
   it("field() cardinality_str renders the common shapes", () => {
     expect(cardinalityStr(field("x", t.string, 1, 1))).toBe("exactly 1");
     expect(cardinalityStr(field("x", t.string, 0, 1))).toBe("0 or 1");

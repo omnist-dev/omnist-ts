@@ -86,9 +86,29 @@ describeIfVendored("main() against the real vendor/omnist-spec/test-suite", () =
     // (formats-json/basic/cross-label-interleaving-lost-and-reported) --
     // 155 vs 153, all passing for real (no new skips: parse/write both
     // carry structured diagnostics already).
+    //
+    // Bumped again to 0ac1eac (issues #125-133, the spec-correctness
+    // audit series), which adds 17 more vectors (172 vs 155). This one PR
+    // implements the whole series in 3 commits:
+    //  1. #125/#130/#133 (schema-level rejected-input checks: [0,0]
+    //     cardinality, empty labels, bracket-in-label) -- 4 osd-grammar
+    //     vectors move from FAIL to SKIP under the existing "syntax-level
+    //     SchemaError carries no structured path/code" category.
+    //  2. #131 (OML leading-zero numeric literals, real code change) and
+    //     #132 (DATE/TIME/DATETIME/tz-offset range validation, including
+    //     the tz-offset 00:60-normalizes-to-01:00 bug) -- #132 turned out
+    //     to already be correctly implemented in this port, verified
+    //     empirically (see PR body); #131's 2 vectors move from FAIL to
+    //     PASS (structured ParseError diagnostics, no new skip).
+    //  3. #126/#127/#128/#129 (format write-side "fail, don't invent"
+    //     fixes -- JSON NaN/Infinity, TOML null leaf, XML illegal-char
+    //     label, XML empty internal node now unconditional failures; XML
+    //     CR now escaped as &#13; instead of written raw) -- 5 vectors
+    //     move from FAIL to PASS.
+    // Net: all 17 new vectors resolved, 0 real failures remain.
     expect(exitCode).toBe(0);
     expect(logs.at(-1)).toBe(
-      "\n118 passed, 0 failed, 37 skipped (of 155 vectors) -- " +
+      "\n124 passed, 0 failed, 48 skipped (of 172 vectors) -- " +
         "diagnostics compared in code-agnostic mode (Sec8.5.2 rule 4)",
     );
   });
@@ -96,7 +116,7 @@ describeIfVendored("main() against the real vendor/omnist-spec/test-suite", () =
   it("every skip cites an explicit, reasoned category", () => {
     const { logs } = withCapturedConsole(() => main());
     const skipLines = logs.filter((l) => l.startsWith("[SKIP]"));
-    expect(skipLines.length).toBe(37);
+    expect(skipLines.length).toBe(48);
     for (const line of skipLines) {
       // D-6 (integer/number kind collapse) is CLOSED as of issue #98 --
       // no vector cites it anymore (see tools/conformance/vectorRunner.ts).
@@ -106,8 +126,8 @@ describeIfVendored("main() against the real vendor/omnist-spec/test-suite", () =
     }
   });
 
-  it("iterVectors discovers all 155 real vectors", () => {
-    expect(iterVectors(REAL_SUITE_DIR).length).toBe(155);
+  it("iterVectors discovers all 172 real vectors", () => {
+    expect(iterVectors(REAL_SUITE_DIR).length).toBe(172);
   });
 });
 

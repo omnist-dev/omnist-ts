@@ -74,9 +74,13 @@ describe("infer: generated-name identifier edge cases", () => {
     expect([...s.env.keys()]).toContain("My_field");
   });
 
-  it("an empty-string label falls back to the generated name \"Rec\"", () => {
-    const s = infer([doc({ "": { x: 1 } })]);
-    expect(s.env.has("Rec")).toBe(true);
+  it("an empty-string label is rejected (issue #130) rather than falling back to a generated name", () => {
+    // Previously fell back to a generated record name "Rec"; since issue
+    // #130, field() rejects an empty-string label unconditionally (it
+    // names nothing a caller could ever reference), so an empty-string key
+    // anywhere in an inferred sample is now a hard error, not silently
+    // renamed.
+    expect(() => infer([doc({ "": { x: 1 } })])).toThrow(/empty-label/);
   });
 });
 
