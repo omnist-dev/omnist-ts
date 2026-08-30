@@ -351,6 +351,17 @@ function runMaterialize(v: Vector): Result {
   return fail("expected failure, materialize succeeded");
 }
 
+/**
+ * Sec8.5.3: strip whitespace strictly between '>' and '<' before comparing
+ * a write vector's expected/actual text for XML. Safe because this library
+ * never produces mixed-content XML (Document model Sec2: a node has either
+ * child edges or one scalar value, never both), so this whitespace can
+ * only ever be inter-tag formatting, never real text data.
+ */
+function normalizeXmlWhitespace(text: string): string {
+  return text.replace(/>\s+</g, "><");
+}
+
 function runWrite(v: Vector): Result {
   const inp = v.input;
   const expect = v.expect;
@@ -366,8 +377,16 @@ function runWrite(v: Vector): Result {
     return fail(`expected success, threw: ${errorMessage(e)}`);
   }
   if (expect.ok !== true) return fail("expected failure, write succeeded");
-  if (expect.text !== undefined && text.trim() !== (expect.text as string).trim()) {
-    return fail(`expected text ${JSON.stringify(expect.text)}, got ${JSON.stringify(text.trim())}`);
+  if (expect.text !== undefined) {
+    let got = text.trim();
+    let want = (expect.text as string).trim();
+    if (fmt === "xml") {
+      got = normalizeXmlWhitespace(got);
+      want = normalizeXmlWhitespace(want);
+    }
+    if (got !== want) {
+      return fail(`expected text ${JSON.stringify(expect.text)}, got ${JSON.stringify(text.trim())}`);
+    }
   }
   if (expect.diagnostics !== undefined) {
     const expPaths = paths(asDiagnostics(expect.diagnostics));
