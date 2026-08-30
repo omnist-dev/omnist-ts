@@ -683,6 +683,13 @@ describe("write", () => {
     expect(r).toEqual({ status: "fail", message: "expected failure, write succeeded" });
   });
 
+  it("passes when write succeeds and no text assertion is present", () => {
+    const r = runVector(
+      vec("write", { format: "json", document: { edges: [["a", { scalar: { kind: "integer", value: 1 } }]] } }, { ok: true }),
+    );
+    expect(r).toEqual({ status: "pass", message: "ok" });
+  });
+
   it("passes with matching diagnostics", () => {
     const r = runVector(
       vec(
@@ -704,6 +711,31 @@ describe("write", () => {
     );
     expect(r.status).toBe("fail");
     expect(r.message).toContain("diagnostic paths differ");
+  });
+
+  it("passes for XML when only insignificant inter-tag whitespace differs (Sec8.5.3)", () => {
+    // A vector written with indentation (matching a different port's
+    // writer convention) must still pass -- inter-tag whitespace isn't
+    // normative.
+    const r = runVector(
+      vec(
+        "write",
+        { format: "xml", document: { edges: [["root", { edges: [["x", { scalar: { kind: "string", value: "hi" } }]] }]] } },
+        { ok: true, text: "<root>\n  <x>hi</x>\n</root>\n" },
+      ),
+    );
+    expect(r).toEqual({ status: "pass", message: "ok" });
+  });
+
+  it("still fails for XML on a genuine content mismatch, not just whitespace", () => {
+    const r = runVector(
+      vec(
+        "write",
+        { format: "xml", document: { edges: [["root", { edges: [["x", { scalar: { kind: "string", value: "hi" } }]] }]] } },
+        { ok: true, text: "<root><x>bye</x></root>" },
+      ),
+    );
+    expect(r.status).toBe("fail");
   });
 });
 
