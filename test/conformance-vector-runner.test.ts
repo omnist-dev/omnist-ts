@@ -119,9 +119,26 @@ describeIfVendored("main() against the real vendor/omnist-spec/test-suite", () =
     // vectorRunner.ts's existing unknown-operation dispatch, the same
     // mechanism every other not-yet-wired operation already uses, not a
     // new harness path. Net: 24 new skips, 0 new failures.
+    //
+    // Bumped again to 47a84d6 (v0.9.1-beta, PRs omnist-spec#58-60), which
+    // adds 5 more vectors (204 vs 199): Sec3.3 S-8 (a Name -- record name
+    // or ref target -- MUST match [A-Za-z_][A-Za-z0-9_]*) added 4 new
+    // extensions-osd-oml/parse-errors vectors, all SKIP for the same
+    // not-implemented-yet reason as every other extensions-osd-oml
+    // vector -- no behavior change, this port's own OSD tokenizer
+    // already only ever lexes NAME as exactly that pattern (verified
+    // against src/osd.ts's NAME regex, not just a clean run). Sec3.3 S-3
+    // (reserved-name matching is exact and case-sensitive) added one new
+    // osd-grammar/reserved-names characterization vector, which PASSes --
+    // verified against src/schema.ts's and src/osd.ts's RESERVED_*_NAMES
+    // Set.has() checks, plain case-sensitive equality with no
+    // case-folding anywhere. v0.9.1-beta itself is a same-day patch
+    // fixing a typo in that S-3 vector (an unquoted field label) caught
+    // by another port's verification pass. Net: 5 new vectors, 1 new
+    // pass, 4 new skips, 0 new failures.
     expect(exitCode).toBe(0);
     expect(logs.at(-1)).toBe(
-      "\n127 passed, 0 failed, 72 skipped (of 199 vectors) -- " +
+      "\n128 passed, 0 failed, 76 skipped (of 204 vectors) -- " +
         "diagnostics compared in code-agnostic mode (Sec8.5.2 rule 4)",
     );
   });
@@ -129,7 +146,7 @@ describeIfVendored("main() against the real vendor/omnist-spec/test-suite", () =
   it("every skip cites an explicit, reasoned category", () => {
     const { logs } = withCapturedConsole(() => main());
     const skipLines = logs.filter((l) => l.startsWith("[SKIP]"));
-    expect(skipLines.length).toBe(72);
+    expect(skipLines.length).toBe(76);
     for (const line of skipLines) {
       // D-6 (integer/number kind collapse) is CLOSED as of issue #98 --
       // no vector cites it anymore (see tools/conformance/vectorRunner.ts).
@@ -142,8 +159,8 @@ describeIfVendored("main() against the real vendor/omnist-spec/test-suite", () =
     }
   });
 
-  it("iterVectors discovers all 199 real vectors", () => {
-    expect(iterVectors(REAL_SUITE_DIR).length).toBe(199);
+  it("iterVectors discovers all 204 real vectors", () => {
+    expect(iterVectors(REAL_SUITE_DIR).length).toBe(204);
   });
 });
 
