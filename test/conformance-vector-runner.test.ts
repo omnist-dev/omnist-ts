@@ -106,9 +106,22 @@ describeIfVendored("main() against the real vendor/omnist-spec/test-suite", () =
     //     CR now escaped as &#13; instead of written raw) -- 5 vectors
     //     move from FAIL to PASS.
     // Net: all 17 new vectors resolved, 0 real failures remain.
+    //
+    // Bumped again to c4141d0 (v0.7.0-beta, PR omnist-spec#53/#55: the
+    // OSD-OML extension -- a schema-as-document representation), which
+    // adds 27 more vectors (199 vs 172): 3 new osd-grammar/prune/normalize
+    // characterization vectors for Sec3.3's canonical-serialization-order
+    // principles (all PASS -- compareCodepoint, issue #136/PR #137, was
+    // already in place) plus 24 new extensions-osd-oml vectors exercising
+    // parse_schema_oml/write_schema_oml, neither of which this port
+    // implements yet (Sec9.6 of the divergence ledger already tracks
+    // OSD-OML as "not yet implemented" for every port) -- these SKIP via
+    // vectorRunner.ts's existing unknown-operation dispatch, the same
+    // mechanism every other not-yet-wired operation already uses, not a
+    // new harness path. Net: 24 new skips, 0 new failures.
     expect(exitCode).toBe(0);
     expect(logs.at(-1)).toBe(
-      "\n124 passed, 0 failed, 48 skipped (of 172 vectors) -- " +
+      "\n127 passed, 0 failed, 72 skipped (of 199 vectors) -- " +
         "diagnostics compared in code-agnostic mode (Sec8.5.2 rule 4)",
     );
   });
@@ -116,18 +129,21 @@ describeIfVendored("main() against the real vendor/omnist-spec/test-suite", () =
   it("every skip cites an explicit, reasoned category", () => {
     const { logs } = withCapturedConsole(() => main());
     const skipLines = logs.filter((l) => l.startsWith("[SKIP]"));
-    expect(skipLines.length).toBe(48);
+    expect(skipLines.length).toBe(72);
     for (const line of skipLines) {
       // D-6 (integer/number kind collapse) is CLOSED as of issue #98 --
       // no vector cites it anymore (see tools/conformance/vectorRunner.ts).
+      // "no driver wired up" covers the new extensions-osd-oml vectors
+      // (parse_schema_oml/write_schema_oml -- OSD-OML isn't implemented
+      // by this port yet, same as every other omnist port).
       expect(line).toMatch(
-        /: (not yet implemented|syntax-level \w+Error carries no structured path\/code)/,
+        /: (not yet implemented|syntax-level \w+Error carries no structured path\/code|no driver wired up yet for operation)/,
       );
     }
   });
 
-  it("iterVectors discovers all 172 real vectors", () => {
-    expect(iterVectors(REAL_SUITE_DIR).length).toBe(172);
+  it("iterVectors discovers all 199 real vectors", () => {
+    expect(iterVectors(REAL_SUITE_DIR).length).toBe(199);
   });
 });
 
