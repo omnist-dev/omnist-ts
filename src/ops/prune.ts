@@ -6,7 +6,7 @@
  * record is *satisfiable* iff it admits at least one finite document, and
  * `prune` returns an equivalent schema with everything that can never
  * match removed. This is the precondition Algorithm 4 (SubschemaSA,
- * `ops/subschema.ts`) needs to be correct -- see `docs/design/model.md`
+ * `ops/subschema.ts`) needs to be correct -- see spec.omnist.dev's Schema Algebra chapter (Sec6)
  * §12 for the full satisfiability subsection.
  *
  * Satisfiability is a least fixpoint over the env's records: a record is

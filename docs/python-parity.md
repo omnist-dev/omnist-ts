@@ -2,7 +2,7 @@
 
 `omnist-ts` is a hand-written port of the Python
 [`omnist`](https://github.com/omnist-dev/omnist) library, built against the
-Python source and [the model spec](design/model.md) rather than transpiled.
+Python source and [the spec's model chapters](https://spec.omnist.dev/02-document-model) rather than transpiled.
 This page records a systematic side-by-side comparison of the two
 implementations, done after the full port and the security/performance
 hardening pass shipped (issue
@@ -16,6 +16,17 @@ results: `omnist` 0.7.8 on CPython 3.13, against this port at
 - [Confirmed identical](#confirmed-identical)
 - [Deliberate, documented divergences](#deliberate-documented-divergences)
 - [Newly discovered gaps](#newly-discovered-gaps)
+
+**Why this page exists alongside omnist-spec's divergence ledger
+(Sec9):** the ledger tracks current, named, cross-port divergences
+(`D-1`, `D-2`, ...) at the spec level, maintained as an ongoing summary.
+This page is a one-time, deeply detailed, test-backed comparison
+against one specific Python version at one specific point in this
+port's history -- most of the behavior it documents was folded into the
+ledger as it was found, but the worked examples and exact test
+references below aren't reproduced there. Kept for that detail, not
+because it's the current source of truth for cross-port status --
+check the ledger for that.
 
 ## Confirmed identical
 
@@ -49,7 +60,7 @@ wrapped in an edge. Faithful parity, not a port defect, so it stays as-is.
 `src/schema.ts` against `omnist/schema.py`. A 144-cell `matchesKind` and
 `valueKind` cross-table over 18 representative values and all seven scalar
 kinds matched in 139 cells; the five that differ are the documented scalar
-collapses below. The two rules model.md section 10 singles out hold
+collapses below. The two rules omnist-spec Sec7.2 singles out hold
 exactly:
 
 - **`boolean` never satisfies `integer` or `number`**, and nothing but a
@@ -67,7 +78,7 @@ resolves to itself and short-circuits conformance on both sides, and
 ### OSD
 
 `src/osd.ts` against `omnist/osd.py`. A 32-case corpus covering every
-production in [the OSD grammar](design/schema-osd-grammar.md) plus its
+production in [the spec's OSD grammar chapter](https://spec.omnist.dev/05-osd-grammar) plus its
 error paths -- all four cardinality spellings, empty and reversed
 cardinality, a fractional bound, `?` on a scalar and (illegally) on a ref,
 `any` and the rejected `any?`, reserved scalar and `any` record names,
@@ -79,7 +90,7 @@ cases**, both the accepted parses (compared as round-tripped
 ### OML
 
 `src/oml.ts` against `omnist/oml.py`. A 78-case corpus covering
-[the OML grammar](design/oml-grammar.md): integer, float and exponent
+[the spec's OML grammar chapter](https://spec.omnist.dev/04-oml-grammar): integer, float and exponent
 spellings; the rejected hex, binary, octal, underscore-separated and
 leading-zero forms; `nan` and `inf`; the boolean and null keywords and
 their rejected capitalizations; the six accepted string escapes plus five
@@ -122,7 +133,7 @@ with the same two-pass label ordering, the same widening once any sample
 repeats a label, the same `integer`/`number` subset collapse, the same
 generated-name uniquifying, and the same `allowAny` fallback reasons.
 `materialize` implements the same conversion and rejection table from
-model.md section 10 and reuses `matchesKind` as its shape check, so
+omnist-spec Sec7.2 and reuses `matchesKind` as its shape check, so
 `validate` and `materialize` agree -- with the one exception recorded as a
 gap below.
 
@@ -271,7 +282,7 @@ side, and the Python behavior is CPython-library leniency:
 `buildNode` treats a `Map` as an ordered-entries container alongside a plain
 object; Python accepts only a `dict`. This is input convenience at the
 boundary and is unrelated to the refused schema-level `Map` type (see
-[Openness](design/openness.md)).
+the spec's `any` type section, Sec3.7).
 
 ## Newly discovered gaps
 
@@ -291,7 +302,7 @@ Issue [#49](https://github.com/omnist-dev/omnist-ts/issues/49), fixed in
 (`Date.parse("2024-02-30")` is 1 March, not `NaN`). So a nonexistent
 calendar date validated as a `date`, and the same string with a time
 attached validated as a `datetime`. Python rejects both via
-`date.fromisoformat`, and model.md section 10 says a string that is not a
+`date.fromisoformat`, and omnist-spec Sec7.2 says a string that is not a
 valid bare ISO date must be rejected.
 
 It also broke an invariant `src/deserialize.ts` states outright -- that

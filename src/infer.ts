@@ -1,6 +1,6 @@
 /**
  * Infer a `Schema` from example Documents, on the canonical model. Ported
- * from `omnist/infer.py`. See `docs/design/model.md` §11 (inference
+ * from `omnist/infer.py`. See omnist-spec Sec6.10 (`infer`,
  * algorithm).
  *
  * Given one or more sample Documents, draft a `record` schema that accepts
@@ -12,7 +12,7 @@
  * - scalar children become one `Scalar` (nullable if any sample was null).
  *   Samples disagreeing on scalar shape raise, except `integer`/`number`
  *   mixing, which collapses to `number` (the one subset relation between
- *   scalars) -- see `docs/design/model.md`;
+ *   scalars) -- see spec.omnist.dev's Schema Algebra chapter (Sec6);
  * - object children become a nested, named `record` (recursively).
  *
  * Since the model has no inline records, nested records are given generated

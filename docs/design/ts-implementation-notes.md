@@ -5,7 +5,7 @@ specific to porting the model into TypeScript's type system and tooling.
 Each is a prerequisite for the issue(s) noted, so an implementer can build
 without stopping to ask. Ported behavior itself is *not* re-decided here —
 only "how do we represent/organize this in TS," never "what should it do"
-(that answer is always the Python source + `docs/design/model.md`).
+(that answer is always the Python source + [spec.omnist.dev's Schema Model chapter](https://spec.omnist.dev/03-schema-model)).
 
 ## 1. `Type` representation: discriminated union, not a class hierarchy
 

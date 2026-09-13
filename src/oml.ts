@@ -1,7 +1,7 @@
 /**
  * OML (Omnist Markup Language) -- the native codec for the Document model.
  * Ported from `omnist/oml.py`. Normative grammar:
- * `docs/design/oml-grammar.md` in the Python repo.
+ * spec.omnist.dev's OML grammar chapter (Sec4).
  *
  * OML is omnist's own serialization format: every Document round-trips
  * through it exactly, with no adjustment ever needed (unlike JSON/YAML/
@@ -198,7 +198,7 @@ const DATETIME_SRC = `${DATE_SRC}T${TIME_BODY_SRC}`;
 
 
 // One compiled alternation, tried in the exact priority order the grammar
-// (docs/design/oml-grammar.md §1) specifies -- see that file and
+// (omnist-spec Sec4.1) specifies -- see spec.omnist.dev and
 // omnist/oml.py's own _MASTER for the rationale behind the ordering
 // (DQUOTE3 before DQFAST, DATETIME before DATE before TIME, the three
 // reserved float spellings before INTEGER/IDENT). JS's `y` (sticky) flag

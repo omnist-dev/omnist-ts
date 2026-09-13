@@ -13,11 +13,7 @@ here, in roughly this order:
 | [API reference](api.md) | Every public name with signatures. |
 | [CLI](cli.md) | The `omnist` command-line tool. |
 | [Formats](formats/overview.md) | How each format maps to the model -- [OML](formats/oml.md) / [JSON](formats/json.md) / [YAML](formats/yaml.md) / [TOML](formats/toml.md) / [XML](formats/xml.md). |
-| [Model spec](design/model.md) | The formal definitions of the Document and Schema models. |
-| [OML-Core grammar](design/oml-grammar.md) | The formal ABNF grammar for OML. |
-| [OSD grammar](design/schema-osd-grammar.md) | The formal ABNF grammar for OSD. |
-| [The `any` type](design/any-type-spec.md) | The formal spec for `any`-typed fields. |
-| [Openness](design/openness.md) | The design note on schema openness, deferred beyond v1.0. |
+| [Spec: formal model, grammars & algebra](https://spec.omnist.dev) | The normative Document/Schema models, OML/OSD grammars, and schema algebra -- language-agnostic, authoritative for every omnist port. |
 | [Glossary](glossary.md) | One definition per term used across the docs and code. |
 | [Testing](testing.md) | The test suite: layout, coverage tooling and target, fuzzing, the semantic oracle, and the doc-example CI gate. |
 | [Repo layout](layout.md) | How the repo is organized: `src/*.ts` responsibilities, the docs page map, the test file map. |

@@ -4,8 +4,8 @@
  *
  * YAML goes through the same JSON-shaped grouping (grouped()) as JSON --
  * same-label edges collapse into an array, a single occurrence stays bare
- * (the schema-less count-1 fallback -- see docs/design/model.md section
- * 9(1) and src/formats/json.ts's file-top comment).
+ * (the schema-less count-1 fallback -- see omnist-spec Sec7.3, writing,
+ * and src/formats/json.ts's file-top comment).
  *
  * Uses the `yaml` npm package (an optionalDependency for consumers, a
  * devDependency here for testing). Both reading and writing use the

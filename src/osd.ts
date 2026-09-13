@@ -1,7 +1,7 @@
 /**
  * OSD (Omnist Schema Definition) -- the text language for the Schema model.
  * Ported from `omnist/osd.py`. Normative grammar:
- * `docs/design/schema-osd-grammar.md` in the Python repo.
+ * spec.omnist.dev's OSD grammar chapter (Sec5).
  *
  * ```
  * schema      := record* 'root' NAME
@@ -18,7 +18,7 @@
  * There is no value-domain composition: no `|`, no enum, no literal-valued
  * fields, and no `union`/`domain` declaration. A field's type is always
  * either one of the seven scalars, optionally `?`, `any`, or a `Ref` to a
- * named record. See `docs/design/model.md` for why: a composable
+ * named record. See spec.omnist.dev's Schema Model chapter (Sec3) for why: a composable
  * value-domain made schema-directed deserialization ambiguous.
  */
 

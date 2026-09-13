@@ -20,9 +20,9 @@
  * including XML's interleaved repeated elements, which a plain object with
  * array-valued keys cannot. `Doc` is a thin, guarded wrapper around a node,
  * with navigation helpers. Order is preserved (it is data); schema
- * validation ignores it. See `docs/design/model.md`.
+ * validation ignores it. See spec.omnist.dev's Document Model chapter (Sec2).
  *
- * ## Scalar-kind mapping (see model.md §10)
+ * ## Scalar-kind mapping (see omnist-spec Sec7.2)
  *
  * Unlike Python (which has distinct `int`/`float`), JS has one `number`
  * type -- both the `integer` and `number` Schema scalar kinds (issue #3)
@@ -424,7 +424,7 @@ export class Doc {
    *
    * A label seen once stays a single value; a label seen more than once
    * becomes an array (the schema-less fallback of the count-1 rule, see
-   * `docs/design/model.md` §9(1)).
+   * omnist-spec Sec7.3, writing).
    */
   toGrouped(): unknown {
     return grouped(this._node);
