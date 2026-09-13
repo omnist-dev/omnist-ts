@@ -132,7 +132,7 @@ case: `01-schema-exact-equal-different-field-order`. `schemaEquals`
 (`src/schema.ts`, via `recordEquals`) compares a record's fields
 positionally, so two records that differ only in field *declaration
 order* compare unequal in exact mode. Field order isn't semantically
-significant per the model (`docs/design/model.md` Sec13 and this
+significant for equality (omnist-spec Sec3.3's canonical-order principles and this
 fixture's `purpose.txt`), and Python's reference `Record.__eq__` is
 order-independent (it compares label-keyed dicts). This looks like a
 genuine `omnist-ts` bug, not a referee bug -- it's left untouched here

@@ -4,7 +4,7 @@
  *
  * JSON goes through the JSON-shaped grouping (grouped()): same-label
  * edges collapse into an array, a single occurrence stays bare (the
- * schema-less count-1 fallback -- see docs/design/model.md section 9(1)).
+ * schema-less count-1 fallback -- see omnist-spec Sec7.3, writing).
  *
  * Writing is lenient by default: a Date leaf (JSON has no date type)
  * is written as an ISO-8601 string, and a NaN/Infinity/-Infinity

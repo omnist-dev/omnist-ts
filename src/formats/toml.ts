@@ -4,7 +4,7 @@
  *
  * TOML goes through the same JSON-shaped grouping (grouped()) as JSON --
  * same-label edges collapse into an array-of-tables, a single occurrence
- * stays bare (see docs/design/model.md section 9(1)).
+ * stays bare (see omnist-spec Sec7.3, writing).
  *
  * Writing is lenient by default: TOML has no `null`, so a null-valued edge
  * is dropped and recorded as a "null.omitted" Adjustment (a warning) in a

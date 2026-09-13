@@ -7,7 +7,7 @@ similar but mean different things, the entry says so explicitly.
 
 These describe the **data** -- the canonical tree every supported format
 reads into and writes out of. Defined formally in
-[the model spec](design/model.md).
+[the spec's Schema Model chapter](https://spec.omnist.dev/03-schema-model).
 
 - **node** -- the canonical value of the Document model: either a scalar
   value (a leaf), or an ordered list of labeled edges (an internal node).
@@ -37,7 +37,7 @@ reads into and writes out of. Defined formally in
 ## Schema model terms
 
 These describe the **constraint** -- the shape a Document must have to be
-valid. Defined formally in [the model spec](design/model.md).
+valid. Defined formally in [the spec's Schema Model chapter](https://spec.omnist.dev/03-schema-model).
 
 - **`ScalarType`** -- the Schema-side type object: one of the seven fixed
   kinds (`string`, `integer`, `number`, `boolean`, `date`, `time`,
@@ -56,7 +56,7 @@ valid. Defined formally in [the model spec](design/model.md).
   unbounded.
 - **`any`** -- a field type that accepts any value (scalar or subtree)
   unchecked, while still fixing the field's label and cardinality. See
-  [design/any-type-spec.md](design/any-type-spec.md).
+  [the spec's `any` type section](https://spec.omnist.dev/03-schema-model#3-7-the-any-type).
 
 ## Operations
 

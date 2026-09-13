@@ -315,7 +315,7 @@ time-literal syntax) unwrap it to plain text on write, the same as
   `Infinity` back out as the reserved `inf` spelling.
 - **The reserved float spellings (`nan`/`inf`/`-inf`) are `NUMBER`
   tokens, not `IDENT`s**, matched by the tokenizer before `IDENT` is ever
-  tried (see [design/oml-grammar.md](../design/oml-grammar.md), §1). That
+  tried (see [the spec's OML grammar chapter](https://spec.omnist.dev/04-oml-grammar), Sec4.1). That
   means `nan: 1` is a `ParseError` -- not "reserved word as label", but
   "unexpected trailing content after the document body", because the
   parser takes the top-level scalar branch (`nan` alone is a complete,
@@ -513,7 +513,7 @@ optional input sugar for later.
 
 ## See also
 
-- [design/oml-grammar.md](../design/oml-grammar.md) -- the full ABNF
+- [the spec's OML grammar chapter](https://spec.omnist.dev/04-oml-grammar) -- the full ABNF
   grammar, its lexical priority order, and the worked examples this page's
   claims are drawn from.
 - [overview.md](overview.md) -- how OML compares to JSON/YAML/TOML on

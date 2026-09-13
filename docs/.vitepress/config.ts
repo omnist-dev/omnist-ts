@@ -7,16 +7,7 @@ export default defineConfig({
   cleanUrls: true,
   lastUpdated: true,
 
-  // design/model.md and design/openness.md are carried over close to
-  // verbatim from the Python port (see docs/design/*.md's file header) and
-  // still link to two pages this port hasn't ported yet: a schema-directed
-  // deserialization writeup and the docs/paper/ PDF. Ignore those two
-  // specific dead links rather than either breaking the build or hand-
-  // editing formally-shared spec text; revisit once deserialization.md
-  // lands (materialize() is already ported and exported -- src/deserialize.ts).
   ignoreDeadLinks: [
-    /\/deserialization$/,
-    /\/docs\/paper$/,
     /\/api\/index\.html$/,
     /\/api\/index$/,
     /\/api\//,
@@ -74,16 +65,6 @@ export default defineConfig({
           { text: "API reference", link: "/api" },
           { text: "TypeDoc API", link: "/api/index.html", target: "_blank" },
           { text: "CLI", link: "/cli" },
-        ],
-      },
-      {
-        text: "Design specs",
-        items: [
-          { text: "Model spec", link: "/design/model" },
-          { text: "OML-Core grammar", link: "/design/oml-grammar" },
-          { text: "OSD grammar", link: "/design/schema-osd-grammar" },
-          { text: "The any type", link: "/design/any-type-spec" },
-          { text: "Openness", link: "/design/openness" },
         ],
       },
       {

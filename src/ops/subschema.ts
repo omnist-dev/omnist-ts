@@ -14,7 +14,7 @@
  * unsatisfiable A-side record is vacuously a subschema of anything (it
  * emits no documents at all), and an optional A-field whose type is
  * unsatisfiable is skipped (it can never actually be emitted, so it
- * imposes no obligation on B). See `docs/design/model.md` §12, "Why
+ * imposes no obligation on B). See omnist-spec Sec6, "Why
  * compatible_with needs this", for the full argument -- this is the one
  * subtle correctness trap: without the vacuous-truth short-circuit below,
  * a mandatory ref cycle on the A side would make the naive coinductive

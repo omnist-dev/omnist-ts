@@ -1,7 +1,7 @@
 /**
  * Schema-directed deserialization: make a freshly-read node conform to a
  * {@link Schema}, or raise. Ported from `omnist/deserialize.py`. See
- * `docs/design/model.md` §10 (scalar/type mapping, "What deserialization
+ * omnist-spec Sec7.2 (materialization rules, "What deserialization
  * additionally converts" / "What deserialization rejects").
  *
  * Readers (`readOml`, and eventually `readJson`/etc.) hand back text-shaped

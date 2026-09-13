@@ -3,7 +3,7 @@
 Omnist gives you **one canonical data model** for JSON, YAML, TOML, XML, and
 its own native [**OML**](formats/oml.md), and a [**schema language**](schema.md)
 to validate and compare shapes over it. The model is defined formally in
-[the model spec](design/model.md); this guide is the practical tour; the
+[the spec's model chapters](https://spec.omnist.dev/02-document-model); this guide is the practical tour; the
 [API reference](api.md) lists every name with signatures.
 
 - [The two ideas](#the-two-ideas)
@@ -21,13 +21,13 @@ to validate and compare shapes over it. The model is defined formally in
 - A **Document** is a *tree*: a node is either a scalar value or an
   **ordered list of labeled edges**. "Many" is a label that repeats, not a
   field pointing to an array. See
-  [the model spec, section 4](design/model.md) for the formal definition.
+  [the spec's Document Model chapter](https://spec.omnist.dev/02-document-model) for the formal definition.
 - A **Schema** is built from named **`record`** definitions (a closed set of
   named fields, each with a cardinality). A field's type is always exactly
   one of the seven fixed scalar kinds (optionally nullable, e.g. `string?`)
   or a `Ref` to a named record -- never a composition of the two. `Ref`s are
   how reuse and recursion work. See
-  [the model spec, section 5](design/model.md) for the formal definition.
+  [the spec's Schema Model chapter](https://spec.omnist.dev/03-schema-model) for the formal definition.
 
 ```ts
 import { parseSchema, doc } from "@omnist-dev/omnist";
@@ -192,7 +192,7 @@ Schema-to-schema and schema-to-itself operations live as `Schema` methods
 and standalone functions from `ops/*`: `compatibleWith`, `equivalent`,
 `normalize`, `prune`, `isEmpty`, `extract`, `isomorphic`, and `lint`. See
 [the API reference](api.md#operations) for signatures, and
-[design/model.md](design/model.md) for what "compatible" and "equivalent"
+[the spec's Schema Algebra chapter](https://spec.omnist.dev/06-schema-algebra) for what "compatible" and "equivalent"
 formally mean.
 
 ## Reading & writing other formats

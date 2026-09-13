@@ -35,7 +35,7 @@ Same model as upstream, ported directly from its formal spec:
   (`string`/`integer`/`number`/`boolean`/`date`/`time`/`datetime`,
   optionally nullable), a `Ref` to a named record, or `any`.
 
-See [the model spec](docs/design/model.md) for the full formal definition
+See [the spec's Schema Model chapter](https://spec.omnist.dev/03-schema-model) for the full formal definition
 this port implements against, or [the quickstart](docs/quickstart.md) for
 the shortest possible tour.
 

@@ -61,7 +61,7 @@ root User
   silently ignored.
 
 All of this is defined formally, with proofs, in
-[the model spec](design/model.md).
+[the spec's Schema Model chapter](https://spec.omnist.dev/03-schema-model).
 
 ## The `any` type
 
@@ -70,7 +70,7 @@ scalar, `null`, or a nested subtree of any shape -- and validation does not
 descend into it. The field's **label** is still fixed, declared, and
 counted: cardinality applies exactly as for every other field. Only the
 value's shape is unconstrained. See
-[design/any-type-spec.md](design/any-type-spec.md) for the formal spec.
+[the spec's `any` type section](https://spec.omnist.dev/03-schema-model#3-7-the-any-type) for the formal spec.
 
 ```ts
 import { doc, parseSchema } from "@omnist-dev/omnist";
@@ -117,10 +117,10 @@ is a shorthand for `schema.validate(doc).ok`.
   fields) short of an outright validation error.
 
 See [the API reference](api.md#operations) for exact signatures and
-[design/model.md](design/model.md) for the formal semantics behind
+[the spec's Schema Model chapter](https://spec.omnist.dev/03-schema-model) for the formal semantics behind
 "compatible" and "equivalent."
 
 ## OSD grammar
 
 The full ABNF grammar, verified against the parser, lives at
-[design/schema-osd-grammar.md](design/schema-osd-grammar.md).
+[the spec's OSD grammar chapter](https://spec.omnist.dev/05-osd-grammar).

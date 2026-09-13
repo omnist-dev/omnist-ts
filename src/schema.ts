@@ -1,6 +1,6 @@
 /**
  * The Schema model -- two state kinds plus naming. Ported from
- * `omnist/schema.py`. See `docs/design/model.md` §5 (Schema model) and §7
+ * `omnist/schema.py`. See spec.omnist.dev's Schema Model chapter (Sec3) and Sec3.6
  * (Conformance), and `docs/design/ts-implementation-notes.md` §1 for the
  * TS-specific type-shape decisions this file builds against.
  *
@@ -15,7 +15,7 @@
  * - **Ref** -- a pointer into the schema's named environment (records only);
  *   enables reuse and recursion.
  * - **`any`** -- a declared leaf whose value is unchecked (the model's one
- *   deliberate opening; see `docs/design/any-type-spec.md`).
+ *   deliberate opening; see spec.omnist.dev's Schema Model chapter, Sec3.7).
  *
  * A field's `type` is a `FieldType`: a `ScalarType`, a `RefType`, or
  * `AnyFieldType` -- never a fourth thing, never a combination. There are no
@@ -319,7 +319,7 @@ function fieldEquals(a: Field, b: Field): boolean {
 
 /** Structural equality for `Record` values: same set of fields, keyed by
  * label -- a record's fields form an unordered set at the model layer
- * (declaration order isn't semantically significant, per model.md §13).
+ * (declaration order isn't semantically significant, per omnist-spec Sec3.3's canonical-order principles).
  * Comparing label-keyed maps makes this order-independent for free, mirroring
  * Python's `Record.__eq__` (`omnist/schema.py`), which compares its
  * label-keyed `_by_label` dicts directly. Duplicate labels are already
@@ -390,7 +390,7 @@ const DATETIME_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,6})?)?([+-]\d{
 // used to satisfy `date`; and the ECMAScript Date Time String Format permits
 // `24:00` as end-of-day, so hour 24 used to satisfy `time`. Python rejects
 // both (`date.fromisoformat("2024-02-30")` and `time.fromisoformat("24:00")`
-// each raise `ValueError`), and model.md section 10 requires a string that is
+// each raise `ValueError`), and omnist-spec Sec7.2 requires a string that is
 // not a valid bare ISO date to be rejected.
 //
 // Routing these through `parseDateToken`/`parseTimeToken`/`parseDatetimeToken`
@@ -423,7 +423,7 @@ function isIsoDatetimeString(v: unknown): boolean {
  *
  * Python has distinct `datetime.date`/`datetime.datetime` classes, so a real
  * object unambiguously satisfies exactly one of `date`/`datetime` (never
- * both), matching model.md §10's mutual-exclusion rule for the object form.
+ * both), matching omnist-spec Sec7.2's mutual-exclusion rule for the object form.
  * The Document layer here has no such distinction -- `src/document.ts`
  * maps *both* `date` and `datetime` onto the single native `Date` type (see
  * its file-top comment) -- so a real `Date` value carries no signal, by
@@ -574,7 +574,7 @@ export class Schema {
 
   // -- validation -----------------------------------------------------
 
-  /** Full conformance per model.md §7: cardinality, closedness, and target
+  /** Full conformance per omnist-spec Sec3.6: cardinality, closedness, and target
    * type matching. Collects every problem found, not just the first. */
   validate(d: Doc): ValidationResult {
     if (!(d instanceof Doc)) {
