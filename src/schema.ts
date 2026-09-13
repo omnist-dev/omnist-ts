@@ -334,12 +334,33 @@ export function recordEquals(a: Record, b: Record): boolean {
   });
 }
 
+/** Compares strings by Unicode codepoint (scalar value), not UTF-16 code
+ * unit -- JS's default string comparison is code-unit-based, which
+ * disagrees with codepoint order for supplementary-plane characters
+ * (surrogate pairs). Required by omnist-spec Sec3.3 principle 3 for the
+ * `normalize`/`extract` alphabetical fallback; spreading a string with
+ * `[...str]` iterates by codepoint, unlike indexing. */
+export function compareCodepoint(a: string, b: string): number {
+  const ai = [...a];
+  const bi = [...b];
+  const len = Math.min(ai.length, bi.length);
+  for (let i = 0; i < len; i++) {
+    // `i < len <= ai.length, bi.length`, so both indices are always in
+    // bounds -- `noUncheckedIndexedAccess` can't see that from the loop
+    // bound alone.
+    const ac = (ai[i] as string).codePointAt(0) as number;
+    const bc = (bi[i] as string).codePointAt(0) as number;
+    if (ac !== bc) return ac - bc;
+  }
+  return ai.length - bi.length;
+}
+
 /** Structural equality for `Schema` values: same root and same environment
  * (record-for-record, name-for-name). */
 export function schemaEquals(a: Schema, b: Schema): boolean {
   if (!fieldTypeEquals(a.root, b.root)) return false;
-  const aNames = [...a.env.keys()].sort();
-  const bNames = [...b.env.keys()].sort();
+  const aNames = [...a.env.keys()].sort(compareCodepoint);
+  const bNames = [...b.env.keys()].sort(compareCodepoint);
   if (aNames.length !== bNames.length) return false;
   return aNames.every((name, i) => {
     if (name !== bNames[i]) return false;

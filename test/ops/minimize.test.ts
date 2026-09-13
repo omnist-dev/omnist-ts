@@ -86,6 +86,33 @@ describe("normalize: partition refinement", () => {
     expect([...n.env.keys()].sort()).toEqual(["A", "B", "P", "Q", "R", "Root", "S"]);
     expect(equivalent(n, s)).toBe(true);
   });
+
+  // issue #136: the representative-name tie-break (and every other
+  // alphabetical-fallback sort in this module) must compare by Unicode
+  // codepoint, never by UTF-16 code unit -- omnist-spec Sec3.3 principle 3.
+  // "￿" (a lone BMP code unit, codepoint U+FFFF) and "\u{10000}" (a
+  // supplementary-plane codepoint encoded as the surrogate pair
+  // 𐀀) disagree under the two orderings: by UTF-16 code unit,
+  // the surrogate pair's leading unit \uD800 (0xD800) sorts before ￿
+  // (0xFFFF); by codepoint, U+FFFF sorts before U+10000. A bare `.sort()`
+  // would therefore pick the wrong representative.
+  it("picks the equivalence-class representative by codepoint, not UTF-16 code unit", () => {
+    const bmpName = "a￿";
+    const supplementaryName = "a\u{10000}";
+    expect(bmpName < supplementaryName).toBe(false); // code-unit order disagrees with codepoint order
+    const s = new Schema(
+      ref("Root"),
+      new Map([
+        ["Root", record(field("x", ref(bmpName)), field("y", ref(supplementaryName)))],
+        [bmpName, record(field("v", t.integer))],
+        [supplementaryName, record(field("v", t.integer))],
+      ]),
+    );
+    const n = normalize(s);
+    expect([...n.env.keys()].sort()).toEqual(["Root", bmpName].sort());
+    expect(n.env.has(bmpName)).toBe(true);
+    expect(n.env.has(supplementaryName)).toBe(false);
+  });
 });
 
 describe("equivalenceClasses", () => {
