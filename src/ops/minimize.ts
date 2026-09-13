@@ -40,6 +40,7 @@ import {
   ref,
   record as makeRecord,
   field as makeField,
+  compareCodepoint,
   type FieldType,
   type Record as OmnistRecord,
 } from "../schema.js";
@@ -71,7 +72,7 @@ function refineKey(rec: OmnistRecord, blockOf: ReadonlyMap<string, number>): unk
     // Field labels are unique within a record (`record()` rejects
     // duplicates), so two entries here never compare equal -- the tie
     // branch below is unreachable and kept only for a total ordering.
-    .sort((a, b) => (a[0] < b[0] ? -1 : 1));
+    .sort((a, b) => compareCodepoint(a[0], b[0]));
   return [localSignature(rec), fields];
 }
 
@@ -89,7 +90,7 @@ function refineKey(rec: OmnistRecord, blockOf: ReadonlyMap<string, number>): unk
  * of records with identical structure.
  */
 export function equivalenceClasses(s: Schema): string[][] {
-  const names = [...s.env.keys()].sort();
+  const names = [...s.env.keys()].sort(compareCodepoint);
   let blockOf = new Map<string, number>();
   let blocks = groupBy(names, (n) => localSignatureKey(s.env.get(n) as OmnistRecord));
   blocks.forEach((block, i) => {
@@ -138,12 +139,12 @@ export function normalize(s: Schema): Schema {
   const pruned = prune(s);
   if (isEmpty(pruned)) return pruned;
 
-  const names = [...pruned.env.keys()].sort();
+  const names = [...pruned.env.keys()].sort(compareCodepoint);
   const blocks = equivalenceClasses(pruned);
 
   const rep = new Map<string, string>();
   for (const block of blocks) {
-    const keep = [...block].sort()[0] as string;
+    const keep = [...block].sort(compareCodepoint)[0] as string;
     for (const n of block) rep.set(n, keep);
   }
 
