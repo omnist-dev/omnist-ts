@@ -68,6 +68,7 @@ import { ParseError, WriteError } from "../errors.js";
 import { finishWrite, WriteReport } from "../report.js";
 import { materialize } from "../deserialize.js";
 import type { Schema } from "../schema.js";
+import { stripLeadingBom } from "../bom.js";
 import { checkInputSize } from "./input-size.js";
 
 // Matches src/document.ts's own MAX_DEPTH (locally redefined here, same as
@@ -231,6 +232,7 @@ export interface ReadYamlOptions {
 
 /** Parse YAML text into a Document node. */
 export function readYaml(text: string, opts: ReadYamlOptions = {}): Node {
+  text = stripLeadingBom(text); // D-15: one leading U+FEFF, then nothing else
   checkInputSize(text, "YAML");
   checkYamlIntegerDigits(text);
   let parsed: unknown;

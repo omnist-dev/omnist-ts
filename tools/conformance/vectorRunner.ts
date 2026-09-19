@@ -100,7 +100,19 @@ import { compareSchema } from "./referee.js";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const VECTOR_SUITE_DIR = path.resolve(HERE, "..", "..", "vendor", "omnist-spec", "test-suite");
 
-const LIMIT_KEYS = ["declared_max_depth", "declared_max_nodes", "declared_max_int_digits"] as const;
+// Allowlist of `declared_max_*` keys (test-suite/README.md, "declared-limit
+// keys"). A vector carrying one was written against a vector-local limit,
+// not this port's default, so it MUST be skipped -- never run against the
+// wrong threshold, which either fails for the wrong reason or (worse)
+// passes without exercising the boundary. Re-check this list against the
+// README's on every spec bump: a key missing here is silently treated as
+// an ordinary vector.
+const LIMIT_KEYS = [
+  "declared_max_depth",
+  "declared_max_nodes",
+  "declared_max_int_digits",
+  "declared_max_alias_expansion", // Sec2.4.1 D-18; enforced by no port yet (ledger DIV-3)
+] as const;
 
 interface Diagnostic {
   readonly path: string;
@@ -236,6 +248,17 @@ function errorMessage(e: unknown): string {
 
 function runParse(v: Vector): Result {
   const inp = v.input;
+  if (inp.declared_max_alias_expansion !== undefined) {
+    // Sec8.5.5 E-20 "not yet implemented": D-18 (alias expansion factor) is
+    // not enforced here, and there is no configuration surface to set the
+    // vector's declared limit on either. Cites DIV-3 (docs/09 Sec9.4), the
+    // spec's own record of the rollout gap. All six vectors in
+    // formats-yaml/alias-expansion.json carry this key, so all six skip
+    // rather than some reporting a false pass at this port's own default.
+    return skip(
+      "not yet implemented -- D-18 alias expansion limit is not enforced and has no runtime configuration surface (DIV-3)",
+    );
+  }
   if (LIMIT_KEYS.some((k) => inp[k] !== undefined)) {
     return skip("not yet implemented -- omnist-ts's safety limits are compile-time constants, no runtime configuration surface");
   }

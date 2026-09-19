@@ -22,6 +22,7 @@
  * value-domain made schema-directed deserialization ambiguous.
  */
 
+import { stripLeadingBom } from "./bom.js";
 import { SchemaError } from "./errors.js";
 import {
   ANY,
@@ -59,7 +60,7 @@ interface Token {
 // `parse.*` code (omnist-spec Sec8.3.1, extended by spec#46 to cover OSD's
 // lexical stage the same way it already covers OML's).
 const TOKEN_RE =
-  /(?<ws>\s+)|(?<comment>#[^\n]*)|(?<number>-?\d+\.\d+|-?\d+)|(?<name>[A-Za-z_][A-Za-z0-9_]*)|(?<punct>[{}[\]:,?])/y;
+  /(?<ws>[^\S\uFEFF]+)|(?<comment>#[^\n]*)|(?<number>-?\d+\.\d+|-?\d+)|(?<name>[A-Za-z_][A-Za-z0-9_]*)|(?<punct>[{}[\]:,?])/y;
 
 /** 1-based `line:col` text-position path for a `parse.*` diagnostic (spec Sec8.4). */
 function posToPath(text: string, pos: number): string {
@@ -104,7 +105,13 @@ function scanString(text: string, start: number): { token: Token; next: number }
       if (i >= text.length) {
         throw lexError(text, start, "parse.unterminated-string", "unterminated string");
       }
-      i += 1; // consume the escaped character verbatim, whatever it is
+      // Consume the escaped character verbatim, whatever it is -- except a
+      // raw control character, which is an error in escape context too
+      // (spec Sec5.3.1: the ban applies to every raw byte in the string body).
+      if (((text[i] as string).codePointAt(0) as number) < 0x20) {
+        throw lexError(text, i, "parse.control-character", "control character in string");
+      }
+      i += 1;
       continue;
     }
     const code = (ch as string).codePointAt(0) as number;
@@ -342,7 +349,7 @@ class Parser {
 
 /** Parse OSD text into a {@link Schema}. */
 export function parseSchema(text: string): Schema {
-  return new Parser(tokenize(text)).parse();
+  return new Parser(tokenize(stripLeadingBom(text))).parse();
 }
 
 // ---------------------------------------------------------------------------

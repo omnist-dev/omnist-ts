@@ -75,6 +75,7 @@
 
 import type { Edge, Node, Scalar } from "./document.js";
 import { ParseError, WriteError } from "./errors.js";
+import { stripLeadingBom } from "./bom.js";
 import { WriteReport } from "./report.js";
 import type { Schema } from "./schema.js";
 import { materialize } from "./deserialize.js";
@@ -286,7 +287,7 @@ class Scanner {
   pos: number;
 
   constructor(text: string) {
-    this.s = text.startsWith("﻿") ? text.slice(1) : text;
+    this.s = stripLeadingBom(text);
     this.n = this.s.length;
     this.pos = 0;
   }

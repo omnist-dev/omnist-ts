@@ -6,6 +6,43 @@ the first documented release of the TypeScript port; the public API
 mirrors the upstream Python package's `__all__` (camelCase names of the
 same functions).
 
+## [v0.3.1-alpha] -- spec v0.18.0-beta sweep: D-15 BOM, data-XML profile, D-18 allowlist
+
+`vendor/omnist-spec` bumped from v0.9.1-beta to v0.18.0-beta (231 vectors,
+was 204). Conformance: 145 pass / 0 fail / 86 skip (was 128 / 0 / 76 at the
+old pin; 148 / 5 fail / 78 against the new suite before any code change,
+plus two of those failures being the same D-15 gap).
+
+Real behavior changes:
+
+- **D-15: a leading U+FEFF is now stripped on every read surface** -- OML
+  (already did), OSD, JSON, YAML, TOML, XML -- through one shared helper,
+  `stripLeadingBom` (`src/bom.ts`), exactly one mark, only at offset zero.
+  JSON, TOML and OSD used to reject it. OML's open-coded strip (written with
+  an invisible literal U+FEFF) was replaced by the helper. OSD's tokenizer
+  also stopped treating U+FEFF as whitespace (JS `\s` includes it), so a
+  doubled or mid-document mark is now an error rather than silently
+  swallowed. No writer emits a BOM (pinned by test on all six writers).
+  YAML and XML libraries tolerate a second leading mark; that is recorded in
+  a test, not tightened.
+- **Data-XML profile (spec v0.14.0):** `readXml` now refuses a `DOCTYPE`
+  declaration on sight (`format.dtd-forbidden`) and any entity reference
+  other than the five predefined ones (`format.entity-forbidden`). Numeric
+  character references remain legal.
+- **OSD Sec5.3.1:** a raw control character immediately after a backslash in
+  a string is now `parse.control-character`, like an unescaped one.
+
+Tooling / no behavior change:
+
+- Vector runner: `declared_max_alias_expansion` added to the declared-limit
+  allowlist. All six `formats-yaml/alias-expansion` vectors carry it, so they
+  skip (citing DIV-3) instead of `expansion-at-declared-limit-succeeds`
+  reporting a false pass at this port's own default. D-18 itself is not
+  implemented here (nor in any port; tracked as DIV-3).
+- S-21 (`infer` opens to `any` only when asked, reports every opening) audited
+  for both opening paths (scalar-kind conflict; object/scalar mix): already
+  compliant, no change.
+
 ## [v0.3.0-alpha] -- spec-correctness audit: 9-issue "fail, don't invent" cycle
 
 `vendor/omnist-spec` bumped to `0ac1eac`+, bringing in a batch of grammar

@@ -55,6 +55,7 @@ import { finishWrite, WriteReport } from "../report.js";
 import { dateKind } from "../temporal.js";
 import { materialize } from "../deserialize.js";
 import { recordField, type FieldType, type Schema, type ScalarType } from "../schema.js";
+import { stripLeadingBom } from "../bom.js";
 import { checkInputSize } from "./input-size.js";
 
 const MAX_DEPTH = 200;
@@ -181,9 +182,42 @@ export interface ReadXmlOptions {
   report?: WriteReport;
 }
 
+// Data-XML profile (docs/formats/xml.md): a DOCTYPE declaration of any kind,
+// and any entity reference other than the five predefined ones, MUST fail
+// the read -- on sight, not on use. Comments, CDATA sections and processing
+// instructions are stripped first: a `<!DOCTYPE` or `&name;` inside one is
+// inert text, not a declaration or a reference. Numeric character
+// references (`&#13;`, `&#xD;`) are character references, not entity
+// references, and stay legal (decodeNumericCharRefs handles them).
+const XML_INERT = /<!--[\s\S]*?-->|<!\[CDATA\[[\s\S]*?\]\]>|<\?[\s\S]*?\?>/g;
+const PREDEFINED_ENTITIES = new Set(["lt", "gt", "amp", "quot", "apos"]);
+const ENTITY_REF = /&([^#;\s&<][^;\s&<]*);/g;
+
+function refuseOutOfProfile(text: string): void {
+  const live = text.replace(XML_INERT, "");
+  if (live.includes("<!DOCTYPE")) {
+    throw new ParseError(
+      "XML DOCTYPE declaration is outside the data-XML profile and is refused",
+      [],
+      "format.dtd-forbidden",
+    );
+  }
+  for (const m of live.matchAll(ENTITY_REF)) {
+    if (!PREDEFINED_ENTITIES.has(m[1] as string)) {
+      throw new ParseError(
+        `XML entity reference &${m[1] as string}; is outside the data-XML profile and is refused`,
+        [],
+        "format.entity-forbidden",
+      );
+    }
+  }
+}
+
 /** Parses XML text into a Document node (spec §4). */
 export function readXml(text: string, opts: ReadXmlOptions = {}): Node {
+  text = stripLeadingBom(text); // D-15: one leading U+FEFF, then nothing else
   checkInputSize(text, "XML");
+  refuseOutOfProfile(text);
   const valid = XMLValidator.validate(text);
   if (valid !== true) {
     throw new ParseError("invalid XML: " + valid.err.msg);

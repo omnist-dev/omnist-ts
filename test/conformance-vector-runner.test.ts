@@ -136,9 +136,17 @@ describeIfVendored("main() against the real vendor/omnist-spec/test-suite", () =
     // fixing a typo in that S-3 vector (an unquoted field label) caught
     // by another port's verification pass. Net: 5 new vectors, 1 new
     // pass, 4 new skips, 0 new failures.
+    //
+    // Bumped to v0.18.0-beta (231 vectors, +27): the D-15 BOM vectors (JSON,
+    // TOML, OSD, OML) pass; the data-XML profile refusals and the OSD
+    // escaped-control-character vector carry structured diagnostics, so they
+    // skip on the syntax-level-diagnostics rule once they throw; all six
+    // formats-yaml/alias-expansion vectors skip via the
+    // declared_max_alias_expansion allowlist entry (D-18 / DIV-3).
+    // Net: 145 pass, 0 fail, 86 skip.
     expect(exitCode).toBe(0);
     expect(logs.at(-1)).toBe(
-      "\n128 passed, 0 failed, 76 skipped (of 204 vectors) -- " +
+      "\n145 passed, 0 failed, 86 skipped (of 231 vectors) -- " +
         "diagnostics compared in code-agnostic mode (Sec8.5.2 rule 4)",
     );
   });
@@ -146,7 +154,7 @@ describeIfVendored("main() against the real vendor/omnist-spec/test-suite", () =
   it("every skip cites an explicit, reasoned category", () => {
     const { logs } = withCapturedConsole(() => main());
     const skipLines = logs.filter((l) => l.startsWith("[SKIP]"));
-    expect(skipLines.length).toBe(76);
+    expect(skipLines.length).toBe(86);
     for (const line of skipLines) {
       // D-6 (integer/number kind collapse) is CLOSED as of issue #98 --
       // no vector cites it anymore (see tools/conformance/vectorRunner.ts).
@@ -159,8 +167,8 @@ describeIfVendored("main() against the real vendor/omnist-spec/test-suite", () =
     }
   });
 
-  it("iterVectors discovers all 204 real vectors", () => {
-    expect(iterVectors(REAL_SUITE_DIR).length).toBe(204);
+  it("iterVectors discovers all 231 real vectors", () => {
+    expect(iterVectors(REAL_SUITE_DIR).length).toBe(231);
   });
 });
 
@@ -238,6 +246,16 @@ describe("parse", () => {
       status: "skip",
       message: "not yet implemented -- omnist-ts's safety limits are compile-time constants, no runtime configuration surface",
     });
+  });
+
+  it("skips a vector declaring declared_max_alias_expansion, citing DIV-3 (never a false pass at the default)", () => {
+    // Runs at this port's own (absent) D-18 threshold if not allowlisted:
+    // an anchor-free doc would "pass" while pinning nothing.
+    const r = runVector(
+      vec("parse", { format: "yaml", declared_max_alias_expansion: 3, text: "a: 1\n" }, { ok: true }),
+    );
+    expect(r.status).toBe("skip");
+    expect(r.message).toMatch(/^not yet implemented .*DIV-3/);
   });
 
   it("passes when the parsed document matches expected", () => {

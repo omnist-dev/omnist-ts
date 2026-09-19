@@ -449,3 +449,20 @@ root Service`;
     expect(result.errors).toEqual([]);
   });
 });
+
+describe("OSD string body: control characters (spec Sec5.3.1)", () => {
+  it("rejects a raw control character immediately after a backslash, like an unescaped one", () => {
+    for (const body of ["a\u0001b", "a\\\u0001b"]) {
+      try {
+        parseSchema(`record R {\n    "${body}": string,\n}\nroot R\n`);
+        expect.unreachable();
+      } catch (e) {
+        expect(e).toBeInstanceOf(SchemaError);
+        expect((e as SchemaError).code).toBe("parse.control-character");
+      }
+    }
+  });
+  it("still accepts an ordinary escaped character", () => {
+    expect(() => parseSchema('record R { "a\\"b": string } root R\n')).not.toThrow();
+  });
+});
