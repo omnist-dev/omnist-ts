@@ -19,7 +19,7 @@ import { ParseError, WriteError } from "../errors.js";
 import { finishWrite, WriteReport } from "../report.js";
 import { dateKind } from "../temporal.js";
 import { materialize } from "../deserialize.js";
-import { stripLeadingBom } from "../bom.js";
+import { rejectSecondLeadingBom, stripLeadingBom } from "../bom.js";
 import { checkInputSize } from "./input-size.js";
 import type { Schema } from "../schema.js";
 
@@ -216,7 +216,8 @@ export interface ReadJsonOptions {
 
 /** Parse JSON text into a Document node. */
 export function readJson(text: string, opts: ReadJsonOptions = {}): Node {
-  text = stripLeadingBom(text); // D-15: one leading U+FEFF, then nothing else
+  text = stripLeadingBom(text); // D-15: one leading U+FEFF
+  rejectSecondLeadingBom(text, "JSON"); // D-21: a second one is an error
   checkInputSize(text, "JSON");
   checkJsonIntegerDigits(text);
   let parsed: unknown;

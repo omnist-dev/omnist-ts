@@ -45,7 +45,7 @@ describe("D-15: every read surface strips one leading BOM", () => {
   });
 });
 
-describe("D-15 negative half: a second BOM is not silently swallowed (where this port owns the grammar)", () => {
+describe("D-21: a second leading BOM is rejected on all six surfaces, at 1:1", () => {
   it("OML rejects a doubled mark", () => {
     expect(() => readOml(BOM + BOM + "a: 1\n")).toThrow(ParseError);
   });
@@ -56,15 +56,44 @@ describe("D-15 negative half: a second BOM is not silently swallowed (where this
     expect(() => parseSchema('record R { "a": string } ' + BOM + "root R\n")).toThrow(SchemaError);
     expect(() => parseSchema(" " + BOM + 'record R { "a": string } root R\n')).toThrow(SchemaError);
   });
-  it("JSON and TOML reject a doubled mark", () => {
-    expect(() => readJson(BOM + BOM + '{"a": 1}')).toThrow(ParseError);
-    expect(() => readToml(BOM + BOM + "a = 1\n")).toThrow(ParseError);
+  it.each([
+    ["JSON", (t: string) => readJson(t), '{"a": 1}'],
+    ["TOML", (t: string) => readToml(t), "a = 1\n"],
+    ["YAML", (t: string) => readYaml(t), "a: 1\n"],
+    ["XML", (t: string) => readXml(t), "<r><a>1</a></r>"],
+  ])("%s: parse.codec-syntax at 1:1 (an explicit pre-check, not left to the library)", (_n, read, body) => {
+    // yaml and fast-xml-parser would silently swallow the second mark; D-21
+    // forbids that second, undeclared strip.
+    for (const text of [BOM + BOM + body, BOM + BOM + BOM + body]) {
+      try {
+        read(text);
+        expect.unreachable();
+      } catch (e) {
+        expect(e).toBeInstanceOf(ParseError);
+        expect((e as ParseError).code).toBe("parse.codec-syntax");
+        expect((e as ParseError).path).toBe("1:1");
+      }
+    }
   });
-  it("YAML and XML: the underlying library tolerates a second mark; recorded, not tightened", () => {
-    // Deliberately NOT reimplementing yaml's / fast-xml-parser's grammar to be
-    // stricter: this pins the observed library behavior so a change is noticed.
-    expect(readYaml(BOM + BOM + "a: 1\n")).toEqual(EXPECTED);
-    expect(readXml(BOM + BOM + "<r><a>1</a></r>")).toEqual(readXml("<r><a>1</a></r>"));
+  it("OML and OSD report the doubled mark as parse.unexpected-token at 1:1", () => {
+    try {
+      readOml(BOM + BOM + "a: 1\n");
+      expect.unreachable();
+    } catch (e) {
+      expect((e as ParseError).code).toBe("parse.unexpected-token");
+      expect((e as ParseError).path).toBe("1:1");
+    }
+    try {
+      parseSchema(BOM + BOM + 'record R { "a": string } root R\n');
+      expect.unreachable();
+    } catch (e) {
+      expect((e as SchemaError).code).toBe("parse.unexpected-token");
+      expect((e as SchemaError).path).toBe("1:1");
+    }
+  });
+  it("a single mark is still stripped on every codec (D-15 unchanged)", () => {
+    expect(readYaml(BOM + "a: 1\n")).toEqual(EXPECTED);
+    expect(readJson(BOM + '{"a": 1}')).toEqual(EXPECTED);
   });
 });
 

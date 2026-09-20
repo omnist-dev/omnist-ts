@@ -6,68 +6,54 @@ the first documented release of the TypeScript port; the public API
 mirrors the upstream Python package's `__all__` (camelCase names of the
 same functions).
 
-## [v0.3.1-alpha] -- spec v0.18.0-beta sweep: D-15 BOM, data-XML profile, D-18 allowlist
+## [v0.3.1-alpha] -- spec v0.19.0-beta sweep: D-15/D-21 BOM, data-XML profile, E-23, OML-25, D-18 allowlist
 
-`vendor/omnist-spec` bumped from v0.9.1-beta to v0.18.0-beta (231 vectors,
-was 204). Conformance: 162 pass / 2 fail / 67 skip of 231 (was 128 / 0 /
-76 of 204 at the old pin; the new 231-vector suite measured 146 pass /
-7 fail / 78 skip before any code change). The 2 failures are open spec
-questions, deliberately left visible rather than skipped -- see "Open" below.
+`vendor/omnist-spec` bumped from v0.9.1-beta to **v0.19.0-beta** (249
+vectors, was 204). Conformance (vector track): **182 pass / 0 fail / 67 skip**
+(was 128 / 0 / 76 of 204 at the old pin; the 231-vector v0.18.0-beta suite
+measured 146 / 7 / 78 before any code change, and the v0.19.0-beta suite
+177 / 3 / 69 with the v0.18 fixes in place). Fixture track: 19 / 0 / 0
+throughout.
 
 Real behavior changes:
 
-- **D-15: a leading U+FEFF is now stripped on every read surface** -- OML
-  (already did), OSD, JSON, YAML, TOML, XML -- through one shared helper,
-  `stripLeadingBom` (`src/bom.ts`), exactly one mark, only at offset zero.
-  JSON, TOML and OSD used to reject it. OML's open-coded strip (written with
-  an invisible literal U+FEFF) was replaced by the helper. OSD's tokenizer
-  also stopped treating U+FEFF as whitespace (JS `\s` includes it), so a
-  doubled or mid-document mark is now an error rather than silently
-  swallowed. No writer emits a BOM (pinned by test on all six writers).
-  YAML and XML libraries tolerate a second leading mark; that is recorded in
-  a test, not tightened.
-- **Data-XML profile (spec v0.14.0):** `readXml` now refuses a `DOCTYPE`
-  declaration on sight (`format.dtd-forbidden`) and any entity reference
-  other than the five predefined ones (`format.entity-forbidden`). Numeric
-  character references remain legal.
-- **OSD Sec5.3.1:** a raw control character immediately after a backslash in
-  a string is now `parse.control-character`, like an unescaped one.
-
-- **OML error codes:** a newline or `;` standing in for a missing array comma
-  is now `parse.separator-in-array` (was `parse.unexpected-token`); a token
-  left over after a top-level edge's value (e.g. the `T99` of
-  `a: 2024-01-01T99`) is `parse.trailing-content`.
-- **Structured XML refusals:** `format.dtd-forbidden`, `format.entity-forbidden`
-  and `format.mixed-content` (previously message-only) now carry their code and
-  path `$` on the thrown `ParseError`.
+- **D-15 / D-21 (BOM):** a leading U+FEFF is stripped on every read surface
+  (OML, OSD, JSON, YAML, TOML, XML) through one shared helper
+  (`src/bom.ts`), exactly one mark at offset zero. A second leading mark is
+  rejected on all six surfaces at text position `1:1`: `parse.unexpected-token`
+  on OML and OSD (their own lexers), `parse.codec-syntax` on JSON, TOML, YAML
+  and XML via an explicit pre-check (`rejectSecondLeadingBom`), because the
+  `yaml` and `fast-xml-parser` libraries would otherwise silently swallow it.
+  JSON and TOML used to reject BOMs entirely; OML's open-coded strip (an
+  invisible literal U+FEFF) was replaced by the helper; OSD's tokenizer no
+  longer treats U+FEFF as whitespace. No writer emits a BOM (pinned by test).
+- **Data-XML profile (spec v0.14.0):** `readXml` refuses a `DOCTYPE`
+  (`format.dtd-forbidden`) and any non-predefined entity reference
+  (`format.entity-forbidden`); these and `format.mixed-content` carry their
+  code and path `$` on the thrown `ParseError`. Numeric character references
+  remain legal.
+- **E-23:** OSD string-body errors (`parse.control-character`) report the
+  position of the string's opening quote, not the offending character; a
+  control character right after a backslash is now an error (OSD Sec5.3.1).
+- **OML error codes:** a newline or `;` in place of a missing array comma is
+  `parse.separator-in-array`; leftover content after a top-level scalar/edge
+  value is `parse.trailing-content` (OML-25).
+- YAML merge-key order (source order, earlier alias wins) already matched via
+  `yaml` 2.9.0; all six `formats-yaml/merge-key` vectors pass unchanged.
 
 Tooling / no behavior change:
 
-- Vector runner: the blanket "reader threw + vector expects diagnostics ->
-  skip" rule was narrowed. It now skips only when the thrown error carries no
-  `path` and/or no `code`; otherwise it compares path and code for real. This
-  moved 17 vectors from skip to pass and surfaced the two open items below.
-
 - Vector runner: `declared_max_alias_expansion` added to the declared-limit
-  allowlist. All six `formats-yaml/alias-expansion` vectors carry it, so they
-  skip (citing DIV-3) instead of `expansion-at-declared-limit-succeeds`
-  reporting a false pass at this port's own default. D-18 itself is not
-  implemented here (nor in any port; tracked as DIV-3).
-- S-21 (`infer` opens to `any` only when asked, reports every opening) audited
-  for both opening paths (scalar-kind conflict; object/scalar mix): already
-  compliant, no change.
-
-Open (spec questions, tracked outside this repo):
-
-- `oml-grammar/reserved/nan-bare-is-a-number-token-not-a-label` expects
-  `parse.unexpected-token` at `1:4`, but `null: 1` at top level (same
-  scalar-branch-then-leftover-colon shape) expects `parse.trailing-content`.
-  This port reports `parse.trailing-content` for both.
-- `osd-grammar/strings/escaped-control-character-is-still-an-error` expects
-  path `1:1`; the input's control character is at `2:8` (string starts at
-  `2:5`). No reading of "position of the failure" gives `1:1`.
-- `formats-yaml/alias-expansion/merge-key-sequence-...`: merged-edge order for
-  `<<: [*a, *b]` (masked by the D-18 allowlist skip).
+  allowlist, so all six `formats-yaml/alias-expansion` vectors skip (E-20
+  "not yet implemented", citing DIV-3) instead of `expansion-at-declared-limit-succeeds`
+  reporting a false pass at this port's own default. D-18/D-19/D-20 are NOT
+  implemented here (nor in any port).
+- Vector runner: the blanket "reader threw + vector expects diagnostics ->
+  skip" rule was narrowed to skip only when the thrown error carries no
+  `path` and/or no `code`; otherwise path and code are compared for real
+  (paths always; codes where the error carries one, Sec8.5.2).
+- S-21 (`infer` opens to `any` only when asked, reports every opening)
+  audited for both opening paths: already compliant, no change.
 
 ## [v0.3.0-alpha] -- spec-correctness audit: 9-issue "fail, don't invent" cycle
 

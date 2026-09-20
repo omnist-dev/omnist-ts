@@ -36,7 +36,7 @@ import { finishWrite, WriteReport } from "../report.js";
 import { parseDateToken, parseDatetimeToken, dateKind } from "../temporal.js";
 import { materialize } from "../deserialize.js";
 import type { Schema } from "../schema.js";
-import { stripLeadingBom } from "../bom.js";
+import { rejectSecondLeadingBom, stripLeadingBom } from "../bom.js";
 import { checkInputSize } from "./input-size.js";
 
 // Matches src/formats/json.ts's own copy of the same guard constant -- see
@@ -254,7 +254,8 @@ function checkTomlIntegerDigits(text: string): void {
 
 /** Parses TOML text into a Document node (spec §4). */
 export function readToml(text: string, opts: ReadTomlOptions = {}): Node {
-  text = stripLeadingBom(text); // D-15: one leading U+FEFF, then nothing else
+  text = stripLeadingBom(text); // D-15: one leading U+FEFF
+  rejectSecondLeadingBom(text, "TOML"); // D-21: a second one is an error
   checkInputSize(text, "TOML");
   checkTomlIntegerDigits(text);
   let parsed: unknown;

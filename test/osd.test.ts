@@ -265,7 +265,7 @@ describe("OSD lexical error codes (spec Sec8.3.1, extended by spec#46 to cover O
     }
     expect(err).toBeInstanceOf(SchemaError);
     expect(err?.code).toBe("parse.control-character");
-    expect(err?.path).toBe("1:14");
+    expect(err?.path).toBe("1:12"); // E-23: the string's opening quote
   });
 
   it("a weak backslash escape of an arbitrary character is accepted, not an invalid-escape error", () => {
@@ -459,6 +459,8 @@ describe("OSD string body: control characters (spec Sec5.3.1)", () => {
       } catch (e) {
         expect(e).toBeInstanceOf(SchemaError);
         expect((e as SchemaError).code).toBe("parse.control-character");
+        // E-23: the string's opening quote (line 2, col 5), not the offending character.
+        expect((e as SchemaError).path).toBe("2:5");
       }
     }
   });

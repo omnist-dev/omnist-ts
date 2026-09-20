@@ -109,14 +109,15 @@ function scanString(text: string, start: number): { token: Token; next: number }
       // raw control character, which is an error in escape context too
       // (spec Sec5.3.1: the ban applies to every raw byte in the string body).
       if (((text[i] as string).codePointAt(0) as number) < 0x20) {
-        throw lexError(text, i, "parse.control-character", "control character in string");
+        throw lexError(text, start, "parse.control-character", "control character in string");
       }
       i += 1;
       continue;
     }
     const code = (ch as string).codePointAt(0) as number;
     if (code < 0x20) {
-      throw lexError(text, i, "parse.control-character", "control character in string");
+      // E-23: a string-body error reports the string's opening quote.
+      throw lexError(text, start, "parse.control-character", "control character in string");
     }
     i += 1;
   }

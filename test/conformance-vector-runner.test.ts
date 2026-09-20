@@ -145,23 +145,17 @@ describeIfVendored("main() against the real vendor/omnist-spec/test-suite", () =
     // declared_max_alias_expansion allowlist entry (D-18 / DIV-3).
     // Then (review fix): the runner's blanket "reader threw + vector expects
     // diagnostics -> skip" was narrowed to skip ONLY when the error carries no
-    // path/code, so coded syntax errors (OML/OSD lexical/parse, XML profile
-    // refusals) are compared for real: 17 vectors moved SKIP -> PASS, and two
-    // real disagreements surfaced that are recorded as spec questions, not
-    // hidden: oml-grammar/reserved/nan-bare-is-a-number-token-not-a-label
-    // (code: unexpected-token vs trailing-content, same shape as the
-    // null-at-top-level vector that expects trailing-content) and
-    // osd-grammar/strings/escaped-control-character-is-still-an-error
-    // (vector expects 1:1 for an input whose control character is at 2:8).
-    // Net: 162 pass, 2 fail, 67 skip; exit code 1 until both are resolved
-    // in the spec.
-    expect(exitCode).toBe(1);
-    expect(logs.filter((l) => l.startsWith("[FAIL]")).map((l) => l.split(":")[0])).toEqual([
-      "[FAIL] oml-grammar/reserved/nan-bare-is-a-number-token-not-a-label",
-      "[FAIL] osd-grammar/strings/escaped-control-character-is-still-an-error",
-    ]);
+    // path/code, so coded syntax errors are compared for real (path and code).
+    //
+    // Bumped to v0.19.0-beta (249 vectors, +18): D-21 doubled-BOM vectors on
+    // all six surfaces pass (explicit pre-check in src/bom.ts); E-23 OSD
+    // string errors report the opening quote; OML-25 and the six new
+    // formats-yaml/merge-key vectors pass. The 6 alias-expansion vectors still
+    // skip (D-18 / DIV-3), the rest of the skips are unchanged.
+    // Net: 182 pass, 0 fail, 67 skip.
+    expect(exitCode).toBe(0);
     expect(logs.at(-1)).toBe(
-      "\n162 passed, 2 failed, 67 skipped (of 231 vectors) -- " +
+      "\n182 passed, 0 failed, 67 skipped (of 249 vectors) -- " +
         "diagnostic paths always compared, codes compared where the error carries one (Sec8.5.2)",
     );
   });
@@ -182,8 +176,8 @@ describeIfVendored("main() against the real vendor/omnist-spec/test-suite", () =
     }
   });
 
-  it("iterVectors discovers all 231 real vectors", () => {
-    expect(iterVectors(REAL_SUITE_DIR).length).toBe(231);
+  it("iterVectors discovers all 249 real vectors", () => {
+    expect(iterVectors(REAL_SUITE_DIR).length).toBe(249);
   });
 });
 
@@ -503,7 +497,7 @@ describe("parse_schema", () => {
 
   it("compares a coded OSD lexical error's position and code", () => {
     const text = 'record R { "a\u0001b": string } root R\n';
-    const ok = runVector(vec("parse_schema", { text }, { ok: false, diagnostics: [{ path: "1:14", code: "parse.control-character" }] }));
+    const ok = runVector(vec("parse_schema", { text }, { ok: false, diagnostics: [{ path: "1:12", code: "parse.control-character" }] }));
     expect(ok).toEqual({ status: "pass", message: "ok" });
     const bad = runVector(vec("parse_schema", { text }, { ok: false, diagnostics: [{ path: "1:1", code: "parse.control-character" }] }));
     expect(bad.status).toBe("fail");
