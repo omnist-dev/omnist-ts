@@ -86,7 +86,7 @@ implementation. Two independent tracks, from the same submodule pin:
 - **The JSON-vector suite** (`tools/conformance/vectorRunner.ts`) runs
   `test-suite/`'s JSON-envelope vectors (`name`/`operation`/`input`/
   `expect`) against the same functions. Currently
-  **182 passed, 0 failed, 67 skipped** (of 249).
+  **189 passed, 0 failed, 60 skipped** (of 249).
 
 Every skip cites an explicit, checkable reason, per
 [`docs/08-conformance-and-errors.md` Sec8.5.5](https://github.com/omnist-dev/omnist-spec/blob/master/docs/08-conformance-and-errors.md)
@@ -103,12 +103,15 @@ in `omnist-spec` -- never an unreasoned skip:
   a runtime-configurable safety limit, and this port's `MAX_DEPTH`/
   `MAX_NODES`/`MAX_INT_DIGITS` are compile-time constants with no
   configuration surface.
-- **A structured-diagnostics gap** -- vectors that expect a `path`/`code`
-  on a syntax-level parse or well-formedness failure skip **only** when the
-  error this port throws genuinely carries no `path` and/or `code` (codec
-  syntax errors, schema well-formedness errors). An error that does carry
-  both (OML/OSD lexical and parse errors, the data-XML profile refusals) is
-  compared for real.
+- **A structured-diagnostics gap** ("not yet implemented", tracked by
+  [omnist-ts#149](https://github.com/omnist-dev/omnist-ts/issues/149)) --
+  20 `schema.*` well-formedness vectors expect a Schema `path` and `code`
+  (Sec8.3.3, Sec8.4.1), and this port's `SchemaError` throw sites carry
+  neither as structured fields (the values are in the message text). A
+  vector skips this way **only** when the error this port throws genuinely
+  lacks a `path` and/or `code`. Errors that carry both are compared for real:
+  OML/OSD `parse.*` errors, the data-XML profile refusals, and
+  `document.unlabeled-element`.
 
 Diagnostic **paths** are always compared; **codes** are compared where the
 thrown error carries one (its `parse.*`/`format.*` codes are spec codes).

@@ -559,3 +559,24 @@ describe("issue #96: TimeValue's toString/toJSON stay text-transparent", () => {
     expect(d.toString()).not.toContain("text");
   });
 });
+
+describe("DocumentError structured diagnostics (document.unlabeled-element)", () => {
+  it("an array of arrays carries the code and the Document path of the inner array", () => {
+    try {
+      doc({ m: [[1n, 2n], [3n, 4n]] });
+      expect.unreachable();
+    } catch (e) {
+      expect((e as { code?: string }).code).toBe("document.unlabeled-element");
+      expect((e as { path?: string }).path).toBe("$.m[0]");
+    }
+  });
+  it("a non-string mapping key carries the code and the path of the mapping", () => {
+    try {
+      doc(new Map<unknown, unknown>([[true, 1n]]));
+      expect.unreachable();
+    } catch (e) {
+      expect((e as { code?: string }).code).toBe("document.unlabeled-element");
+      expect((e as { path?: string }).path).toBe("$");
+    }
+  });
+});

@@ -102,7 +102,18 @@ export class ParseError extends OmnistError {
  * object key, a cycle -- or when an operation doesn't fit the node (e.g.
  * `get` on a scalar). The message carries the offending path.
  */
-export class DocumentError extends OmnistError {}
+export class DocumentError extends OmnistError {
+  /** Stable machine-readable error code (omnist-spec Sec8.3.2), when the throw site has one. */
+  readonly code: string | undefined;
+  /** Document path (Sec8.4) of the offending construct, when known. */
+  readonly path: string | undefined;
+
+  constructor(message: string, code?: string, path?: string) {
+    super(message);
+    this.code = code;
+    this.path = path;
+  }
+}
 
 /**
  * A cursor was used after its node was removed from the document.

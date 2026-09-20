@@ -195,7 +195,7 @@ export function buildNode(
     const edges: Edge[] = [];
     for (const [k, v] of entries) {
       if (typeof k !== "string") {
-        throw new DocumentError(`${path}: object key ${String(k)} is not a string`);
+        throw new DocumentError(`${path}: object key ${String(k)} is not a string`, "document.unlabeled-element", path);
       }
       const kp = join(path, k);
       for (const child of children(v, kp, depth + 1, nextSeen, counter)) {
@@ -222,7 +222,11 @@ function* children(
     for (let i = 0; i < v.length; i++) {
       const item: unknown = v[i];
       if (Array.isArray(item)) {
-        throw new DocumentError(`${path}[${i}]: an array of arrays has no labeled-edge form`);
+        throw new DocumentError(
+          `${path}[${i}]: an array of arrays has no labeled-edge form`,
+          "document.unlabeled-element",
+          `${path}[${i}]`,
+        );
       }
       yield buildNode(item, `${path}[${i}]`, depth + 1, seen, counter);
     }

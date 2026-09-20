@@ -13,9 +13,9 @@
  *    boolean-resolution sharp edges, issue #89) are fixed. One of the
  *    two YAML vectors now reports as a SKIP rather than a PASS: fixing
  *    the boolean-key bug makes it correctly reject the document, but
- *    the DocumentError raised carries no structured path/code, so it
- *    falls into the same "syntax-level error carries no structured
- *    diagnostics" skip category as the oml/osd-grammar vectors.
+ *    the DocumentError raised carried no structured path/code then, so
+ *    it skipped (it now carries `document.unlabeled-element` + a Document
+ *    path and passes; see the v0.19.0-beta note below).
  *    If this test starts failing because the *tally* changed, that is
  *    worth investigating either way (a new bug, or a new fix) that
  *    requires updating this assertion, not a regression to chase
@@ -140,7 +140,7 @@ describeIfVendored("main() against the real vendor/omnist-spec/test-suite", () =
     // Bumped to v0.18.0-beta (231 vectors, +27): the D-15 BOM vectors (JSON,
     // TOML, OSD, OML) pass; the data-XML profile refusals and the OSD
     // escaped-control-character vector carry structured diagnostics, so they
-    // skip on the syntax-level-diagnostics rule once they throw; all six
+    // were first skipped for lack of structure (since fixed, see below); all six
     // formats-yaml/alias-expansion vectors skip via the
     // declared_max_alias_expansion allowlist entry (D-18 / DIV-3).
     // Then (review fix): the runner's blanket "reader threw + vector expects
@@ -152,10 +152,13 @@ describeIfVendored("main() against the real vendor/omnist-spec/test-suite", () =
     // string errors report the opening quote; OML-25 and the six new
     // formats-yaml/merge-key vectors pass. The 6 alias-expansion vectors still
     // skip (D-18 / DIV-3), the rest of the skips are unchanged.
-    // Net: 182 pass, 0 fail, 67 skip.
+    // Net: 189 pass, 0 fail, 60 skip (after the second review round: OML temporal
+    // errors now carry parse.invalid-date/-time at the token start, and
+    // document.unlabeled-element carries a Document path, so 7 skips became
+    // passes; the 20 schema.* skips cite omnist-ts#149).
     expect(exitCode).toBe(0);
     expect(logs.at(-1)).toBe(
-      "\n182 passed, 0 failed, 67 skipped (of 249 vectors) -- " +
+      "\n189 passed, 0 failed, 60 skipped (of 249 vectors) -- " +
         "diagnostic paths always compared, codes compared where the error carries one (Sec8.5.2)",
     );
   });
@@ -163,7 +166,7 @@ describeIfVendored("main() against the real vendor/omnist-spec/test-suite", () =
   it("every skip cites an explicit, reasoned category", () => {
     const { logs } = withCapturedConsole(() => main());
     const skipLines = logs.filter((l) => l.startsWith("[SKIP]"));
-    expect(skipLines.length).toBe(67);
+    expect(skipLines.length).toBe(60);
     for (const line of skipLines) {
       // D-6 (integer/number kind collapse) is CLOSED as of issue #98 --
       // no vector cites it anymore (see tools/conformance/vectorRunner.ts).
@@ -171,7 +174,7 @@ describeIfVendored("main() against the real vendor/omnist-spec/test-suite", () =
       // (parse_schema_oml/write_schema_oml -- OSD-OML isn't implemented
       // by this port yet, same as every other omnist port).
       expect(line).toMatch(
-        /: (not yet implemented|syntax-level \w+Error carries no structured path\/code|no driver wired up yet for operation)/,
+        /: (not yet implemented|no driver wired up yet for operation)/,
       );
     }
   });
@@ -300,7 +303,10 @@ describe("parse", () => {
     const r = runVector(
       vec("parse", { format: "json", text: "{not json" }, { ok: false, diagnostics: [{ path: "1:1", code: "parse.codec-syntax" }] }),
     );
-    expect(r).toEqual({ status: "skip", message: "syntax-level ParseError carries no structured path/code" });
+    expect(r).toEqual({
+      status: "skip",
+      message: "not yet implemented -- ParseError carries no structured code/path for this diagnostic",
+    });
   });
 
   it("compares the path and code a coded syntax error carries (pass)", () => {
@@ -492,7 +498,10 @@ describe("parse_schema", () => {
 
   it("skips a syntax failure asserting structured diagnostics only when the error carries no path/code", () => {
     const r = runVector(vec("parse_schema", { text: "not a schema" }, { ok: false, diagnostics: [{ path: "R", code: "x" }] }));
-    expect(r).toEqual({ status: "skip", message: "syntax-level SchemaError carries no structured path/code" });
+    expect(r).toEqual({
+      status: "skip",
+      message: "not yet implemented -- SchemaError carries no structured code/path for this diagnostic (omnist-ts#149)",
+    });
   });
 
   it("compares a coded OSD lexical error's position and code", () => {

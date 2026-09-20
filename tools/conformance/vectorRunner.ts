@@ -62,9 +62,10 @@
  * lacks a `path` and/or `code`, and otherwise compares path and code for real.
  * Original text follows.
  *
- * **4. Structured diagnostics on syntax errors.** Verified directly:
- * `readOml("a: [1, 2\n")` throws `ParseError` with `.errors` empty (only
- * `.message`, a plain string) -- `src/errors.ts`'s documented asymmetry
+ * **4. Structured diagnostics on syntax errors.** (Historical: written when
+ * no OML error carried structure; `readOml("a: [1, 2")` now carries
+ * `parse.unexpected-token` and a `line:col` path.) Verified directly at the
+ * time: an OML syntax error threw `ParseError` with `.errors` empty -- `src/errors.ts`'s documented asymmetry
  * (`ParseError.errors` is populated only for `materialize`-driven
  * schema-conformance failures, never for syntax failures), matching
  * Python's `ParseError` exactly. `SchemaError` (osd-grammar syntax
@@ -264,10 +265,18 @@ function errorMessage(e: unknown): string {
  * syntax error or a schema-conformance failure raised as a plain
  * ParseError). Whatever the error does carry is verified, never assumed.
  */
-function compareThrownDiagnostics(e: unknown, expected: readonly Diagnostic[], kind: string): Result {
+function compareThrownDiagnostics(e: unknown, expected: readonly Diagnostic[]): Result {
+  // The thrown error's own class names the reason (never a guess from the vector).
+  const kind = (e as object).constructor.name;
   const err = e as { path?: string; code?: string };
   if (err.path === undefined || err.code === undefined) {
-    return skip(`syntax-level ${kind} carries no structured path/code`);
+    // E-20 "not yet implemented" (no ledger entry required): the diagnostic
+    // values exist in the message text but not as structured `code`/`path`
+    // fields. Tracked by omnist-ts#149 for SchemaError (the schema.* codes of
+    // Sec8.3.3/Sec8.4.1: 20 vectors today); any other error class that reaches
+    // this branch is skipped for the same reason, named honestly, uncited.
+    const tracked = kind === "SchemaError" ? " (omnist-ts#149)" : "";
+    return skip(`not yet implemented -- ${kind} carries no structured code/path for this diagnostic${tracked}`);
   }
   const expPaths = paths(expected);
   const actPaths = new Set([err.path]);
@@ -313,7 +322,7 @@ function runParse(v: Vector): Result {
   } catch (e) {
     if (expect.ok === false) {
       if (expect.diagnostics !== undefined) {
-        return compareThrownDiagnostics(e, asDiagnostics(expect.diagnostics), "ParseError");
+        return compareThrownDiagnostics(e, asDiagnostics(expect.diagnostics));
       }
       return pass();
     }
@@ -343,7 +352,7 @@ function runParseSchema(v: Vector): Result {
   } catch (e) {
     if (expect.ok === false) {
       if (expect.diagnostics !== undefined) {
-        return compareThrownDiagnostics(e, asDiagnostics(expect.diagnostics), "SchemaError");
+        return compareThrownDiagnostics(e, asDiagnostics(expect.diagnostics));
       }
       return pass();
     }

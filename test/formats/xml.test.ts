@@ -831,4 +831,25 @@ describe("data-XML profile refusals (docs/formats/xml.md)", () => {
   it("does not mistake inert text for a DOCTYPE or entity reference", () => {
     expect(() => readXml("<d><!-- <!DOCTYPE x> &nbsp; --><f><![CDATA[&nbsp; <!DOCTYPE]]></f></d>")).not.toThrow();
   });
+
+  it("malformed input is a syntax error, not a profile refusal, even when it also has a DOCTYPE or entity", () => {
+    // Well-formedness is checked first (docs/formats/xml.md: refusals are
+    // "well-formed XML"; E-24). The message says "invalid XML", carries no
+    // format.* refusal code.
+    for (const text of ["<r><a>&foo;</a>", "<!DOCTYPE r><r><a>1</a>", '<!DOCTYPE r [<!ENTITY x "y">]><r>&x;</r']) {
+      try {
+        readXml(text);
+        expect.unreachable();
+      } catch (e) {
+        expect(e).toBeInstanceOf(ParseError);
+        expect((e as ParseError).message).toMatch(/^invalid XML/);
+        expect((e as ParseError).code ?? "").not.toMatch(/^format\./);
+      }
+    }
+  });
+
+  it("well-formed input with a DOCTYPE or an undeclared entity is a refusal (validator treats both as well-formed)", () => {
+    expect((() => { try { readXml("<r>&foo;</r>"); } catch (e) { return (e as ParseError).code; } })()).toBe("format.entity-forbidden");
+    expect((() => { try { readXml("<!DOCTYPE r><r><a>1</a></r>"); } catch (e) { return (e as ParseError).code; } })()).toBe("format.dtd-forbidden");
+  });
 });

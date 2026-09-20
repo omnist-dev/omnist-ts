@@ -234,11 +234,18 @@ export function readXml(text: string, opts: ReadXmlOptions = {}): Node {
   text = stripLeadingBom(text); // D-15: one leading U+FEFF
   rejectSecondLeadingBom(text, "XML"); // D-21: a second one is an error
   checkInputSize(text, "XML");
-  refuseOutOfProfile(text);
+  // Well-formedness FIRST: malformed input is a syntax error
+  // (parse.codec-syntax) even when it also contains a DOCTYPE or an entity
+  // reference; only well-formed XML can be a profile *refusal* (docs/formats/
+  // xml.md: "Every document above is well-formed XML"; E-24). Verified:
+  // fast-xml-parser's validator treats a DOCTYPE and an undeclared entity
+  // reference (`<r>&foo;</r>`) as well-formed, so it does not pre-empt the
+  // refusal below, and it rejects `<r><a>&foo;</a>` (unclosed) on its own.
   const valid = XMLValidator.validate(text);
   if (valid !== true) {
     throw new ParseError("invalid XML: " + valid.err.msg);
   }
+  refuseOutOfProfile(text);
   let parsed: XmlEntry[];
   try {
     parsed = PARSER.parse(text) as XmlEntry[];

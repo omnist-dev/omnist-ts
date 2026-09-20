@@ -9,7 +9,7 @@ same functions).
 ## [v0.3.1-alpha] -- spec v0.19.0-beta sweep: D-15/D-21 BOM, data-XML profile, E-23, OML-25, D-18 allowlist
 
 `vendor/omnist-spec` bumped from v0.9.1-beta to **v0.19.0-beta** (249
-vectors, was 204). Conformance (vector track): **182 pass / 0 fail / 67 skip**
+vectors, was 204). Conformance (vector track): **189 pass / 0 fail / 60 skip**
 (was 128 / 0 / 76 of 204 at the old pin; the 231-vector v0.18.0-beta suite
 measured 146 / 7 / 78 before any code change, and the v0.19.0-beta suite
 177 / 3 / 69 with the v0.18 fixes in place). Fixture track: 19 / 0 / 0
@@ -38,8 +38,24 @@ Real behavior changes:
 - **OML error codes:** a newline or `;` in place of a missing array comma is
   `parse.separator-in-array`; leftover content after a top-level scalar/edge
   value is `parse.trailing-content` (OML-25).
-- YAML merge-key order (source order, earlier alias wins) already matched via
-  `yaml` 2.9.0; all six `formats-yaml/merge-key` vectors pass unchanged.
+- YAML merge-key order (source order, earlier alias wins) already matches, but
+  entirely because of the `yaml` library (2.9.0, resolved from `^2.5.0`); this
+  port has no merge logic of its own, and the six `formats-yaml/merge-key`
+  vectors are the only assertion of it.
+- **OML `parse.separator-in-array`** fires only when a newline/`;` stood where
+  a comma was required before a *further* element; an unterminated array
+  whose last element is followed by a newline (`a: [1, 2\n`) is
+  `parse.unexpected-token`. The "got EOF" error message now names the real
+  `line:col` (it said `line 0, col 0`; the path was already right).
+- **OML temporal value errors** (`2024-13-01`, `23:59:60`, ...) now carry
+  `parse.invalid-date` / `parse.invalid-time` at the token's start (was
+  uncoded, positioned at the token's end).
+- **`DocumentError`** gained optional `code` / `path`; array-of-arrays and
+  non-string mapping keys carry `document.unlabeled-element` with the Document
+  path.
+- **XML order:** well-formedness is checked before the data-XML profile
+  refusal, so malformed input is a syntax error even if it also contains a
+  DOCTYPE or an entity reference.
 
 Tooling / no behavior change:
 
@@ -51,7 +67,10 @@ Tooling / no behavior change:
 - Vector runner: the blanket "reader threw + vector expects diagnostics ->
   skip" rule was narrowed to skip only when the thrown error carries no
   `path` and/or no `code`; otherwise path and code are compared for real
-  (paths always; codes where the error carries one, Sec8.5.2).
+  (paths always; codes where the error carries one, Sec8.5.2). The 20
+  remaining such skips are the `schema.*` well-formedness vectors, reported
+  as E-20 "not yet implemented" and cited to omnist-ts#149 (`SchemaError`
+  carries no structured `code`/`path`; the values are in the message).
 - S-21 (`infer` opens to `any` only when asked, reports every opening)
   audited for both opening paths: already compliant, no change.
 

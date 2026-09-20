@@ -121,6 +121,13 @@ function leadingZeroIntPart(text: string): boolean {
 // Tokenizer
 // ---------------------------------------------------------------------------
 
+/** Token kinds that can begin an array element (a value): everything except
+ * structural/closing tokens and EOF. See parseArray's separator-in-array rule. */
+const NON_ELEMENT_START = new Set<string>(["SEP", "RBRACE", "RBRACKET", "COMMA", "COLON", "EOF"]);
+function startsElement(kind: string): boolean {
+  return !NON_ELEMENT_START.has(kind);
+}
+
 type TokKind =
   | "SEP"
   | "STRING"
@@ -309,15 +316,12 @@ class Scanner {
   }
 
   errorEof(pos: number, msg: string, code?: string): ParseError {
-    // Quirk preserved from the Python scanner: an EOF token carries no
-    // position, so any "got EOF" error *message* names line 0, col 0
-    // rather than the source's actual end position. See omnist/oml.py's
-    // _Scanner.error_eof. The structured `path` is new (issue #108) and
-    // is not bound by that message-text quirk, so it reports the real
-    // 1-based line:col of the EOF position, computed from `pos` (the
-    // scanner's actual end-of-input offset).
+    // Historically (a quirk inherited from the Python scanner) a "got EOF"
+    // message said `line 0, col 0` while the structured `path` carried the
+    // real position. The message now agrees with the path: both name the
+    // 1-based line:col of the scanner's actual end-of-input offset.
     const [line, col] = this.lineCol(pos);
-    return new ParseError(`line 0, col 0: ${msg}`, [], code, `${line}:${col}`);
+    return new ParseError(`line ${line}, col ${col}: ${msg}`, [], code, `${line}:${col}`);
   }
 
   next(): Tok {
@@ -822,7 +826,11 @@ class Parser {
         closeKind,
         closeStart,
         `expected ',' or ']' in array, got ${closeKind} ${JSON.stringify(text)}`,
-        sawSeparator ? "parse.separator-in-array" : "parse.unexpected-token",
+        // Only when a newline/`;` stood where a comma was required BEFORE A
+        // FURTHER ELEMENT: the closing token must itself be able to start an
+        // element. A separator run followed by EOF, `}` or `:` (an
+        // unterminated or mis-closed array) used nothing as a separator.
+        sawSeparator && startsElement(closeKind) ? "parse.separator-in-array" : "parse.unexpected-token",
       );
     }
     return elements;
@@ -878,14 +886,14 @@ class Parser {
         const text = this.sc.s.slice(start, end);
         const d = parseDateToken(text);
         if (d === null) {
-          throw this.sc.errorAt(end, `invalid date ${JSON.stringify(text)}`);
+          throw this.sc.errorAt(start, `invalid date ${JSON.stringify(text)}`, "parse.invalid-date");
         }
         return d;
       }
       case "TIME": {
         const text = this.sc.s.slice(start, end);
         if (parseTimeToken(text) === null) {
-          throw this.sc.errorAt(end, `invalid time ${JSON.stringify(text)}`);
+          throw this.sc.errorAt(start, `invalid time ${JSON.stringify(text)}`, "parse.invalid-time");
         }
         // Document-model mapping: `time` has no native JS type, so a
         // genuinely time-kinded value is a `TimeValue` wrapper around the
@@ -898,7 +906,10 @@ class Parser {
         const text = this.sc.s.slice(start, end);
         const d = parseDatetimeToken(text);
         if (d === null) {
-          throw this.sc.errorAt(end, `invalid datetime ${JSON.stringify(text)}`);
+          // Sec8.3.1: invalid-date is "a DATE or the date portion of a
+          // DATETIME"; invalid-time is the time portion or a tz-offset.
+          const code = parseDateToken(text.slice(0, 10)) === null ? "parse.invalid-date" : "parse.invalid-time";
+          throw this.sc.errorAt(start, `invalid datetime ${JSON.stringify(text)}`, code);
         }
         return d;
       }
