@@ -86,7 +86,9 @@ implementation. Two independent tracks, from the same submodule pin:
 - **The JSON-vector suite** (`tools/conformance/vectorRunner.ts`) runs
   `test-suite/`'s JSON-envelope vectors (`name`/`operation`/`input`/
   `expect`) against the same functions. Currently
-  **103 passed, 0 failed, 36 skipped** (of 139).
+  **162 passed, 2 failed, 67 skipped** (of 231). The two failures are
+  open spec questions, not port regressions -- see the v0.3.1-alpha
+  CHANGELOG entry.
 
 Every skip cites an explicit, checkable reason, per
 [`docs/08-conformance-and-errors.md` Sec8.5.5](https://github.com/omnist-dev/omnist-spec/blob/master/docs/08-conformance-and-errors.md)
@@ -103,16 +105,17 @@ in `omnist-spec` -- never an unreasoned skip:
   a runtime-configurable safety limit, and this port's `MAX_DEPTH`/
   `MAX_NODES`/`MAX_INT_DIGITS` are compile-time constants with no
   configuration surface.
-- **A structured-diagnostics gap** -- 29 `oml-grammar`/`osd-grammar`/
-  `schema-wellformedness` vectors expect a `path`/`code` on a raw
-  syntax-level parse or well-formedness failure, and this port's
-  `ParseError`/`SchemaError` carry no structured fields for that case
-  (matching the same asymmetry as the Python reference's `ParseError`).
+- **A structured-diagnostics gap** -- vectors that expect a `path`/`code`
+  on a syntax-level parse or well-formedness failure skip **only** when the
+  error this port throws genuinely carries no `path` and/or `code` (codec
+  syntax errors, schema well-formedness errors). An error that does carry
+  both (OML/OSD lexical and parse errors, the data-XML profile refusals) is
+  compared for real.
 
-Diagnostics are compared in **code-agnostic mode** (`ok` plus the set of
-`path`s, never `code`) per Sec8.5.2 rule 4 -- verified empirically, not
-assumed: this port's error codes predate `omnist-spec`'s Sec8.3 code
-taxonomy, same as the Python reference.
+Diagnostic **paths** are always compared; **codes** are compared where the
+thrown error carries one (its `parse.*`/`format.*` codes are spec codes).
+Validate/materialize diagnostics are compared by path only (Sec8.5.2
+rule 4) -- those codes predate `omnist-spec`'s Sec8.3 taxonomy.
 
 Run locally:
 

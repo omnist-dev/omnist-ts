@@ -262,14 +262,11 @@ type Tok = readonly [TokKind, number, number];
 // reachable here: unexpected-token, trailing-content, unterminated-string,
 // invalid-escape, unpaired-surrogate, control-character,
 // reserved-word-label, bare-word, empty-array, nested-array.
-// `parse.separator-in-array` is NOT wired: this parser's array loop (see
-// parseArray below) does not have a throw site that distinguishes "a SEP
-// was used as an array separator" from every other malformed
-// array-closing token -- both collapse into the same generic "expected
-// ',' or ']'" diagnostic (parse.unexpected-token). Splitting that would
-// mean restructuring parseArray's control flow well past this issue's
-// additive scope, so it stays undifferentiated, the same way #105 left
-// OSD's structurally-unreachable codes uncoded rather than forcing them.
+// `parse.separator-in-array` is wired in parseArray (spec v0.18.0-beta sweep):
+// when the token that fails to close an array was preceded by a
+// newline/`;` separator run, that separator stood in for the missing comma
+// and the code is separator-in-array; every other malformed closing token
+// stays parse.unexpected-token.
 // Two throw-site families deliberately stay *uncoded* (no `code`, though
 // they may still carry a `path` if they went through errorAt/errorFor):
 // invalid DATE/TIME/DATETIME literal *values* (the token matched the
@@ -716,7 +713,11 @@ class Parser {
           this.start,
           "expected a separator (newline or ';') or '}' after the value for " +
             `${JSON.stringify(label)}, got ${this.kind} ${JSON.stringify(text)}`,
-          "parse.unexpected-token",
+          // At the top level (depth 0) the leftover token is content
+          // remaining after the document's single node (spec Sec4.2/8.3.1:
+          // `2024-01-01T99` is a DATE, then trailing content); inside a
+          // `{...}` body it is a token the grammar does not allow there.
+          depth === 0 ? "parse.trailing-content" : "parse.unexpected-token",
         );
       }
       this.skipSep();
@@ -792,6 +793,7 @@ class Parser {
       throw this.sc.errorAt(openStart, "empty array is not allowed", "parse.empty-array");
     }
     const elements: Node[] = [];
+    let sawSeparator = false;
     for (;;) {
       if (this.kind === "LBRACKET") {
         throw this.sc.errorAt(
@@ -802,6 +804,7 @@ class Parser {
         );
       }
       elements.push(this.parseValue(depth));
+      sawSeparator = this.kind === "SEP";
       this.skipSep();
       if (this.kind === "COMMA") {
         this.advance();
@@ -819,7 +822,7 @@ class Parser {
         closeKind,
         closeStart,
         `expected ',' or ']' in array, got ${closeKind} ${JSON.stringify(text)}`,
-        "parse.unexpected-token",
+        sawSeparator ? "parse.separator-in-array" : "parse.unexpected-token",
       );
     }
     return elements;

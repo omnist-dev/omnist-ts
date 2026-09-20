@@ -143,18 +143,33 @@ describeIfVendored("main() against the real vendor/omnist-spec/test-suite", () =
     // skip on the syntax-level-diagnostics rule once they throw; all six
     // formats-yaml/alias-expansion vectors skip via the
     // declared_max_alias_expansion allowlist entry (D-18 / DIV-3).
-    // Net: 145 pass, 0 fail, 86 skip.
-    expect(exitCode).toBe(0);
+    // Then (review fix): the runner's blanket "reader threw + vector expects
+    // diagnostics -> skip" was narrowed to skip ONLY when the error carries no
+    // path/code, so coded syntax errors (OML/OSD lexical/parse, XML profile
+    // refusals) are compared for real: 17 vectors moved SKIP -> PASS, and two
+    // real disagreements surfaced that are recorded as spec questions, not
+    // hidden: oml-grammar/reserved/nan-bare-is-a-number-token-not-a-label
+    // (code: unexpected-token vs trailing-content, same shape as the
+    // null-at-top-level vector that expects trailing-content) and
+    // osd-grammar/strings/escaped-control-character-is-still-an-error
+    // (vector expects 1:1 for an input whose control character is at 2:8).
+    // Net: 162 pass, 2 fail, 67 skip; exit code 1 until both are resolved
+    // in the spec.
+    expect(exitCode).toBe(1);
+    expect(logs.filter((l) => l.startsWith("[FAIL]")).map((l) => l.split(":")[0])).toEqual([
+      "[FAIL] oml-grammar/reserved/nan-bare-is-a-number-token-not-a-label",
+      "[FAIL] osd-grammar/strings/escaped-control-character-is-still-an-error",
+    ]);
     expect(logs.at(-1)).toBe(
-      "\n145 passed, 0 failed, 86 skipped (of 231 vectors) -- " +
-        "diagnostics compared in code-agnostic mode (Sec8.5.2 rule 4)",
+      "\n162 passed, 2 failed, 67 skipped (of 231 vectors) -- " +
+        "diagnostic paths always compared, codes compared where the error carries one (Sec8.5.2)",
     );
   });
 
   it("every skip cites an explicit, reasoned category", () => {
     const { logs } = withCapturedConsole(() => main());
     const skipLines = logs.filter((l) => l.startsWith("[SKIP]"));
-    expect(skipLines.length).toBe(86);
+    expect(skipLines.length).toBe(67);
     for (const line of skipLines) {
       // D-6 (integer/number kind collapse) is CLOSED as of issue #98 --
       // no vector cites it anymore (see tools/conformance/vectorRunner.ts).
@@ -201,14 +216,14 @@ describe("main() against a scratch suite directory", () => {
     writeFileSync(path.join(dir, "nested", "readme.txt"), "not a vector file\n", "utf-8");
     const { result: exitCode, logs } = withCapturedConsole(() => main(dir));
     expect(exitCode).toBe(0);
-    expect(logs.at(-1)).toBe("\n1 passed, 0 failed, 0 skipped (of 1 vectors) -- diagnostics compared in code-agnostic mode (Sec8.5.2 rule 4)");
+    expect(logs.at(-1)).toBe("\n1 passed, 0 failed, 0 skipped (of 1 vectors) -- diagnostic paths always compared, codes compared where the error carries one (Sec8.5.2)");
   });
 
   it("treats a JSON file with no 'vectors' key as contributing zero vectors", () => {
     writeFileSync(path.join(dir, "empty.json"), JSON.stringify({}), "utf-8");
     const { result: exitCode, logs } = withCapturedConsole(() => main(dir));
     expect(exitCode).toBe(0);
-    expect(logs.at(-1)).toBe("\n0 passed, 0 failed, 0 skipped (of 0 vectors) -- diagnostics compared in code-agnostic mode (Sec8.5.2 rule 4)");
+    expect(logs.at(-1)).toBe("\n0 passed, 0 failed, 0 skipped (of 0 vectors) -- diagnostic paths always compared, codes compared where the error carries one (Sec8.5.2)");
   });
 
   it("reports a nonzero exit code when any vector fails", () => {
@@ -285,11 +300,36 @@ describe("parse", () => {
     expect(r).toEqual({ status: "fail", message: "expected failure, parse succeeded" });
   });
 
-  it("skips a syntax failure asserting structured diagnostics", () => {
+  it("skips a syntax failure asserting structured diagnostics ONLY when the error carries no path/code", () => {
+    // A codec syntax error (bare message, no code/path) genuinely lacks the
+    // structure the vector compares.
     const r = runVector(
-      vec("parse", { format: "oml", text: "a: [1, 2\n" }, { ok: false, diagnostics: [{ path: "1:1", code: "parse.x" }] }),
+      vec("parse", { format: "json", text: "{not json" }, { ok: false, diagnostics: [{ path: "1:1", code: "parse.codec-syntax" }] }),
     );
     expect(r).toEqual({ status: "skip", message: "syntax-level ParseError carries no structured path/code" });
+  });
+
+  it("compares the path and code a coded syntax error carries (pass)", () => {
+    const r = runVector(
+      vec("parse", { format: "oml", text: "a: [1\n2]\n" }, { ok: false, diagnostics: [{ path: "2:1", code: "parse.separator-in-array" }] }),
+    );
+    expect(r).toEqual({ status: "pass", message: "ok" });
+  });
+
+  it("fails when a coded syntax error's path differs from the vector's", () => {
+    const r = runVector(
+      vec("parse", { format: "oml", text: "a: [1\n2]\n" }, { ok: false, diagnostics: [{ path: "1:1", code: "parse.separator-in-array" }] }),
+    );
+    expect(r.status).toBe("fail");
+    expect(r.message).toContain("diagnostic paths differ");
+  });
+
+  it("fails when a coded syntax error's code differs from the vector's", () => {
+    const r = runVector(
+      vec("parse", { format: "oml", text: "a: [1\n2]\n" }, { ok: false, diagnostics: [{ path: "2:1", code: "parse.bare-word" }] }),
+    );
+    expect(r.status).toBe("fail");
+    expect(r.message).toContain("diagnostic codes differ");
   });
 
   it("passes a syntax failure asserting only ok:false", () => {
@@ -456,9 +496,17 @@ describe("parse_schema", () => {
     expect(r.message).toContain("expected success, threw:");
   });
 
-  it("skips a syntax failure asserting structured diagnostics", () => {
+  it("skips a syntax failure asserting structured diagnostics only when the error carries no path/code", () => {
     const r = runVector(vec("parse_schema", { text: "not a schema" }, { ok: false, diagnostics: [{ path: "R", code: "x" }] }));
     expect(r).toEqual({ status: "skip", message: "syntax-level SchemaError carries no structured path/code" });
+  });
+
+  it("compares a coded OSD lexical error's position and code", () => {
+    const text = 'record R { "a\u0001b": string } root R\n';
+    const ok = runVector(vec("parse_schema", { text }, { ok: false, diagnostics: [{ path: "1:14", code: "parse.control-character" }] }));
+    expect(ok).toEqual({ status: "pass", message: "ok" });
+    const bad = runVector(vec("parse_schema", { text }, { ok: false, diagnostics: [{ path: "1:1", code: "parse.control-character" }] }));
+    expect(bad.status).toBe("fail");
   });
 
   it("passes a syntax failure asserting only ok:false", () => {

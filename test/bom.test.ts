@@ -15,7 +15,7 @@ import { readXml, writeXml } from "../src/formats/xml.js";
 
 // Spec D-15 (docs/02-document-model.md Sec2.5): a leading U+FEFF is stripped
 // on every read surface, exactly one, only at offset zero; no writer emits one.
-const BOM = "﻿";
+const BOM = "\uFEFF";
 const EXPECTED = doc({ a: 1n }).toData();
 
 describe("stripLeadingBom", () => {
@@ -99,6 +99,7 @@ describe("D-15: stripping lives in one place", () => {
     };
     walk(path.join(root, "src"));
     walk(path.join(root, "tools"));
+    walk(path.join(root, "test")); // including this file: it must use the escape too
     expect(offenders).toEqual([]);
   });
 });

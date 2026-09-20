@@ -1451,14 +1451,21 @@ describe("OML parse error codes (spec Sec8.3.1, issue #108)", () => {
     expect(err.path).toBe("1:6");
   });
 
-  it("parse.separator-in-array is not reachable: a newline between array elements without a comma still reports parse.unexpected-token", () => {
-    // OML's array loop silently skips SEP tokens between elements before
-    // checking for a comma, so there is no throw site that can tell
-    // "a SEP was used as the separator" apart from any other malformed
-    // array-closing token; both collapse into the generic "expected ','
-    // or ']'" diagnostic. See the file-top comment in src/oml.ts.
+  it("parse.separator-in-array: a newline or ';' between array elements without a comma", () => {
     const err = errOf("a: [1\n2]");
-    expect(err.code).toBe("parse.unexpected-token");
+    expect(err.code).toBe("parse.separator-in-array");
+    expect(err.path).toBe("2:1");
+    expect(errOf("a: [1; 2]").code).toBe("parse.separator-in-array");
+    // a separator before the closing bracket, or after a real comma, is legal
+    expect(() => readOml("a: [1\n]")).not.toThrow();
+    expect(() => readOml("a: [1,\n2]")).not.toThrow();
+    // any other malformed closing token is still an ordinary unexpected token
+    expect(errOf("a: [1 }").code).toBe("parse.unexpected-token");
+  });
+
+  it("content after a top-level edge's value is parse.trailing-content; inside braces it is parse.unexpected-token", () => {
+    expect(errOf("a: 2024-01-01T99\n").code).toBe("parse.trailing-content");
+    expect(errOf("a: { b: 1 c: 2 }\n").code).toBe("parse.unexpected-token");
   });
 
   it("resource-limit throw sites (MAX_DEPTH) still carry no code/path (out of this issue's scope)", () => {

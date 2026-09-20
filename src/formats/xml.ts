@@ -200,6 +200,7 @@ function refuseOutOfProfile(text: string): void {
       "XML DOCTYPE declaration is outside the data-XML profile and is refused",
       [],
       "format.dtd-forbidden",
+      "$",
     );
   }
   for (const m of live.matchAll(ENTITY_REF)) {
@@ -208,9 +209,24 @@ function refuseOutOfProfile(text: string): void {
         `XML entity reference &${m[1] as string}; is outside the data-XML profile and is refused`,
         [],
         "format.entity-forbidden",
+        "$",
       );
     }
   }
+}
+
+// A data-XML profile refusal (docs/formats/xml.md; spec Sec8.3.8 E-7): the input
+// is well-formed XML that Omnist declines, not a syntax error. Carries the
+// spec code and the whole-input path `$` the vectors pin (no Document
+// exists to descend into once a read is refused); `where` names the element
+// in the message only.
+function mixedContentError(where: string): ParseError {
+  return new ParseError(
+    where + ": mixed content (text alongside child elements) is outside the data-XML profile",
+    [],
+    "format.mixed-content",
+    "$",
+  );
 }
 
 /** Parses XML text into a Document node (spec §4). */
@@ -347,9 +363,7 @@ function xmlToNode(
       continue;
     }
     if (sawFirstElement && tailText.trim() !== "") {
-      throw new ParseError(
-        path + "." + String(lastElementLabel) + ": mixed content (text alongside child elements) is outside the data-XML profile",
-      );
+      throw mixedContentError(path + "." + String(lastElementLabel));
     }
     tailText = "";
     sawFirstElement = true;
@@ -364,12 +378,10 @@ function xmlToNode(
     });
   }
   if (ownText.trim() !== "") {
-    throw new ParseError(path + ": mixed content (text alongside child elements) is outside the data-XML profile");
+    throw mixedContentError(path);
   }
   if (tailText.trim() !== "") {
-    throw new ParseError(
-      path + "." + String(lastElementLabel) + ": mixed content (text alongside child elements) is outside the data-XML profile",
-    );
+    throw mixedContentError(path + "." + String(lastElementLabel));
   }
   return out;
 }

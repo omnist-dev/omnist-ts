@@ -9,9 +9,10 @@ same functions).
 ## [v0.3.1-alpha] -- spec v0.18.0-beta sweep: D-15 BOM, data-XML profile, D-18 allowlist
 
 `vendor/omnist-spec` bumped from v0.9.1-beta to v0.18.0-beta (231 vectors,
-was 204). Conformance: 145 pass / 0 fail / 86 skip (was 128 / 0 / 76 at the
-old pin; 148 / 5 fail / 78 against the new suite before any code change,
-plus two of those failures being the same D-15 gap).
+was 204). Conformance: 162 pass / 2 fail / 67 skip of 231 (was 128 / 0 /
+76 of 204 at the old pin; the new 231-vector suite measured 146 pass /
+7 fail / 78 skip before any code change). The 2 failures are open spec
+questions, deliberately left visible rather than skipped -- see "Open" below.
 
 Real behavior changes:
 
@@ -32,7 +33,20 @@ Real behavior changes:
 - **OSD Sec5.3.1:** a raw control character immediately after a backslash in
   a string is now `parse.control-character`, like an unescaped one.
 
+- **OML error codes:** a newline or `;` standing in for a missing array comma
+  is now `parse.separator-in-array` (was `parse.unexpected-token`); a token
+  left over after a top-level edge's value (e.g. the `T99` of
+  `a: 2024-01-01T99`) is `parse.trailing-content`.
+- **Structured XML refusals:** `format.dtd-forbidden`, `format.entity-forbidden`
+  and `format.mixed-content` (previously message-only) now carry their code and
+  path `$` on the thrown `ParseError`.
+
 Tooling / no behavior change:
+
+- Vector runner: the blanket "reader threw + vector expects diagnostics ->
+  skip" rule was narrowed. It now skips only when the thrown error carries no
+  `path` and/or no `code`; otherwise it compares path and code for real. This
+  moved 17 vectors from skip to pass and surfaced the two open items below.
 
 - Vector runner: `declared_max_alias_expansion` added to the declared-limit
   allowlist. All six `formats-yaml/alias-expansion` vectors carry it, so they
@@ -42,6 +56,18 @@ Tooling / no behavior change:
 - S-21 (`infer` opens to `any` only when asked, reports every opening) audited
   for both opening paths (scalar-kind conflict; object/scalar mix): already
   compliant, no change.
+
+Open (spec questions, tracked outside this repo):
+
+- `oml-grammar/reserved/nan-bare-is-a-number-token-not-a-label` expects
+  `parse.unexpected-token` at `1:4`, but `null: 1` at top level (same
+  scalar-branch-then-leftover-colon shape) expects `parse.trailing-content`.
+  This port reports `parse.trailing-content` for both.
+- `osd-grammar/strings/escaped-control-character-is-still-an-error` expects
+  path `1:1`; the input's control character is at `2:8` (string starts at
+  `2:5`). No reading of "position of the failure" gives `1:1`.
+- `formats-yaml/alias-expansion/merge-key-sequence-...`: merged-edge order for
+  `<<: [*a, *b]` (masked by the D-18 allowlist skip).
 
 ## [v0.3.0-alpha] -- spec-correctness audit: 9-issue "fail, don't invent" cycle
 

@@ -25,7 +25,7 @@
  * The codes don't match syntactically even though they mean the same thing;
  * omnist-ts's diagnostic codes predate Sec8.3 and were never renamed to
  * match it, the same situation Python's port is in. This runner therefore
- * always compares in code-agnostic mode: `ok` plus the *set* of `path`s,
+ * compares validate/materialize diagnostics in code-agnostic mode: `ok` plus the *set* of `path`s,
  * never `code`. Message text is never compared either way (rule 1).
  *
  * **2. D-6 (integer/number kind collapse) -- CLOSED, issue #98.** Used to
@@ -52,6 +52,15 @@
  * `1_000_000`), with no runtime-configuration surface. These SKIP, citing
  * "not yet implemented -- omnist-ts's safety limits are compile-time
  * constants, no runtime configuration surface".
+ *
+ * **4 (AMENDED, v0.18.0-beta sweep). Structured diagnostics on syntax
+ * errors.** The paragraph below was written when no syntax error carried
+ * structure, and the runner skipped every such vector. Since issue #108
+ * OML/OSD lexical and parse errors carry a `line:col` `path` and a `parse.*`
+ * `code`, and the data-XML profile refusals carry `format.*` codes with path
+ * `$`. `compareThrownDiagnostics` therefore skips ONLY when the thrown error
+ * lacks a `path` and/or `code`, and otherwise compares path and code for real.
+ * Original text follows.
  *
  * **4. Structured diagnostics on syntax errors.** Verified directly:
  * `readOml("a: [1, 2\n")` throws `ParseError` with `.errors` empty (only
@@ -246,6 +255,32 @@ function errorMessage(e: unknown): string {
 // Operation drivers -- one function per operation, (vector) -> Result
 // ---------------------------------------------------------------------------
 
+/**
+ * A reader threw and the vector expects `ok: false` with `diagnostics`.
+ * Compare the (path, code) the error itself carries against the expected
+ * set (Sec8.5.2: paths compared as a set, message text never). SKIP only
+ * when the error genuinely lacks the structure the vector compares -- no
+ * `path` and/or no `code` (a bare message, e.g. a JSON/TOML/YAML codec
+ * syntax error or a schema-conformance failure raised as a plain
+ * ParseError). Whatever the error does carry is verified, never assumed.
+ */
+function compareThrownDiagnostics(e: unknown, expected: readonly Diagnostic[], kind: string): Result {
+  const err = e as { path?: string; code?: string };
+  if (err.path === undefined || err.code === undefined) {
+    return skip(`syntax-level ${kind} carries no structured path/code`);
+  }
+  const expPaths = paths(expected);
+  const actPaths = new Set([err.path]);
+  if (!setsEqual(expPaths, actPaths)) {
+    return fail(`diagnostic paths differ: expected ${setStr(expPaths)}, got ${setStr(actPaths)}`);
+  }
+  const expCodes = new Set(expected.map((d) => d.code));
+  if (!setsEqual(expCodes, new Set([err.code]))) {
+    return fail(`diagnostic codes differ: expected ${setStr(expCodes)}, got ${setStr(new Set([err.code]))}`);
+  }
+  return pass();
+}
+
 function runParse(v: Vector): Result {
   const inp = v.input;
   if (inp.declared_max_alias_expansion !== undefined) {
@@ -278,7 +313,7 @@ function runParse(v: Vector): Result {
   } catch (e) {
     if (expect.ok === false) {
       if (expect.diagnostics !== undefined) {
-        return skip("syntax-level ParseError carries no structured path/code");
+        return compareThrownDiagnostics(e, asDiagnostics(expect.diagnostics), "ParseError");
       }
       return pass();
     }
@@ -308,7 +343,7 @@ function runParseSchema(v: Vector): Result {
   } catch (e) {
     if (expect.ok === false) {
       if (expect.diagnostics !== undefined) {
-        return skip("syntax-level SchemaError carries no structured path/code");
+        return compareThrownDiagnostics(e, asDiagnostics(expect.diagnostics), "SchemaError");
       }
       return pass();
     }
@@ -650,7 +685,7 @@ export function main(suiteDir: string = VECTOR_SUITE_DIR): number {
   const total = passed + failed + skipped;
   console.log(
     `\n${passed} passed, ${failed} failed, ${skipped} skipped (of ${total} vectors) -- ` +
-      "diagnostics compared in code-agnostic mode (Sec8.5.2 rule 4)",
+      "diagnostic paths always compared, codes compared where the error carries one (Sec8.5.2)",
   );
   return failed ? 1 : 0;
 }
