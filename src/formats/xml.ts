@@ -55,6 +55,7 @@ import { finishWrite, WriteReport } from "../report.js";
 import { dateKind } from "../temporal.js";
 import { materialize } from "../deserialize.js";
 import { recordField, type FieldType, type Schema, type ScalarType } from "../schema.js";
+import { rejectSecondLeadingBom, stripLeadingBom } from "../bom.js";
 import { checkInputSize } from "./input-size.js";
 
 const MAX_DEPTH = 200;
@@ -181,13 +182,70 @@ export interface ReadXmlOptions {
   report?: WriteReport;
 }
 
+// Data-XML profile (docs/formats/xml.md): a DOCTYPE declaration of any kind,
+// and any entity reference other than the five predefined ones, MUST fail
+// the read -- on sight, not on use. Comments, CDATA sections and processing
+// instructions are stripped first: a `<!DOCTYPE` or `&name;` inside one is
+// inert text, not a declaration or a reference. Numeric character
+// references (`&#13;`, `&#xD;`) are character references, not entity
+// references, and stay legal (decodeNumericCharRefs handles them).
+const XML_INERT = /<!--[\s\S]*?-->|<!\[CDATA\[[\s\S]*?\]\]>|<\?[\s\S]*?\?>/g;
+const PREDEFINED_ENTITIES = new Set(["lt", "gt", "amp", "quot", "apos"]);
+const ENTITY_REF = /&([^#;\s&<][^;\s&<]*);/g;
+
+function refuseOutOfProfile(text: string): void {
+  const live = text.replace(XML_INERT, "");
+  if (live.includes("<!DOCTYPE")) {
+    throw new ParseError(
+      "XML DOCTYPE declaration is outside the data-XML profile and is refused",
+      [],
+      "format.dtd-forbidden",
+      "$",
+    );
+  }
+  for (const m of live.matchAll(ENTITY_REF)) {
+    if (!PREDEFINED_ENTITIES.has(m[1] as string)) {
+      throw new ParseError(
+        `XML entity reference &${m[1] as string}; is outside the data-XML profile and is refused`,
+        [],
+        "format.entity-forbidden",
+        "$",
+      );
+    }
+  }
+}
+
+// A data-XML profile refusal (docs/formats/xml.md; spec Sec8.3.8 E-7): the input
+// is well-formed XML that Omnist declines, not a syntax error. Carries the
+// spec code and the whole-input path `$` the vectors pin (no Document
+// exists to descend into once a read is refused); `where` names the element
+// in the message only.
+function mixedContentError(where: string): ParseError {
+  return new ParseError(
+    where + ": mixed content (text alongside child elements) is outside the data-XML profile",
+    [],
+    "format.mixed-content",
+    "$",
+  );
+}
+
 /** Parses XML text into a Document node (spec §4). */
 export function readXml(text: string, opts: ReadXmlOptions = {}): Node {
+  text = stripLeadingBom(text); // D-15: one leading U+FEFF
+  rejectSecondLeadingBom(text, "XML"); // D-21: a second one is an error
   checkInputSize(text, "XML");
+  // Well-formedness FIRST: malformed input is a syntax error
+  // (parse.codec-syntax) even when it also contains a DOCTYPE or an entity
+  // reference; only well-formed XML can be a profile *refusal* (docs/formats/
+  // xml.md: "Every document above is well-formed XML"; E-24). Verified:
+  // fast-xml-parser's validator treats a DOCTYPE and an undeclared entity
+  // reference (`<r>&foo;</r>`) as well-formed, so it does not pre-empt the
+  // refusal below, and it rejects `<r><a>&foo;</a>` (unclosed) on its own.
   const valid = XMLValidator.validate(text);
   if (valid !== true) {
     throw new ParseError("invalid XML: " + valid.err.msg);
   }
+  refuseOutOfProfile(text);
   let parsed: XmlEntry[];
   try {
     parsed = PARSER.parse(text) as XmlEntry[];
@@ -313,9 +371,7 @@ function xmlToNode(
       continue;
     }
     if (sawFirstElement && tailText.trim() !== "") {
-      throw new ParseError(
-        path + "." + String(lastElementLabel) + ": mixed content (text alongside child elements) is outside the data-XML profile",
-      );
+      throw mixedContentError(path + "." + String(lastElementLabel));
     }
     tailText = "";
     sawFirstElement = true;
@@ -330,12 +386,10 @@ function xmlToNode(
     });
   }
   if (ownText.trim() !== "") {
-    throw new ParseError(path + ": mixed content (text alongside child elements) is outside the data-XML profile");
+    throw mixedContentError(path);
   }
   if (tailText.trim() !== "") {
-    throw new ParseError(
-      path + "." + String(lastElementLabel) + ": mixed content (text alongside child elements) is outside the data-XML profile",
-    );
+    throw mixedContentError(path + "." + String(lastElementLabel));
   }
   return out;
 }

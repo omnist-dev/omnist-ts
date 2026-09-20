@@ -75,6 +75,7 @@
 
 import type { Edge, Node, Scalar } from "./document.js";
 import { ParseError, WriteError } from "./errors.js";
+import { stripLeadingBom } from "./bom.js";
 import { WriteReport } from "./report.js";
 import type { Schema } from "./schema.js";
 import { materialize } from "./deserialize.js";
@@ -119,6 +120,13 @@ function leadingZeroIntPart(text: string): boolean {
 // ---------------------------------------------------------------------------
 // Tokenizer
 // ---------------------------------------------------------------------------
+
+/** Token kinds that can begin an array element (a value): everything except
+ * structural/closing tokens and EOF. See parseArray's separator-in-array rule. */
+const NON_ELEMENT_START = new Set<string>(["SEP", "RBRACE", "RBRACKET", "COMMA", "COLON", "EOF"]);
+function startsElement(kind: string): boolean {
+  return !NON_ELEMENT_START.has(kind);
+}
 
 type TokKind =
   | "SEP"
@@ -261,14 +269,11 @@ type Tok = readonly [TokKind, number, number];
 // reachable here: unexpected-token, trailing-content, unterminated-string,
 // invalid-escape, unpaired-surrogate, control-character,
 // reserved-word-label, bare-word, empty-array, nested-array.
-// `parse.separator-in-array` is NOT wired: this parser's array loop (see
-// parseArray below) does not have a throw site that distinguishes "a SEP
-// was used as an array separator" from every other malformed
-// array-closing token -- both collapse into the same generic "expected
-// ',' or ']'" diagnostic (parse.unexpected-token). Splitting that would
-// mean restructuring parseArray's control flow well past this issue's
-// additive scope, so it stays undifferentiated, the same way #105 left
-// OSD's structurally-unreachable codes uncoded rather than forcing them.
+// `parse.separator-in-array` is wired in parseArray (spec v0.18.0-beta sweep):
+// when the token that fails to close an array was preceded by a
+// newline/`;` separator run, that separator stood in for the missing comma
+// and the code is separator-in-array; every other malformed closing token
+// stays parse.unexpected-token.
 // Two throw-site families deliberately stay *uncoded* (no `code`, though
 // they may still carry a `path` if they went through errorAt/errorFor):
 // invalid DATE/TIME/DATETIME literal *values* (the token matched the
@@ -286,7 +291,7 @@ class Scanner {
   pos: number;
 
   constructor(text: string) {
-    this.s = text.startsWith("﻿") ? text.slice(1) : text;
+    this.s = stripLeadingBom(text);
     this.n = this.s.length;
     this.pos = 0;
   }
@@ -311,15 +316,12 @@ class Scanner {
   }
 
   errorEof(pos: number, msg: string, code?: string): ParseError {
-    // Quirk preserved from the Python scanner: an EOF token carries no
-    // position, so any "got EOF" error *message* names line 0, col 0
-    // rather than the source's actual end position. See omnist/oml.py's
-    // _Scanner.error_eof. The structured `path` is new (issue #108) and
-    // is not bound by that message-text quirk, so it reports the real
-    // 1-based line:col of the EOF position, computed from `pos` (the
-    // scanner's actual end-of-input offset).
+    // Historically (a quirk inherited from the Python scanner) a "got EOF"
+    // message said `line 0, col 0` while the structured `path` carried the
+    // real position. The message now agrees with the path: both name the
+    // 1-based line:col of the scanner's actual end-of-input offset.
     const [line, col] = this.lineCol(pos);
-    return new ParseError(`line 0, col 0: ${msg}`, [], code, `${line}:${col}`);
+    return new ParseError(`line ${line}, col ${col}: ${msg}`, [], code, `${line}:${col}`);
   }
 
   next(): Tok {
@@ -715,7 +717,11 @@ class Parser {
           this.start,
           "expected a separator (newline or ';') or '}' after the value for " +
             `${JSON.stringify(label)}, got ${this.kind} ${JSON.stringify(text)}`,
-          "parse.unexpected-token",
+          // At the top level (depth 0) the leftover token is content
+          // remaining after the document's single node (spec Sec4.2/8.3.1:
+          // `2024-01-01T99` is a DATE, then trailing content); inside a
+          // `{...}` body it is a token the grammar does not allow there.
+          depth === 0 ? "parse.trailing-content" : "parse.unexpected-token",
         );
       }
       this.skipSep();
@@ -791,6 +797,7 @@ class Parser {
       throw this.sc.errorAt(openStart, "empty array is not allowed", "parse.empty-array");
     }
     const elements: Node[] = [];
+    let sawSeparator = false;
     for (;;) {
       if (this.kind === "LBRACKET") {
         throw this.sc.errorAt(
@@ -801,6 +808,7 @@ class Parser {
         );
       }
       elements.push(this.parseValue(depth));
+      sawSeparator = this.kind === "SEP";
       this.skipSep();
       if (this.kind === "COMMA") {
         this.advance();
@@ -818,7 +826,11 @@ class Parser {
         closeKind,
         closeStart,
         `expected ',' or ']' in array, got ${closeKind} ${JSON.stringify(text)}`,
-        "parse.unexpected-token",
+        // Only when a newline/`;` stood where a comma was required BEFORE A
+        // FURTHER ELEMENT: the closing token must itself be able to start an
+        // element. A separator run followed by EOF, `}` or `:` (an
+        // unterminated or mis-closed array) used nothing as a separator.
+        sawSeparator && startsElement(closeKind) ? "parse.separator-in-array" : "parse.unexpected-token",
       );
     }
     return elements;
@@ -874,14 +886,14 @@ class Parser {
         const text = this.sc.s.slice(start, end);
         const d = parseDateToken(text);
         if (d === null) {
-          throw this.sc.errorAt(end, `invalid date ${JSON.stringify(text)}`);
+          throw this.sc.errorAt(start, `invalid date ${JSON.stringify(text)}`, "parse.invalid-date");
         }
         return d;
       }
       case "TIME": {
         const text = this.sc.s.slice(start, end);
         if (parseTimeToken(text) === null) {
-          throw this.sc.errorAt(end, `invalid time ${JSON.stringify(text)}`);
+          throw this.sc.errorAt(start, `invalid time ${JSON.stringify(text)}`, "parse.invalid-time");
         }
         // Document-model mapping: `time` has no native JS type, so a
         // genuinely time-kinded value is a `TimeValue` wrapper around the
@@ -894,7 +906,10 @@ class Parser {
         const text = this.sc.s.slice(start, end);
         const d = parseDatetimeToken(text);
         if (d === null) {
-          throw this.sc.errorAt(end, `invalid datetime ${JSON.stringify(text)}`);
+          // Sec8.3.1: invalid-date is "a DATE or the date portion of a
+          // DATETIME"; invalid-time is the time portion or a tz-offset.
+          const code = parseDateToken(text.slice(0, 10)) === null ? "parse.invalid-date" : "parse.invalid-time";
+          throw this.sc.errorAt(start, `invalid datetime ${JSON.stringify(text)}`, code);
         }
         return d;
       }

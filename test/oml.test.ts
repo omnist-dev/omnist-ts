@@ -1444,21 +1444,43 @@ describe("OML parse error codes (spec Sec8.3.1, issue #108)", () => {
     expect(err.path).toBe("1:5");
   });
 
-  it("an EOF-terminated array (missing ']') still gets parse.unexpected-token, with a real path despite the 'line 0, col 0' message quirk", () => {
+  it("an EOF-terminated array (missing ']') is parse.unexpected-token, and the message names the same line:col as the path", () => {
     const err = errOf("a: [1");
     expect(err.code).toBe("parse.unexpected-token");
-    expect(err.message).toMatch(/^line 0, col 0:/);
     expect(err.path).toBe("1:6");
+    expect(err.message).toMatch(/^line 1, col 6:/);
   });
 
-  it("parse.separator-in-array is not reachable: a newline between array elements without a comma still reports parse.unexpected-token", () => {
-    // OML's array loop silently skips SEP tokens between elements before
-    // checking for a comma, so there is no throw site that can tell
-    // "a SEP was used as the separator" apart from any other malformed
-    // array-closing token; both collapse into the generic "expected ','
-    // or ']'" diagnostic. See the file-top comment in src/oml.ts.
+  it("parse.separator-in-array: a newline or ';' between array elements without a comma", () => {
     const err = errOf("a: [1\n2]");
-    expect(err.code).toBe("parse.unexpected-token");
+    expect(err.code).toBe("parse.separator-in-array");
+    expect(err.path).toBe("2:1");
+    expect(errOf("a: [1; 2]").code).toBe("parse.separator-in-array");
+    // a separator before the closing bracket, or after a real comma, is legal
+    expect(() => readOml("a: [1\n]")).not.toThrow();
+    expect(() => readOml("a: [1,\n2]")).not.toThrow();
+    // any other malformed closing token is still an ordinary unexpected token
+    expect(errOf("a: [1 }").code).toBe("parse.unexpected-token");
+  });
+
+  it("an UNTERMINATED array is parse.unexpected-token even when a newline follows the last element (nothing stood as a separator)", () => {
+    for (const text of ["a: [1, 2\n", "a: [1\n", "a: [1, 2", "a: [1;", "x: { a: [1, 2\n}", "a: [1\n\n\n"]) {
+      expect(errOf(text).code, JSON.stringify(text)).toBe("parse.unexpected-token");
+    }
+    expect(errOf("a: [1, 2\n").path).toBe("2:1");
+  });
+
+  it("parse.separator-in-array needs a FURTHER element after the separator (all element kinds)", () => {
+    for (const text of ["a: [1\n2]", "a: [1; 2]", 'a: [1\n"x"]', "a: [1\ntrue]", "a: [1\n{ b: 1 }]", "a: [{ b: 1 }\n{ c: 2 }]"]) {
+      expect(errOf(text).code, JSON.stringify(text)).toBe("parse.separator-in-array");
+    }
+    // a separator run before a closer, or a stray colon, is not one
+    expect(errOf("a: [1\n: 2]").code).toBe("parse.unexpected-token");
+  });
+
+  it("content after a top-level edge's value is parse.trailing-content; inside braces it is parse.unexpected-token", () => {
+    expect(errOf("a: 2024-01-01T99\n").code).toBe("parse.trailing-content");
+    expect(errOf("a: { b: 1 c: 2 }\n").code).toBe("parse.unexpected-token");
   });
 
   it("resource-limit throw sites (MAX_DEPTH) still carry no code/path (out of this issue's scope)", () => {
@@ -1468,9 +1490,15 @@ describe("OML parse error codes (spec Sec8.3.1, issue #108)", () => {
     expect(err.path).toBeUndefined();
   });
 
-  it("an invalid calendar DATE value still carries no code/path (a value-shape error, not a parse.* grammar error)", () => {
-    const err = errOf("a: 2024-13-01");
-    expect(err.code).toBeUndefined();
-    expect(err.path).toBe("1:14");
+  it("an invalid calendar DATE / TIME / DATETIME value: parse.invalid-date / parse.invalid-time at the token start", () => {
+    let err = errOf("a: 2024-13-01");
+    expect(err.code).toBe("parse.invalid-date");
+    expect(err.path).toBe("1:4");
+    err = errOf("a: 23:59:60");
+    expect(err.code).toBe("parse.invalid-time");
+    expect(err.path).toBe("1:4");
+    // datetime: the date portion is bad, then the time portion is bad
+    expect(errOf("a: 2024-02-30T10:00").code).toBe("parse.invalid-date");
+    expect(errOf("a: 2024-01-01T10:30+00:60").code).toBe("parse.invalid-time");
   });
 });

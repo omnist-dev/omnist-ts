@@ -25,7 +25,7 @@
  * The codes don't match syntactically even though they mean the same thing;
  * omnist-ts's diagnostic codes predate Sec8.3 and were never renamed to
  * match it, the same situation Python's port is in. This runner therefore
- * always compares in code-agnostic mode: `ok` plus the *set* of `path`s,
+ * compares validate/materialize diagnostics in code-agnostic mode: `ok` plus the *set* of `path`s,
  * never `code`. Message text is never compared either way (rule 1).
  *
  * **2. D-6 (integer/number kind collapse) -- CLOSED, issue #98.** Used to
@@ -53,9 +53,19 @@
  * "not yet implemented -- omnist-ts's safety limits are compile-time
  * constants, no runtime configuration surface".
  *
- * **4. Structured diagnostics on syntax errors.** Verified directly:
- * `readOml("a: [1, 2\n")` throws `ParseError` with `.errors` empty (only
- * `.message`, a plain string) -- `src/errors.ts`'s documented asymmetry
+ * **4 (AMENDED, v0.18.0-beta sweep). Structured diagnostics on syntax
+ * errors.** The paragraph below was written when no syntax error carried
+ * structure, and the runner skipped every such vector. Since issue #108
+ * OML/OSD lexical and parse errors carry a `line:col` `path` and a `parse.*`
+ * `code`, and the data-XML profile refusals carry `format.*` codes with path
+ * `$`. `compareThrownDiagnostics` therefore skips ONLY when the thrown error
+ * lacks a `path` and/or `code`, and otherwise compares path and code for real.
+ * Original text follows.
+ *
+ * **4. Structured diagnostics on syntax errors.** (Historical: written when
+ * no OML error carried structure; `readOml("a: [1, 2")` now carries
+ * `parse.unexpected-token` and a `line:col` path.) Verified directly at the
+ * time: an OML syntax error threw `ParseError` with `.errors` empty -- `src/errors.ts`'s documented asymmetry
  * (`ParseError.errors` is populated only for `materialize`-driven
  * schema-conformance failures, never for syntax failures), matching
  * Python's `ParseError` exactly. `SchemaError` (osd-grammar syntax
@@ -100,7 +110,19 @@ import { compareSchema } from "./referee.js";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const VECTOR_SUITE_DIR = path.resolve(HERE, "..", "..", "vendor", "omnist-spec", "test-suite");
 
-const LIMIT_KEYS = ["declared_max_depth", "declared_max_nodes", "declared_max_int_digits"] as const;
+// Allowlist of `declared_max_*` keys (test-suite/README.md, "declared-limit
+// keys"). A vector carrying one was written against a vector-local limit,
+// not this port's default, so it MUST be skipped -- never run against the
+// wrong threshold, which either fails for the wrong reason or (worse)
+// passes without exercising the boundary. Re-check this list against the
+// README's on every spec bump: a key missing here is silently treated as
+// an ordinary vector.
+const LIMIT_KEYS = [
+  "declared_max_depth",
+  "declared_max_nodes",
+  "declared_max_int_digits",
+  "declared_max_alias_expansion", // Sec2.4.1 D-18; enforced by no port yet (ledger DIV-3)
+] as const;
 
 interface Diagnostic {
   readonly path: string;
@@ -234,8 +256,53 @@ function errorMessage(e: unknown): string {
 // Operation drivers -- one function per operation, (vector) -> Result
 // ---------------------------------------------------------------------------
 
+/**
+ * A reader threw and the vector expects `ok: false` with `diagnostics`.
+ * Compare the (path, code) the error itself carries against the expected
+ * set (Sec8.5.2: paths compared as a set, message text never). SKIP only
+ * when the error genuinely lacks the structure the vector compares -- no
+ * `path` and/or no `code` (a bare message, e.g. a JSON/TOML/YAML codec
+ * syntax error or a schema-conformance failure raised as a plain
+ * ParseError). Whatever the error does carry is verified, never assumed.
+ */
+function compareThrownDiagnostics(e: unknown, expected: readonly Diagnostic[]): Result {
+  // The thrown error's own class names the reason (never a guess from the vector).
+  const kind = (e as object).constructor.name;
+  const err = e as { path?: string; code?: string };
+  if (err.path === undefined || err.code === undefined) {
+    // E-20 "not yet implemented" (no ledger entry required): the diagnostic
+    // values exist in the message text but not as structured `code`/`path`
+    // fields. Tracked by omnist-ts#149 for SchemaError (the schema.* codes of
+    // Sec8.3.3/Sec8.4.1: 20 vectors today); any other error class that reaches
+    // this branch is skipped for the same reason, named honestly, uncited.
+    const tracked = kind === "SchemaError" ? " (omnist-ts#149)" : "";
+    return skip(`not yet implemented -- ${kind} carries no structured code/path for this diagnostic${tracked}`);
+  }
+  const expPaths = paths(expected);
+  const actPaths = new Set([err.path]);
+  if (!setsEqual(expPaths, actPaths)) {
+    return fail(`diagnostic paths differ: expected ${setStr(expPaths)}, got ${setStr(actPaths)}`);
+  }
+  const expCodes = new Set(expected.map((d) => d.code));
+  if (!setsEqual(expCodes, new Set([err.code]))) {
+    return fail(`diagnostic codes differ: expected ${setStr(expCodes)}, got ${setStr(new Set([err.code]))}`);
+  }
+  return pass();
+}
+
 function runParse(v: Vector): Result {
   const inp = v.input;
+  if (inp.declared_max_alias_expansion !== undefined) {
+    // Sec8.5.5 E-20 "not yet implemented": D-18 (alias expansion factor) is
+    // not enforced here, and there is no configuration surface to set the
+    // vector's declared limit on either. Cites DIV-3 (docs/09 Sec9.4), the
+    // spec's own record of the rollout gap. All six vectors in
+    // formats-yaml/alias-expansion.json carry this key, so all six skip
+    // rather than some reporting a false pass at this port's own default.
+    return skip(
+      "not yet implemented -- D-18 alias expansion limit is not enforced and has no runtime configuration surface (DIV-3)",
+    );
+  }
   if (LIMIT_KEYS.some((k) => inp[k] !== undefined)) {
     return skip("not yet implemented -- omnist-ts's safety limits are compile-time constants, no runtime configuration surface");
   }
@@ -255,7 +322,7 @@ function runParse(v: Vector): Result {
   } catch (e) {
     if (expect.ok === false) {
       if (expect.diagnostics !== undefined) {
-        return skip("syntax-level ParseError carries no structured path/code");
+        return compareThrownDiagnostics(e, asDiagnostics(expect.diagnostics));
       }
       return pass();
     }
@@ -285,7 +352,7 @@ function runParseSchema(v: Vector): Result {
   } catch (e) {
     if (expect.ok === false) {
       if (expect.diagnostics !== undefined) {
-        return skip("syntax-level SchemaError carries no structured path/code");
+        return compareThrownDiagnostics(e, asDiagnostics(expect.diagnostics));
       }
       return pass();
     }
@@ -627,7 +694,7 @@ export function main(suiteDir: string = VECTOR_SUITE_DIR): number {
   const total = passed + failed + skipped;
   console.log(
     `\n${passed} passed, ${failed} failed, ${skipped} skipped (of ${total} vectors) -- ` +
-      "diagnostics compared in code-agnostic mode (Sec8.5.2 rule 4)",
+      "diagnostic paths always compared, codes compared where the error carries one (Sec8.5.2)",
   );
   return failed ? 1 : 0;
 }

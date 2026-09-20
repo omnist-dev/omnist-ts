@@ -13,9 +13,9 @@
  *    boolean-resolution sharp edges, issue #89) are fixed. One of the
  *    two YAML vectors now reports as a SKIP rather than a PASS: fixing
  *    the boolean-key bug makes it correctly reject the document, but
- *    the DocumentError raised carries no structured path/code, so it
- *    falls into the same "syntax-level error carries no structured
- *    diagnostics" skip category as the oml/osd-grammar vectors.
+ *    the DocumentError raised carried no structured path/code then, so
+ *    it skipped (it now carries `document.unlabeled-element` + a Document
+ *    path and passes; see the v0.19.0-beta note below).
  *    If this test starts failing because the *tally* changed, that is
  *    worth investigating either way (a new bug, or a new fix) that
  *    requires updating this assertion, not a regression to chase
@@ -136,17 +136,37 @@ describeIfVendored("main() against the real vendor/omnist-spec/test-suite", () =
     // fixing a typo in that S-3 vector (an unquoted field label) caught
     // by another port's verification pass. Net: 5 new vectors, 1 new
     // pass, 4 new skips, 0 new failures.
+    //
+    // Bumped to v0.18.0-beta (231 vectors, +27): the D-15 BOM vectors (JSON,
+    // TOML, OSD, OML) pass; the data-XML profile refusals and the OSD
+    // escaped-control-character vector carry structured diagnostics, so they
+    // were first skipped for lack of structure (since fixed, see below); all six
+    // formats-yaml/alias-expansion vectors skip via the
+    // declared_max_alias_expansion allowlist entry (D-18 / DIV-3).
+    // Then (review fix): the runner's blanket "reader threw + vector expects
+    // diagnostics -> skip" was narrowed to skip ONLY when the error carries no
+    // path/code, so coded syntax errors are compared for real (path and code).
+    //
+    // Bumped to v0.19.0-beta (249 vectors, +18): D-21 doubled-BOM vectors on
+    // all six surfaces pass (explicit pre-check in src/bom.ts); E-23 OSD
+    // string errors report the opening quote; OML-25 and the six new
+    // formats-yaml/merge-key vectors pass. The 6 alias-expansion vectors still
+    // skip (D-18 / DIV-3), the rest of the skips are unchanged.
+    // Net: 189 pass, 0 fail, 60 skip (after the second review round: OML temporal
+    // errors now carry parse.invalid-date/-time at the token start, and
+    // document.unlabeled-element carries a Document path, so 7 skips became
+    // passes; the 20 schema.* skips cite omnist-ts#149).
     expect(exitCode).toBe(0);
     expect(logs.at(-1)).toBe(
-      "\n128 passed, 0 failed, 76 skipped (of 204 vectors) -- " +
-        "diagnostics compared in code-agnostic mode (Sec8.5.2 rule 4)",
+      "\n189 passed, 0 failed, 60 skipped (of 249 vectors) -- " +
+        "diagnostic paths always compared, codes compared where the error carries one (Sec8.5.2)",
     );
   });
 
   it("every skip cites an explicit, reasoned category", () => {
     const { logs } = withCapturedConsole(() => main());
     const skipLines = logs.filter((l) => l.startsWith("[SKIP]"));
-    expect(skipLines.length).toBe(76);
+    expect(skipLines.length).toBe(60);
     for (const line of skipLines) {
       // D-6 (integer/number kind collapse) is CLOSED as of issue #98 --
       // no vector cites it anymore (see tools/conformance/vectorRunner.ts).
@@ -154,13 +174,13 @@ describeIfVendored("main() against the real vendor/omnist-spec/test-suite", () =
       // (parse_schema_oml/write_schema_oml -- OSD-OML isn't implemented
       // by this port yet, same as every other omnist port).
       expect(line).toMatch(
-        /: (not yet implemented|syntax-level \w+Error carries no structured path\/code|no driver wired up yet for operation)/,
+        /: (not yet implemented|no driver wired up yet for operation)/,
       );
     }
   });
 
-  it("iterVectors discovers all 204 real vectors", () => {
-    expect(iterVectors(REAL_SUITE_DIR).length).toBe(204);
+  it("iterVectors discovers all 249 real vectors", () => {
+    expect(iterVectors(REAL_SUITE_DIR).length).toBe(249);
   });
 });
 
@@ -193,14 +213,14 @@ describe("main() against a scratch suite directory", () => {
     writeFileSync(path.join(dir, "nested", "readme.txt"), "not a vector file\n", "utf-8");
     const { result: exitCode, logs } = withCapturedConsole(() => main(dir));
     expect(exitCode).toBe(0);
-    expect(logs.at(-1)).toBe("\n1 passed, 0 failed, 0 skipped (of 1 vectors) -- diagnostics compared in code-agnostic mode (Sec8.5.2 rule 4)");
+    expect(logs.at(-1)).toBe("\n1 passed, 0 failed, 0 skipped (of 1 vectors) -- diagnostic paths always compared, codes compared where the error carries one (Sec8.5.2)");
   });
 
   it("treats a JSON file with no 'vectors' key as contributing zero vectors", () => {
     writeFileSync(path.join(dir, "empty.json"), JSON.stringify({}), "utf-8");
     const { result: exitCode, logs } = withCapturedConsole(() => main(dir));
     expect(exitCode).toBe(0);
-    expect(logs.at(-1)).toBe("\n0 passed, 0 failed, 0 skipped (of 0 vectors) -- diagnostics compared in code-agnostic mode (Sec8.5.2 rule 4)");
+    expect(logs.at(-1)).toBe("\n0 passed, 0 failed, 0 skipped (of 0 vectors) -- diagnostic paths always compared, codes compared where the error carries one (Sec8.5.2)");
   });
 
   it("reports a nonzero exit code when any vector fails", () => {
@@ -240,6 +260,16 @@ describe("parse", () => {
     });
   });
 
+  it("skips a vector declaring declared_max_alias_expansion, citing DIV-3 (never a false pass at the default)", () => {
+    // Runs at this port's own (absent) D-18 threshold if not allowlisted:
+    // an anchor-free doc would "pass" while pinning nothing.
+    const r = runVector(
+      vec("parse", { format: "yaml", declared_max_alias_expansion: 3, text: "a: 1\n" }, { ok: true }),
+    );
+    expect(r.status).toBe("skip");
+    expect(r.message).toMatch(/^not yet implemented .*DIV-3/);
+  });
+
   it("passes when the parsed document matches expected", () => {
     const r = runVector(
       vec(
@@ -267,11 +297,39 @@ describe("parse", () => {
     expect(r).toEqual({ status: "fail", message: "expected failure, parse succeeded" });
   });
 
-  it("skips a syntax failure asserting structured diagnostics", () => {
+  it("skips a syntax failure asserting structured diagnostics ONLY when the error carries no path/code", () => {
+    // A codec syntax error (bare message, no code/path) genuinely lacks the
+    // structure the vector compares.
     const r = runVector(
-      vec("parse", { format: "oml", text: "a: [1, 2\n" }, { ok: false, diagnostics: [{ path: "1:1", code: "parse.x" }] }),
+      vec("parse", { format: "json", text: "{not json" }, { ok: false, diagnostics: [{ path: "1:1", code: "parse.codec-syntax" }] }),
     );
-    expect(r).toEqual({ status: "skip", message: "syntax-level ParseError carries no structured path/code" });
+    expect(r).toEqual({
+      status: "skip",
+      message: "not yet implemented -- ParseError carries no structured code/path for this diagnostic",
+    });
+  });
+
+  it("compares the path and code a coded syntax error carries (pass)", () => {
+    const r = runVector(
+      vec("parse", { format: "oml", text: "a: [1\n2]\n" }, { ok: false, diagnostics: [{ path: "2:1", code: "parse.separator-in-array" }] }),
+    );
+    expect(r).toEqual({ status: "pass", message: "ok" });
+  });
+
+  it("fails when a coded syntax error's path differs from the vector's", () => {
+    const r = runVector(
+      vec("parse", { format: "oml", text: "a: [1\n2]\n" }, { ok: false, diagnostics: [{ path: "1:1", code: "parse.separator-in-array" }] }),
+    );
+    expect(r.status).toBe("fail");
+    expect(r.message).toContain("diagnostic paths differ");
+  });
+
+  it("fails when a coded syntax error's code differs from the vector's", () => {
+    const r = runVector(
+      vec("parse", { format: "oml", text: "a: [1\n2]\n" }, { ok: false, diagnostics: [{ path: "2:1", code: "parse.bare-word" }] }),
+    );
+    expect(r.status).toBe("fail");
+    expect(r.message).toContain("diagnostic codes differ");
   });
 
   it("passes a syntax failure asserting only ok:false", () => {
@@ -438,9 +496,20 @@ describe("parse_schema", () => {
     expect(r.message).toContain("expected success, threw:");
   });
 
-  it("skips a syntax failure asserting structured diagnostics", () => {
+  it("skips a syntax failure asserting structured diagnostics only when the error carries no path/code", () => {
     const r = runVector(vec("parse_schema", { text: "not a schema" }, { ok: false, diagnostics: [{ path: "R", code: "x" }] }));
-    expect(r).toEqual({ status: "skip", message: "syntax-level SchemaError carries no structured path/code" });
+    expect(r).toEqual({
+      status: "skip",
+      message: "not yet implemented -- SchemaError carries no structured code/path for this diagnostic (omnist-ts#149)",
+    });
+  });
+
+  it("compares a coded OSD lexical error's position and code", () => {
+    const text = 'record R { "a\u0001b": string } root R\n';
+    const ok = runVector(vec("parse_schema", { text }, { ok: false, diagnostics: [{ path: "1:12", code: "parse.control-character" }] }));
+    expect(ok).toEqual({ status: "pass", message: "ok" });
+    const bad = runVector(vec("parse_schema", { text }, { ok: false, diagnostics: [{ path: "1:1", code: "parse.control-character" }] }));
+    expect(bad.status).toBe("fail");
   });
 
   it("passes a syntax failure asserting only ok:false", () => {

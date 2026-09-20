@@ -799,3 +799,57 @@ describe("issue #96: a TimeValue writes as plain text (XML has no native time sy
     expect(text).toContain("<t>12:00:00</t>");
   });
 });
+
+describe("data-XML profile refusals (docs/formats/xml.md)", () => {
+  it("refuses any DOCTYPE on sight, even one whose entities are never used", () => {
+    const text = '<?xml version="1.0"?><!DOCTYPE d [<!ELEMENT d ANY>]><d><f>hi</f></d>';
+    expect(() => readXml(text)).toThrow(ParseError);
+    try {
+      readXml(text);
+    } catch (e) {
+      expect((e as ParseError).code).toBe("format.dtd-forbidden");
+    }
+    expect(() => readXml('<!DOCTYPE d><d>x</d>')).toThrow(/DOCTYPE/);
+  });
+
+  it("refuses an entity reference other than the five predefined", () => {
+    try {
+      readXml("<d><f>&nbsp;</f></d>");
+      expect.unreachable();
+    } catch (e) {
+      expect(e).toBeInstanceOf(ParseError);
+      expect((e as ParseError).code).toBe("format.entity-forbidden");
+    }
+  });
+
+  it("accepts the five predefined entities and numeric character references", () => {
+    expect(readXml("<d><f>&lt;&gt;&amp;&quot;&apos;&#65;&#x42;</f></d>")).toEqual(
+      readXml("<d><f>&lt;&gt;&amp;&quot;&apos;AB</f></d>"),
+    );
+  });
+
+  it("does not mistake inert text for a DOCTYPE or entity reference", () => {
+    expect(() => readXml("<d><!-- <!DOCTYPE x> &nbsp; --><f><![CDATA[&nbsp; <!DOCTYPE]]></f></d>")).not.toThrow();
+  });
+
+  it("malformed input is a syntax error, not a profile refusal, even when it also has a DOCTYPE or entity", () => {
+    // Well-formedness is checked first (docs/formats/xml.md: refusals are
+    // "well-formed XML"; E-24). The message says "invalid XML", carries no
+    // format.* refusal code.
+    for (const text of ["<r><a>&foo;</a>", "<!DOCTYPE r><r><a>1</a>", '<!DOCTYPE r [<!ENTITY x "y">]><r>&x;</r']) {
+      try {
+        readXml(text);
+        expect.unreachable();
+      } catch (e) {
+        expect(e).toBeInstanceOf(ParseError);
+        expect((e as ParseError).message).toMatch(/^invalid XML/);
+        expect((e as ParseError).code ?? "").not.toMatch(/^format\./);
+      }
+    }
+  });
+
+  it("well-formed input with a DOCTYPE or an undeclared entity is a refusal (validator treats both as well-formed)", () => {
+    expect((() => { try { readXml("<r>&foo;</r>"); } catch (e) { return (e as ParseError).code; } })()).toBe("format.entity-forbidden");
+    expect((() => { try { readXml("<!DOCTYPE r><r><a>1</a></r>"); } catch (e) { return (e as ParseError).code; } })()).toBe("format.dtd-forbidden");
+  });
+});

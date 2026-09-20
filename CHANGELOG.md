@@ -6,6 +6,74 @@ the first documented release of the TypeScript port; the public API
 mirrors the upstream Python package's `__all__` (camelCase names of the
 same functions).
 
+## [v0.3.1-alpha] -- spec v0.19.0-beta sweep: D-15/D-21 BOM, data-XML profile, E-23, OML-25, D-18 allowlist
+
+`vendor/omnist-spec` bumped from v0.9.1-beta to **v0.19.0-beta** (249
+vectors, was 204). Conformance (vector track): **189 pass / 0 fail / 60 skip**
+(was 128 / 0 / 76 of 204 at the old pin; the 231-vector v0.18.0-beta suite
+measured 146 / 7 / 78 before any code change, and the v0.19.0-beta suite
+177 / 3 / 69 with the v0.18 fixes in place). Fixture track: 19 / 0 / 0
+throughout.
+
+Real behavior changes:
+
+- **D-15 / D-21 (BOM):** a leading U+FEFF is stripped on every read surface
+  (OML, OSD, JSON, YAML, TOML, XML) through one shared helper
+  (`src/bom.ts`), exactly one mark at offset zero. A second leading mark is
+  rejected on all six surfaces at text position `1:1`: `parse.unexpected-token`
+  on OML and OSD (their own lexers), `parse.codec-syntax` on JSON, TOML, YAML
+  and XML via an explicit pre-check (`rejectSecondLeadingBom`), because the
+  `yaml` and `fast-xml-parser` libraries would otherwise silently swallow it.
+  JSON and TOML used to reject BOMs entirely; OML's open-coded strip (an
+  invisible literal U+FEFF) was replaced by the helper; OSD's tokenizer no
+  longer treats U+FEFF as whitespace. No writer emits a BOM (pinned by test).
+- **Data-XML profile (spec v0.14.0):** `readXml` refuses a `DOCTYPE`
+  (`format.dtd-forbidden`) and any non-predefined entity reference
+  (`format.entity-forbidden`); these and `format.mixed-content` carry their
+  code and path `$` on the thrown `ParseError`. Numeric character references
+  remain legal.
+- **E-23:** OSD string-body errors (`parse.control-character`) report the
+  position of the string's opening quote, not the offending character; a
+  control character right after a backslash is now an error (OSD Sec5.3.1).
+- **OML error codes:** a newline or `;` in place of a missing array comma is
+  `parse.separator-in-array`; leftover content after a top-level scalar/edge
+  value is `parse.trailing-content` (OML-25).
+- YAML merge-key order (source order, earlier alias wins) already matches, but
+  entirely because of the `yaml` library (2.9.0, resolved from `^2.5.0`); this
+  port has no merge logic of its own, and the six `formats-yaml/merge-key`
+  vectors are the only assertion of it.
+- **OML `parse.separator-in-array`** fires only when a newline/`;` stood where
+  a comma was required before a *further* element; an unterminated array
+  whose last element is followed by a newline (`a: [1, 2\n`) is
+  `parse.unexpected-token`. The "got EOF" error message now names the real
+  `line:col` (it said `line 0, col 0`; the path was already right).
+- **OML temporal value errors** (`2024-13-01`, `23:59:60`, ...) now carry
+  `parse.invalid-date` / `parse.invalid-time` at the token's start (was
+  uncoded, positioned at the token's end).
+- **`DocumentError`** gained optional `code` / `path`; array-of-arrays and
+  non-string mapping keys carry `document.unlabeled-element` with the Document
+  path.
+- **XML order:** well-formedness is checked before the data-XML profile
+  refusal, so malformed input is a syntax error even if it also contains a
+  DOCTYPE or an entity reference.
+
+Tooling / no behavior change:
+
+- Vector runner: `declared_max_alias_expansion` added to the declared-limit
+  allowlist, so all six `formats-yaml/alias-expansion` vectors skip (E-20
+  "not yet implemented", citing DIV-3) instead of `expansion-at-declared-limit-succeeds`
+  reporting a false pass at this port's own default. D-18/D-19/D-20 are NOT
+  implemented here (nor in any port).
+- Vector runner: the blanket "reader threw + vector expects diagnostics ->
+  skip" rule was narrowed to skip only when the thrown error carries no
+  `path` and/or no `code`; otherwise path and code are compared for real
+  (paths always; codes where the error carries one, Sec8.5.2). The 20
+  remaining such skips are the `schema.*` well-formedness vectors, reported
+  as E-20 "not yet implemented" and cited to omnist-ts#149 (`SchemaError`
+  carries no structured `code`/`path`; the values are in the message).
+- S-21 (`infer` opens to `any` only when asked, reports every opening)
+  audited for both opening paths: already compliant, no change.
+
 ## [v0.3.0-alpha] -- spec-correctness audit: 9-issue "fail, don't invent" cycle
 
 `vendor/omnist-spec` bumped to `0ac1eac`+, bringing in a batch of grammar
