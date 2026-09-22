@@ -75,7 +75,8 @@ describe("machine mode --json examples", () => {
     expect(code).toBe(2);
     expect(err).toBe("");
     expect(out).toBe(
-      '{"ok": false, "message": "path $.age: a null-valued leaf has no TOML representation and no safe substitute (TOML has no null token, and silently dropping the edge is unrecoverable data loss)", "errors": []}\n',
+      '{"ok": false, "message": "path $.age: a null-valued leaf has no TOML representation and no safe substitute (TOML has no null token, and silently dropping the edge is unrecoverable data loss)", ' +
+        '"errors": [{"path": "$.age", "code": "write.unsupported-value", "message": "path $.age: a null-valued leaf has no TOML representation and no safe substitute (TOML has no null token, and silently dropping the edge is unrecoverable data loss)"}]}\n',
     );
   });
 
@@ -93,7 +94,8 @@ describe("machine mode --json examples", () => {
     expect(code).toBe(2);
     expect(err).toBe("");
     expect(out).toBe(
-      '{"ok": false, "message": "path $.age: a null-valued leaf has no TOML representation and no safe substitute (TOML has no null token, and silently dropping the edge is unrecoverable data loss)", "errors": []}\n',
+      '{"ok": false, "message": "path $.age: a null-valued leaf has no TOML representation and no safe substitute (TOML has no null token, and silently dropping the edge is unrecoverable data loss)", ' +
+        '"errors": [{"path": "$.age", "code": "write.unsupported-value", "message": "path $.age: a null-valued leaf has no TOML representation and no safe substitute (TOML has no null token, and silently dropping the edge is unrecoverable data loss)"}]}\n',
     );
   });
 

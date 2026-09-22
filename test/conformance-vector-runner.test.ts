@@ -186,7 +186,7 @@ describeIfVendored("main() against the real vendor/omnist-spec/test-suite", () =
       "\n213 passed, 0 failed, 60 skipped (of 273 vectors) -- " +
         "diagnostic paths always compared, codes compared where the error carries one (Sec8.5.2)",
     );
-  }, 60000);
+  }, 120000);
 
   // bytes_hex vectors spawn a real `node --import tsx src/cli.ts` subprocess
   // per vector (14 of them) -- routinely 5-15s total on this machine, well
@@ -205,7 +205,7 @@ describeIfVendored("main() against the real vendor/omnist-spec/test-suite", () =
         /: (not yet implemented|no driver wired up yet for operation)/,
       );
     }
-  }, 60000);
+  }, 120000);
 
   it("iterVectors discovers all 273 real vectors", () => {
     expect(iterVectors(REAL_SUITE_DIR).length).toBe(273);
@@ -612,15 +612,32 @@ describe("validate", () => {
     expect(r).toEqual({ status: "pass", message: "ok" });
   });
 
-  it("compares against an empty expected-diagnostics set when the diagnostics key is absent", () => {
+  it("passes ok:false without checking diagnostics when the diagnostics key is absent", () => {
+    // Matches every other driver's convention in this file (extract,
+    // write, materialize, infer_with_report): `expect.diagnostics`
+    // present-but-absent means "don't check", not "compare against an
+    // implicit empty set" -- an ok:false vector with no diagnostics field
+    // is asserting failure alone.
     const r = runVector(
       vec("validate", { schema: SCHEMA, document: { edges: [["n", { scalar: { kind: "integer", value: 1 } }]] } }, { ok: false }),
     );
-    // No `diagnostics` key on an ok:false expect exercises `asDiagnostics`'s
-    // `?? []` fallback -- expected paths is the empty set, which can't
-    // match the real (non-empty) actual error set, so this fails; that's
-    // fine, the point is exercising the branch, not asserting a pass here.
+    expect(r).toEqual({ status: "pass", message: "ok" });
+  });
+
+  it("compares diagnostic codes too, not just paths", () => {
+    // validate/basic's own `n: string` vs `n: "x"` shape from this
+    // describe block's SCHEMA -- schema.ts's validate() always attaches a
+    // code (validate.type-mismatch here); mutating it must fail, proving
+    // code is actually compared (not just paths, the pre-fix behavior).
+    const r = runVector(
+      vec(
+        "validate",
+        { schema: SCHEMA, document: { edges: [["n", { scalar: { kind: "integer", value: 1 } }]] } },
+        { ok: false, diagnostics: [{ path: "$.n", code: "validate.MUTATED" }] },
+      ),
+    );
     expect(r.status).toBe("fail");
+    expect(r.message).toContain("diagnostic codes differ");
   });
 
   it("fails when expected and actual diagnostic sets differ in size", () => {
@@ -735,15 +752,27 @@ describe("materialize", () => {
     expect(r.message).toContain("expected success, threw:");
   });
 
-  it("passes ok:false with matching diagnostic paths on a thrown ParseError", () => {
+  it("passes ok:false with matching diagnostic path and code on a thrown ParseError", () => {
     const r = runVector(
       vec(
         "materialize",
         { schema: SCHEMA, document: { edges: [["n", { scalar: { kind: "string", value: "x" } }]] } },
-        { ok: false, diagnostics: [{ path: "$.n", code: "type-mismatch" }] },
+        { ok: false, diagnostics: [{ path: "$.n", code: "materialize.inexact-conversion" }] },
       ),
     );
     expect(r).toEqual({ status: "pass", message: "ok" });
+  });
+
+  it("fails ok:false when the diagnostic code differs (path matches)", () => {
+    const r = runVector(
+      vec(
+        "materialize",
+        { schema: SCHEMA, document: { edges: [["n", { scalar: { kind: "string", value: "x" } }]] } },
+        { ok: false, diagnostics: [{ path: "$.n", code: "validate.MUTATED" }] },
+      ),
+    );
+    expect(r.status).toBe("fail");
+    expect(r.message).toContain("diagnostic codes differ");
   });
 
   it("fails ok:false with mismatched diagnostic paths", () => {
@@ -799,11 +828,34 @@ describe("write", () => {
     expect(r.message).toContain("expected success, threw:");
   });
 
-  it("passes when write throws and failure was expected (strict)", () => {
+  it("passes when write throws and failure was expected, diagnostics unchecked", () => {
     const r = runVector(
-      vec("write", { format: "toml", strict: true, document: { edges: [["a", { scalar: { kind: null, value: null } }]] } }, { ok: false, diagnostics: [] }),
+      vec("write", { format: "toml", strict: true, document: { edges: [["a", { scalar: { kind: null, value: null } }]] } }, { ok: false }),
     );
     expect(r).toEqual({ status: "pass", message: "ok" });
+  });
+
+  it("compares write's failure diagnostics for real (write.unsupported-value)", () => {
+    const r = runVector(
+      vec(
+        "write",
+        { format: "toml", strict: true, document: { edges: [["a", { scalar: { kind: null, value: null } }]] } },
+        { ok: false, diagnostics: [{ path: "$.a", code: "write.unsupported-value" }] },
+      ),
+    );
+    expect(r).toEqual({ status: "pass", message: "ok" });
+  });
+
+  it("fails write's diagnostics comparison on a wrong expected path", () => {
+    const r = runVector(
+      vec(
+        "write",
+        { format: "toml", strict: true, document: { edges: [["a", { scalar: { kind: null, value: null } }]] } },
+        { ok: false, diagnostics: [{ path: "$.wrong", code: "write.unsupported-value" }] },
+      ),
+    );
+    expect(r.status).toBe("fail");
+    expect(r.message).toContain("diagnostic paths differ");
   });
 
   it("fails when write succeeds but failure was expected", () => {
@@ -882,7 +934,8 @@ describe("normalize / prune", () => {
 
   it("normalize fails on mismatch", () => {
     const r = runVector(vec("normalize", { schema: SCHEMA }, { schema: 'record R {\n    "a": integer,\n}\nroot R\n' }));
-    expect(r).toEqual({ status: "fail", message: "output schema does not match expected" });
+    expect(r.status).toBe("fail");
+    expect(r.message).toContain("output schema does not match expected byte for byte");
   });
 
   it("prune passes on exact match", () => {
@@ -935,7 +988,8 @@ describe("extract", () => {
 
   it("fails on a mismatched extracted schema", () => {
     const r = runVector(vec("extract", { schema: SCHEMA, keep: ["name"] }, { ok: true, schema: 'record R {\n    "name": integer,\n}\nroot R\n' }));
-    expect(r).toEqual({ status: "fail", message: "extracted schema does not match expected" });
+    expect(r.status).toBe("fail");
+    expect(r.message).toContain("extracted schema does not match expected byte for byte");
   });
 
   it("fails when extract throws but success was expected", () => {
@@ -944,9 +998,37 @@ describe("extract", () => {
     expect(r.message).toContain("expected success, threw:");
   });
 
-  it("passes when extract throws and failure was expected", () => {
-    const r = runVector(vec("extract", { schema: SCHEMA, keep: [] }, { ok: false, diagnostics: [] }));
+  it("passes when extract throws and failure was expected, diagnostics unchecked", () => {
+    // No `diagnostics` field at all -- distinct from the next test, which
+    // supplies one and expects it to be compared for real.
+    const r = runVector(vec("extract", { schema: SCHEMA, keep: [] }, { ok: false }));
     expect(r).toEqual({ status: "pass", message: "ok" });
+  });
+
+  it("compares extract's failure diagnostics for real (A-11, algebra.extract-invalidates-root)", () => {
+    // keep:[] invalidates every record; Address is first in SCHEMA's own
+    // declaration order (Sec6.9's whole-environment pass), so it is the
+    // first offender -- matches src/ops/extract.ts's structured throw.
+    const r = runVector(
+      vec("extract", { schema: SCHEMA, keep: [] }, { ok: false, diagnostics: [{ path: "Address", code: "algebra.extract-invalidates-root" }] }),
+    );
+    expect(r).toEqual({ status: "pass", message: "ok" });
+  });
+
+  it("fails extract's diagnostics comparison on a wrong expected path", () => {
+    const r = runVector(
+      vec("extract", { schema: SCHEMA, keep: [] }, { ok: false, diagnostics: [{ path: "R", code: "algebra.extract-invalidates-root" }] }),
+    );
+    expect(r.status).toBe("fail");
+    expect(r.message).toContain("diagnostic paths differ");
+  });
+
+  it("fails extract's diagnostics comparison on a wrong expected code (path matches)", () => {
+    const r = runVector(
+      vec("extract", { schema: SCHEMA, keep: [] }, { ok: false, diagnostics: [{ path: "Address", code: "algebra.MUTATED" }] }),
+    );
+    expect(r.status).toBe("fail");
+    expect(r.message).toContain("diagnostic codes differ");
   });
 
   it("fails when extract succeeds but failure was expected", () => {
@@ -987,7 +1069,15 @@ describe("lint", () => {
   it("fails when finding locations differ", () => {
     const r = runVector(vec("lint", { schema: 'record R {\n    "data": any,\n}\nroot R\n' }, { ok: true, findings: [{ code: "lint.any-field", severity: "info", location: "R.other" }] }));
     expect(r.status).toBe("fail");
-    expect(r.message).toContain("finding locations differ");
+    expect(r.message).toContain("findings differ");
+  });
+
+  it("fails when finding codes differ (location matches)", () => {
+    // Proves `code` is actually compared, not just `location`: same
+    // location as the real finding, wrong code.
+    const r = runVector(vec("lint", { schema: 'record R {\n    "data": any,\n}\nroot R\n' }, { ok: true, findings: [{ code: "lint.MUTATED", severity: "info", location: "R.data" }] }));
+    expect(r.status).toBe("fail");
+    expect(r.message).toContain("findings differ");
   });
 });
 
@@ -1047,6 +1137,37 @@ describe("infer / infer_with_report", () => {
 
   it("infer_with_report passes when it throws (ambiguous, no allow_any) and failure was expected", () => {
     const r = runVector(vec("infer_with_report", { samples: ["a: 1\n", 'a: "x"\n'] }, { ok: false }));
+    expect(r).toEqual({ status: "pass", message: "ok" });
+  });
+
+  it("infer_with_report fails when fallbacks differ (mutation proof: garbage reason is caught)", () => {
+    const r = runVector(
+      vec(
+        "infer_with_report",
+        { samples: ["a: 1\n", 'a: "x"\n'], allow_any: true },
+        {
+          ok: true,
+          schema: 'record Root {\n    "a": any,\n}\nroot Root\n',
+          fallbacks: [{ location: "Root.a", reason: "GARBAGE-mutated-reason" }],
+        },
+      ),
+    );
+    expect(r.status).toBe("fail");
+    expect(r.message).toContain("fallbacks differ");
+  });
+
+  it("infer_with_report passes when fallbacks match exactly", () => {
+    const r = runVector(
+      vec(
+        "infer_with_report",
+        { samples: ["a: 1\n", 'a: "x"\n'], allow_any: true },
+        {
+          ok: true,
+          schema: 'record Root {\n    "a": any,\n}\nroot Root\n',
+          fallbacks: [{ location: "Root.a", reason: "values of more than one scalar kind (integer, string)" }],
+        },
+      ),
+    );
     expect(r).toEqual({ status: "pass", message: "ok" });
   });
 });

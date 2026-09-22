@@ -10,7 +10,59 @@ same functions).
 
 `vendor/omnist-spec` bumped from v0.19.0-beta to **v0.21.0-beta** (273
 vectors, was 249). Conformance (vector track): **213 pass / 0 fail / 60 skip**
-(was 189 / 0 / 60 at the old pin). Fixture track: 19 / 0 / 0 throughout.
+(was 189 / 0 / 60 at the old pin; at the new pin, before any code change,
+199 pass / 6 fail / 68 skip -- the 6 failures were the new `bytes_hex`
+vectors throwing on an unhandled input field, and the skip count included 8
+more `bytes_hex` vectors reached the same way). Fixture track: 19 / 0 / 0
+throughout.
+
+An independent review of this PR (before merge) found the vector runner
+itself had **three more instances of the same bug class** its own fix for
+OSD-15 uncovered -- a real defect hidden behind a comparison the runner was
+silently not making. All three are fixed here too, alongside two further
+port defects (wrong diagnostic codes) the strengthened comparisons then
+caught for real:
+
+- `expect.schema` for `parse_schema`/`normalize`/`prune`/`extract` was
+  compared structurally (re-parse and compare Schema models), not **byte
+  for byte** as `omnist-spec` Sec8.5.3 requires -- proven by changing
+  `toOsd`'s default indent from 4 to 2 spaces on a scratch copy: every
+  `canonical-output` vector stayed green. Fixed with a real string-equality
+  comparator; re-running the same mutation now fails 18 vectors, not 0.
+- `expect.fallbacks` (`infer_with_report`) and `expect.diagnostics` on
+  `extract`/`infer`'s failure paths were never compared at all -- proven by
+  replacing both `infer_with_report` vectors' `fallbacks` with garbage on a
+  scratch copy: both still passed. Fixed; `extract`'s A-11 failure and
+  `infer`'s four error cases now carry real `code`/`path` for the first
+  time (`src/ops/extract.ts`, `src/infer.ts` -- additive, matches the
+  `SchemaError`/`WriteError` structured-diagnostic convention).
+- `lint`'s findings were compared by `location` only, never `code` -- proven
+  by mutating a vector's expected `code` on a scratch copy: still passed
+  (every one of the suite's 5 lint vectors happens to have a unique
+  location, so this was invisible without a mutation). Fixed to compare
+  `(code, location)` pairs as a set.
+- Auditing every operation's comparison against Sec8.5.2/Sec8.5.3 for
+  real (not just the three the review flagged) found two more: `validate`
+  and `materialize`'s failure diagnostics compared `path` only, never
+  `code`, either -- both fixed the same way, and both caught a real bug
+  once code was actually compared: `materialize`'s shape/cardinality
+  failures used non-existent `materialize.shape-mismatch`/
+  `materialize.unexpected-field`/`materialize.cardinality`/
+  `materialize.null-not-allowed` codes; Sec8.3.5 states plainly that
+  "shape and cardinality problems found during materialization use the
+  `validate.*` codes above -- materialization performs the same checks, so
+  there is no separate set of names for them." `src/deserialize.ts` now
+  emits the correct `validate.*` codes (`materialize.inexact-conversion`,
+  the one code Sec8.3.5 actually defines, is unchanged). `write`'s own
+  failure diagnostics (`format.multiple-roots`, `write.unsupported-value`)
+  were similarly uncompared; the four throw sites across
+  `src/formats/{json,toml,xml}.ts` that seven real vectors pin now carry
+  structured `code`/`path` too.
+- Widened the raw-BOM source guard (`test/bom.test.ts`) to also scan for
+  any raw C0 control byte other than tab/LF/CR, after this PR's own first
+  draft of the OSD-14 unit tests accidentally carried four literal control
+  bytes instead of `\u` escapes -- the same invisible-character-in-source
+  class as the two earlier raw-BOM incidents this port has had.
 
 Real behavior changes:
 

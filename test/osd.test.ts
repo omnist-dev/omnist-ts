@@ -521,9 +521,9 @@ describe("OSD-14: a field label with a C0 control character has no OSD spelling 
     ["tab", "\t"],
     ["newline", "\n"],
     ["carriage return", "\r"],
-    ["NUL", " "],
-    ["a mid-range C0 control (U+000B)", ""],
-    ["the last C0 control (U+001F)", ""],
+    ["NUL", "\u0000"],
+    ["a mid-range C0 control (U+000B)", "\u000b"],
+    ["the last C0 control (U+001F)", "\u001f"],
   ])("rejects a label containing %s", (_name, ch) => {
     const s = schema(ref("R"), { R: record(field(`x${ch}y`, t.string)) });
     expect(() => toOsd(s)).toThrow(WriteError);
@@ -536,7 +536,7 @@ describe("OSD-14: a field label with a C0 control character has no OSD spelling 
   });
 
   it("is unconditional: {indent: null} (compact) also throws", () => {
-    const s = schema(ref("R"), { R: record(field("a b", t.string)) });
+    const s = schema(ref("R"), { R: record(field("a\u0000b", t.string)) });
     expect(() => toOsd(s, { indent: null })).toThrow(WriteError);
   });
 });

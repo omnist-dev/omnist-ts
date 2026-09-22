@@ -236,6 +236,12 @@ function paths(diagnostics: readonly Diagnostic[]): Set<string> {
 }
 
 function asDiagnostics(v: JsonValue | undefined): Diagnostic[] {
+  // Defensive: every call site in this file only calls asDiagnostics after
+  // its own expect.diagnostics !== undefined check (or, for
+  // compareThrownDiagnostics call sites, the caller already made the same
+  // check), so v is never actually undefined here in practice; kept as a
+  // backstop against a future call site that forgets the guard.
+  /* v8 ignore next */
   return ((v as Diagnostic[] | undefined) ?? []) as Diagnostic[];
 }
 
@@ -545,8 +551,8 @@ function runParseSchema(v: Vector): Result {
       return fail("expected write to succeed, threw: " + errorMessage(e));
     }
     /* v8 ignore stop */
-    if (!compareSchema(written, expect.schema as string, "exact")) {
-      return fail("written schema does not match expected: got " + JSON.stringify(written));
+    if (!compareSchemaTextExact(written, expect.schema as string)) {
+      return fail("written schema does not match expected byte for byte: got " + JSON.stringify(written));
     }
   }
   return pass();
@@ -561,11 +567,22 @@ function runValidate(v: Vector): Result {
   if (result.ok !== (expect.ok as boolean)) {
     return fail(`expected ok=${String(expect.ok)}, got ${String(result.ok)}`);
   }
-  if (expect.ok === false) {
-    const expPaths = paths(asDiagnostics(expect.diagnostics));
-    const actPaths = paths(result.errors as unknown as Diagnostic[]);
+  if (expect.ok === false && expect.diagnostics !== undefined) {
+    const expected = asDiagnostics(expect.diagnostics);
+    const actual = result.errors as unknown as Diagnostic[];
+    const expPaths = paths(expected);
+    const actPaths = paths(actual);
     if (!setsEqual(expPaths, actPaths)) {
       return fail(`diagnostic paths differ: expected ${setStr(expPaths)}, got ${setStr(actPaths)}`);
+    }
+    // schema.ts's validate() always attaches a code to every
+    // ValidationResult error (validate.type-mismatch, validate.cardinality,
+    // ...) -- compared here for real now; it previously was not (paths
+    // only), confirmed by mutation on a scratch copy of the vendored suite.
+    const expCodes = new Set(expected.map((d) => d.code));
+    const actCodes = new Set(actual.map((d) => d.code));
+    if (!setsEqual(expCodes, actCodes)) {
+      return fail(`diagnostic codes differ: expected ${setStr(expCodes)}, got ${setStr(actCodes)}`);
     }
   }
   return pass();
@@ -597,10 +614,22 @@ function runMaterialize(v: Vector): Result {
       // `?? []` below has no reachable false case through this driver.
       /* v8 ignore next */
       const issues = (e as { errors?: Diagnostic[] }).errors ?? [];
-      const expPaths = paths(asDiagnostics(expect.diagnostics));
+      const expected = asDiagnostics(expect.diagnostics);
+      const expPaths = paths(expected);
       const actPaths = paths(issues);
       if (!setsEqual(expPaths, actPaths)) {
         return fail(`diagnostic paths differ: expected ${setStr(expPaths)}, got ${setStr(actPaths)}`);
+      }
+      // Every OmnistIssue materialize's ParseError.errors carries (deserialize.ts)
+      // has a non-optional `code` -- compared here for real now; it
+      // previously was not (paths only), confirmed by mutation on a
+      // scratch copy of the vendored suite (materialize/rejections/
+      // quoted-numeral-string-does-not-upgrade-to-integer's code mutated
+      // to garbage still reported a false pass before this fix).
+      const expCodes = new Set(expected.map((d) => d.code));
+      const actCodes = new Set(issues.map((d) => d.code));
+      if (!setsEqual(expCodes, actCodes)) {
+        return fail(`diagnostic codes differ: expected ${setStr(expCodes)}, got ${setStr(actCodes)}`);
       }
     }
     return pass();
@@ -630,7 +659,17 @@ function runWrite(v: Vector): Result {
   try {
     text = getFormat(fmt).write(node, { strict, report });
   } catch (e) {
-    if (expect.ok === false) return pass();
+    if (expect.ok === false) {
+      // Sec8.5.3: several formats-json/formats-toml/formats-xml write
+      // failure vectors carry `expect.diagnostics` (write.unsupported-value,
+      // format.multiple-roots) -- compared for real now that WriteError
+      // carries `code`/`path` at these throw sites (src/formats/json.ts,
+      // toml.ts, xml.ts).
+      if (expect.diagnostics !== undefined) {
+        return compareThrownDiagnostics(e, asDiagnostics(expect.diagnostics));
+      }
+      return pass();
+    }
     return fail(`expected success, threw: ${errorMessage(e)}`);
   }
   if (expect.ok !== true) return fail("expected failure, write succeeded");
@@ -655,10 +694,29 @@ function runWrite(v: Vector): Result {
   return pass();
 }
 
+/**
+ * Sec8.5.3: normalize/prune/extract's `expect.schema` is documented as
+ * "compared byte for byte per Sec5.9's canonical-output requirement" --
+ * not a structural re-parse. `compareSchema(..., "exact")` re-parses both
+ * sides and compares Schema *models*, which is the right tool for
+ * `parse_schema`'s bare `{ok}` vectors (no canonical-text promise) but the
+ * wrong one here: it cannot catch a writer that is structurally correct
+ * but formats differently from the canonical form (verified: changing
+ * toOsd's default indent from 4 to 2 spaces on a scratch copy left every
+ * normalize/prune/extract vector green under the structural comparison).
+ * Exact string equality is what Sec5.9's canonical-output promise
+ * actually requires; the vector's own `expect.schema` text is already in
+ * toOsd's canonical form (verified against the vendored vectors), so no
+ * trimming or normalization is applied on either side.
+ */
+function compareSchemaTextExact(actual: string, expected: string): boolean {
+  return actual === expected;
+}
+
 function runSchemaProducing(v: Vector, fn: (text: string) => string): Result {
   const schema = fn(v.input.schema as string);
-  if (compareSchema(schema, v.expect.schema as string, "exact")) return pass();
-  return fail("output schema does not match expected");
+  if (compareSchemaTextExact(schema, v.expect.schema as string)) return pass();
+  return fail(`output schema does not match expected byte for byte: got ${JSON.stringify(schema)}`);
 }
 
 function runNormalize(v: Vector): Result {
@@ -707,12 +765,45 @@ function runExtract(v: Vector): Result {
     } catch (e) {
       return fail(`expected success, threw: ${errorMessage(e)}`);
     }
-    if (compareSchema(actual, expect.schema as string, "exact")) return pass();
-    return fail("extracted schema does not match expected");
+    // Sec6.9 (docs/06-schema-algebra.md): a satisfiable extract result is
+    // run through prune then normalize and "lands in the same canonical
+    // form normalize produces everywhere else -- including its canonical
+    // output order", so this is the same byte-for-byte promise
+    // normalize/prune's own `expect.schema` carries, not a structural one.
+    if (compareSchemaTextExact(actual, expect.schema as string)) return pass();
+    return fail(`extracted schema does not match expected byte for byte: got ${JSON.stringify(actual)}`);
   }
   try {
     opsExtract(schema, keep);
-  } catch {
+  } catch (e) {
+    // A-11: extract fails via SchemaError with no structured code/path at
+    // this throw site today (unlike osd.ts's lexical errors) -- the same
+    // "genuinely lacks the structure" shape compareThrownDiagnostics
+    // already skips for, applied here since this driver doesn't route
+    // through that helper.
+    if (expect.diagnostics !== undefined) {
+      const err = e as { path?: string; code?: string };
+      // Defensive: src/ops/extract.ts's one reachable throw site
+      // (A-11) always attaches `algebra.extract-invalidates-root` and a
+      // record-name path now; the other SchemaError it can throw (no
+      // recorded offender) is itself unreachable there, structurally
+      // seeded by step 1 before any propagation -- see that file's own
+      // `/* v8 ignore */` comment. Kept as a backstop in case that
+      // invariant ever changes.
+      /* v8 ignore next 3 */
+      if (err.path === undefined || err.code === undefined) {
+        return skip("not yet implemented -- SchemaError carries no structured code/path for extract's A-11 failure (omnist-ts#149)");
+      }
+      const expected = asDiagnostics(expect.diagnostics);
+      const expPaths = paths(expected);
+      if (!setsEqual(expPaths, new Set([err.path]))) {
+        return fail(`diagnostic paths differ: expected ${setStr(expPaths)}, got {${JSON.stringify(err.path)}}`);
+      }
+      const expCodes = new Set(expected.map((d) => d.code));
+      if (!setsEqual(expCodes, new Set([err.code]))) {
+        return fail(`diagnostic codes differ: expected ${setStr(expCodes)}, got {${JSON.stringify(err.code)}}`);
+      }
+    }
     return pass();
   }
   return fail("expected failure, extract succeeded");
@@ -735,16 +826,25 @@ function runLint(v: Vector): Result {
   if (actualOk !== expectOk) {
     return fail(`expected ok=${String(expectOk)}, got ${String(actualOk)}`);
   }
-  // Sec8.5.3: findings compared as a set of {code, location} -- mirrors
-  // Python's vector_runner.py, which (like this driver) compares by
-  // location only, the discriminating field in practice (mirrors
-  // runner.ts's Track-1 lint driver's own location-set comparison too).
-  const expLocs = new Set((expect.findings as { location: string }[]).map((f) => f.location));
-  const actLocs = new Set(findings.map((f) => f.location));
-  if (!setsEqual(expLocs, actLocs)) {
-    return fail(`finding locations differ: expected ${setStr(expLocs)}, got ${setStr(actLocs)}`);
+  // Sec8.5.3: findings compared as a set of {code, location} (message
+  // text never compared, per Sec8.5.2 rule 1). Verified by mutation that
+  // `code` matters and was not actually being compared: every one of this
+  // suite's 5 lint vectors happens to have a unique `location`, so a
+  // location-only comparison (the previous version of this driver)
+  // reported a false pass when a vector's expected `code` was mutated to
+  // something wrong -- confirmed, then reverted, on a scratch copy of the
+  // vendored suite.
+  const key = (f: { code: string; location: string }): string => `${f.code}\u0000${f.location}`;
+  const expFindings = new Set((expect.findings as { code: string; location: string }[]).map(key));
+  const actFindings = new Set(findings.map(key));
+  if (!setsEqual(expFindings, actFindings)) {
+    return fail(`findings differ: expected ${setStr(expFindings)}, got ${setStr(actFindings)}`);
   }
   return pass();
+}
+
+function fallbackSetStr(fallbacks: readonly { location: string; reason: string }[]): string {
+  return setStr(new Set(fallbacks.map((f) => JSON.stringify(f))));
 }
 
 function runInferCommon(v: Vector, withReport: boolean): Result {
@@ -753,10 +853,22 @@ function runInferCommon(v: Vector, withReport: boolean): Result {
   const samples = (inp.samples as string[]).map((s) => new Doc(readOml(s)));
   const allowAny = inp.allow_any === true;
   let schema;
+  let fallbacks: readonly { location: string; reason: string }[] = [];
   try {
-    schema = withReport ? inferWithReport(samples, { allowAny }).schema : infer(samples, { allowAny });
+    if (withReport) {
+      const result = inferWithReport(samples, { allowAny });
+      schema = result.schema;
+      fallbacks = result.report;
+    } else {
+      schema = infer(samples, { allowAny });
+    }
   } catch (e) {
-    if (expect.ok === false) return pass();
+    if (expect.ok === false) {
+      if (expect.diagnostics !== undefined) {
+        return compareThrownDiagnostics(e, asDiagnostics(expect.diagnostics));
+      }
+      return pass();
+    }
     return fail(`expected success, threw: ${errorMessage(e)}`);
   }
   if (expect.ok !== true) return fail("expected failure, infer succeeded");
@@ -764,8 +876,22 @@ function runInferCommon(v: Vector, withReport: boolean): Result {
   // isomorphic, not exact: infer's generated record names are
   // implementation-derived, never canonical (mirrors runner.ts's runInfer
   // and Python's vector_runner.py's _run_infer).
-  if (compareSchema(toOsd(schema), toOsd(expectedSchema), "isomorphic")) return pass();
-  return fail("inferred schema is not isomorphic to expected");
+  if (!compareSchema(toOsd(schema), toOsd(expectedSchema), "isomorphic")) {
+    return fail("inferred schema is not isomorphic to expected");
+  }
+  // Sec8.5.3: infer_with_report's `fallbacks` is "always present on
+  // success", compared as a set the same way `lint`'s findings are --
+  // order is never significant (S-21's opening order is a fixpoint-walk
+  // artifact, not a promise).
+  if (expect.fallbacks !== undefined) {
+    const expected = expect.fallbacks as { location: string; reason: string }[];
+    const expSet = new Set(expected.map((f) => JSON.stringify(f)));
+    const actSet = new Set(fallbacks.map((f) => JSON.stringify(f)));
+    if (!setsEqual(expSet, actSet)) {
+      return fail(`fallbacks differ: expected ${fallbackSetStr(expected)}, got ${fallbackSetStr(fallbacks)}`);
+    }
+  }
+  return pass();
 }
 
 function runInfer(v: Vector): Result {

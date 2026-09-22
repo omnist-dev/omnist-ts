@@ -120,7 +120,7 @@ function materializeRecord(
   errors: OmnistIssue[],
 ): Node {
   if (!Array.isArray(node)) {
-    errors.push({ path, message: "expected an object, got a value", code: "materialize.shape-mismatch" });
+    errors.push({ path, message: "expected an object, got a value", code: "validate.shape-mismatch" });
     return node;
   }
   const out: Edge[] = [];
@@ -131,7 +131,7 @@ function materializeRecord(
     const p = i === 0 ? `${path}.${label}` : `${path}.${label}[${i}]`;
     const f = recordField(rec, label);
     if (f === undefined) {
-      errors.push({ path: p, message: "unexpected field", code: "materialize.unexpected-field" });
+      errors.push({ path: p, message: "unexpected field", code: "validate.unexpected-field" });
       out.push({ label, target });
     } else {
       out.push({ label, target: materializeType(target, schema, f.type, p, errors) });
@@ -143,7 +143,7 @@ function materializeRecord(
       errors.push({
         path,
         message: `field ${JSON.stringify(f.label)} occurs ${c} time(s), expected ${cardinalityStr(f)}`,
-        code: "materialize.cardinality",
+        code: "validate.cardinality",
       });
     }
   }
@@ -160,13 +160,13 @@ function materializeScalar(
     errors.push({
       path,
       message: `expected a ${s.scalarKind} value, got an object`,
-      code: "materialize.shape-mismatch",
+      code: "validate.shape-mismatch",
     });
     return value;
   }
   if (value === null) {
     if (!s.nullable) {
-      errors.push({ path, message: "null not allowed here", code: "materialize.null-not-allowed" });
+      errors.push({ path, message: "null not allowed here", code: "validate.null-not-allowed" });
     }
     return value;
   }

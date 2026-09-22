@@ -302,6 +302,9 @@ function stripNulls(node: Node, path: string, rep: WriteReport, depth = 0): Node
       throw new WriteError(
         "path " + p + ": a null-valued leaf has no TOML representation and no safe substitute " +
           "(TOML has no null token, and silently dropping the edge is unrecoverable data loss)",
+        undefined,
+        "write.unsupported-value",
+        p,
       );
     }
     out.push({ label, target: stripNulls(target, p, rep, depth + 1) });

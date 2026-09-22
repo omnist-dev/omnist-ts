@@ -131,4 +131,37 @@ describe("D-15: stripping lives in one place", () => {
     walk(path.join(root, "test")); // including this file: it must use the escape too
     expect(offenders).toEqual([]);
   });
+
+  // Same invisible-character-in-source class as the raw-BOM guard above --
+  // widened after a real incident (this repo's own OSD-14 unit tests
+  // originally carried four literal C0 control bytes (NUL, vertical tab,
+  // unit separator, NUL again) instead of unicode escapes; a raw byte in a diff is exactly as easy to
+  // miss as a raw BOM, and this port has now hit both). Reads each file
+  // as raw bytes, not decoded text, so this catches a byte even where
+  // encoding it as UTF-8 would produce something readFileSync("utf-8")
+  // might otherwise mangle.
+  it("no source file carries a raw C0 control byte other than tab/LF/CR", () => {
+    const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+    const offenders: string[] = [];
+    const isBenign = (b: number): boolean => b === 0x09 || b === 0x0a || b === 0x0d;
+    const walk = (dir: string): void => {
+      for (const name of readdirSync(dir)) {
+        const p = path.join(dir, name);
+        if (statSync(p).isDirectory()) walk(p);
+        else if (name.endsWith(".ts")) {
+          const bytes = readFileSync(p);
+          for (const b of bytes) {
+            if (b < 0x20 && !isBenign(b)) {
+              offenders.push(`${p} (0x${b.toString(16).padStart(2, "0")})`);
+              break;
+            }
+          }
+        }
+      }
+    };
+    walk(path.join(root, "src"));
+    walk(path.join(root, "tools"));
+    walk(path.join(root, "test"));
+    expect(offenders).toEqual([]);
+  });
 });

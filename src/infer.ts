@@ -101,11 +101,16 @@ export function inferWithReport(
   const rootName = options.rootName ?? "Root";
   const allowAny = options.allowAny ?? false;
   const nodes = samples.map(sampleNode);
+  // Sec6.10 (docs/06-schema-algebra.md): path is `$` for both -- no
+  // schema exists yet at this failure point, a pre-schema sample-shape
+  // error rather than a schema-side one, so Sec8.4's RecordName-based
+  // Schema path form doesn't apply (matches the vendored conformance
+  // vectors' own path for both).
   if (nodes.length === 0) {
-    throw new SchemaError("cannot infer a schema from zero samples");
+    throw new SchemaError("cannot infer a schema from zero samples", "algebra.infer-no-samples", "$");
   }
   if (nodes.some((n) => !Array.isArray(n))) {
-    throw new SchemaError("infer expects object (record) samples at the root");
+    throw new SchemaError("infer expects object (record) samples at the root", "algebra.infer-scalar-root", "$");
   }
   const env = new Map<string, SchemaRecord>();
   const used = new Set<string>();
@@ -248,6 +253,8 @@ function inferType(
     }
     throw new SchemaError(
       `label ${JSON.stringify(label)} mixes objects and values; cannot infer one type`,
+      "algebra.infer-mixed-shape",
+      `${recordName}.${label}`,
     );
   }
   // all scalars
@@ -278,6 +285,8 @@ function inferType(
     throw new SchemaError(
       `label ${JSON.stringify(label)} has values of more than one scalar ` +
         `(${sorted.join(", ")}); cannot infer one scalar type`,
+      "algebra.infer-conflicting-scalars",
+      `${recordName}.${label}`,
     );
   }
   // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
