@@ -1197,3 +1197,64 @@ describe("global --json machine mode", () => {
     expect("findings" in payload).toBe(true);
   });
 });
+
+describe("D-14: strict UTF-8 decoding at the CLI's byte-oriented entry point (spec Sec2.5/E-27)", () => {
+  function writeTmpBytes(name: string, bytes: Uint8Array): string {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "omnist-cli-bytes-"));
+    const p = path.join(dir, name);
+    fs.writeFileSync(p, Buffer.from(bytes));
+    return p;
+  }
+
+  it("rejects a file with a lone continuation byte, text mode", () => {
+    const p = writeTmpBytes("bad.json", Uint8Array.from([0x7b, 0x22, 0x61, 0x22, 0x3a, 0x31, 0x80, 0x7d]));
+    const { code, err } = run(["convert", "--from", "json", "--to", "json", p]);
+    expect(code).toBe(2);
+    expect(err).toContain("input is not valid UTF-8");
+  });
+
+  it("rejects a file with a lone continuation byte, --json mode, with structured code/path", () => {
+    const p = writeTmpBytes("bad.json", Uint8Array.from([0x7b, 0x22, 0x61, 0x22, 0x3a, 0x31, 0x80, 0x7d]));
+    const { code, out } = run(["convert", "--from", "json", "--to", "json", "--json", p]);
+    expect(code).toBe(2);
+    const payload = JSON.parse(out) as { ok: boolean; errors: { path: string; code: string }[] };
+    expect(payload.ok).toBe(false);
+    expect(payload.errors).toEqual([{ path: "1:1", code: "parse.invalid-encoding", message: "input is not valid UTF-8" }]);
+  });
+
+  it("accepts a file with valid multi-byte UTF-8", () => {
+    const p = writeTmpBytes(
+      "ok.json",
+      Uint8Array.from([0x7b, 0x22, 0x61, 0x22, 0x3a, 0x22, 0xc3, 0xa9, 0x22, 0x7d]), // {"a":"é"}
+    );
+    const { code, out } = run(["convert", "--from", "json", "--to", "oml", p]);
+    expect(code).toBe(0);
+    expect(out).toBe('a: "é"\n');
+  });
+
+  it("--json error payload uses the structured .errors list when the exception carries one (materialize failure)", () => {
+    const docF = writeTmp("bad.json", '{"a": "not-an-int"}');
+    const schemaF = writeTmp("s.osd", 'record R {\n    "a": integer,\n}\nroot R\n');
+    const { code, out } = run(["convert", docF, "--from", "json", "--to", "oml", "--schema", schemaF, "--json"]);
+    expect(code).toBe(2);
+    const payload = JSON.parse(out) as { ok: boolean; errors: { path: string; code: string }[] };
+    expect(payload.ok).toBe(false);
+    expect(payload.errors).toEqual([
+      { path: "$.a", code: "materialize.inexact-conversion", message: '"not-an-int" cannot be read as integer (not a value-exact conversion)' },
+    ]);
+  });
+
+  it("--json error payload falls back to an empty errors array for an exception with no top-level code/path", () => {
+    // A malformed --schema with a syntax error most SchemaError throw sites
+    // don't attach a code/path to (see errors.ts's SchemaError doc comment)
+    // -- jsonError's final fallback branch, distinct from both the
+    // `.errors`-populated branch and the new top-level-code/path branch.
+    const doc = writeTmp("doc.json", '{"a": 1}');
+    const schemaFile = writeTmp("bad.osd", "not a valid schema at all {{{");
+    const { code, out } = run(["validate", "--from", "json", "--schema", schemaFile, "--json", doc]);
+    expect(code).toBe(2);
+    const payload = JSON.parse(out) as { ok: boolean; errors: unknown[] };
+    expect(payload.ok).toBe(false);
+    expect(payload.errors).toEqual([]);
+  });
+});

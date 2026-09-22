@@ -91,6 +91,7 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 
 import "../../src/index.js"; // side effect: registers the built-in formats
 import { Doc, type Node, type Edge, type Scalar } from "../../src/document.js";
@@ -108,7 +109,9 @@ import { tagIntegerLiterals, bigintReviver } from "../../src/formats/json.js";
 import { compareSchema } from "./referee.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const VECTOR_SUITE_DIR = path.resolve(HERE, "..", "..", "vendor", "omnist-spec", "test-suite");
+const REPO_ROOT = path.resolve(HERE, "..", "..");
+const VECTOR_SUITE_DIR = path.resolve(REPO_ROOT, "vendor", "omnist-spec", "test-suite");
+const CLI_PATH = path.resolve(REPO_ROOT, "src", "cli.ts");
 
 // Allowlist of `declared_max_*` keys (test-suite/README.md, "declared-limit
 // keys"). A vector carrying one was written against a vector-local limit,
@@ -290,8 +293,163 @@ function compareThrownDiagnostics(e: unknown, expected: readonly Diagnostic[]): 
   return pass();
 }
 
+/**
+ * E-27 / D-14 (`omnist-spec` Sec8.5.3, Sec2.5): a `bytes_hex` vector's
+ * input is bytes, not text a JSON vector file can carry, and D-14 binds at
+ * this package's one byte-oriented entry point: its CLI (`src/cli.ts`'s
+ * `readInput`/`decodeStrictUtf8` -- see that file's doc comment). Every
+ * library reader takes a `string`, which is UTF-16 and cannot hold
+ * ill-formed UTF-8 at all, so presenting these bytes to one instead --
+ * the shortcut every other vector in this runner takes -- would either
+ * throw a `TypeError` on `undefined` (there is no `text` field) or, worse,
+ * require decoding the bytes into a string first, which is exactly the
+ * "decode with replacement" E-27 forbids (Node's own `Buffer#toString`/
+ * `fs.readFileSync(path, "utf-8")` substitute `U+FFFD` rather than fail --
+ * confirmed live, see `src/cli.ts`'s `decodeStrictUtf8` doc comment). So
+ * these 14 vectors alone are driven through a real CLI subprocess, fed the
+ * raw bytes on stdin -- the same path `main()`'s real-fd-0 branch takes,
+ * untouched by the in-process `opts.stdin` string-injection seam used
+ * everywhere else in this codebase (that seam can't carry invalid UTF-8;
+ * a JS string is always well-formed UTF-16, decoded upstream of it).
+ */
+function runCli(args: readonly string[], stdinBytes: Uint8Array): { code: number; stdout: string; stderr: string } {
+  const result = spawnSync(process.execPath, ["--import", "tsx", CLI_PATH, ...args], {
+    input: Buffer.from(stdinBytes),
+    cwd: REPO_ROOT,
+    encoding: "utf-8",
+  });
+  // Defensive: result.status is only ever null if the child was killed by
+  // a signal (never happens here -- every bytes_hex vector's CLI
+  // invocation runs to a normal exit), and result.stdout/.stderr are only
+  // ever undefined if spawnSync itself failed to launch the child or
+  // "encoding" were omitted, neither of which any real vector exercises.
+  /* v8 ignore next */
+  return { code: result.status ?? 1, stdout: result.stdout ?? "", stderr: result.stderr ?? "" };
+}
+
+function hexToBytes(hex: string): Uint8Array {
+  const out = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < out.length; i++) {
+    out[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+  }
+  return out;
+}
+
+/** Parses this CLI's own `--json` error payload (`jsonValidateErrors` in
+ * `src/cli.ts`): `{ ok, message, errors: [{ path, code, message }] }`. */
+function parseCliJsonError(stdout: string): { path?: string; code?: string } | undefined {
+  try {
+    const payload = JSON.parse(stdout) as { errors?: { path?: string; code?: string }[] };
+    return payload.errors?.[0];
+  } catch {
+    return undefined;
+  }
+}
+
+function runParseBytesHex(v: Vector): Result {
+  const inp = v.input;
+  const expect = v.expect;
+  const bytes = hexToBytes(inp.bytes_hex as string);
+  const fmt = inp.format as string;
+  // `convert --from X --to oml` reads via the exact same `readInput` path
+  // `convert`/`format`/`schema format` use for a real file (Sec8.5.3's
+  // driver-through-the-CLI requirement), and re-expressing the result as
+  // OML lets a *successful* read be checked against `expect.document`
+  // through this runner's own `readOml`/`decodeDocument`/`Doc.equals`
+  // machinery -- the CLI's `--json` success payload for `convert` is just
+  // the written text, not a vector-comparable encoding, so there is
+  // nothing to gain by parsing it directly instead.
+  const args = fmt === "oml" ? ["format", "-", "--json"] : ["convert", "--from", fmt, "--to", "oml", "-", "--json"];
+  const { code, stdout, stderr } = runCli(args, bytes);
+  if (expect.ok === true) {
+    if (code !== 0) {
+      return fail(`expected success, CLI exited ${code}: ${stderr || stdout}`);
+    }
+    let node: Node;
+    try {
+      node = readOml(stdout);
+    } catch (e) {
+      // Defensive: the CLI's own OML writer only ever emits OML this
+      // package's own reader accepts.
+      /* v8 ignore next */
+      return fail(`CLI succeeded but its OML output did not parse back: ${errorMessage(e)}`);
+    }
+    if (expect.document !== undefined) {
+      const expected = decodeDocument(expect.document as EncodedNode);
+      if (!new Doc(node).equals(new Doc(expected))) {
+        return fail("parsed document does not match expected");
+      }
+    }
+    return pass();
+  }
+  // expect.ok === false
+  if (code === 0) {
+    return fail("expected failure, CLI exited 0");
+  }
+  if (expect.diagnostics !== undefined) {
+    const err = parseCliJsonError(stdout);
+    if (err?.path === undefined || err?.code === undefined) {
+      return fail(`CLI's --json error payload carried no structured path/code: ${stdout || stderr}`);
+    }
+    const expected = asDiagnostics(expect.diagnostics);
+    const expPaths = paths(expected);
+    if (!setsEqual(expPaths, new Set([err.path]))) {
+      return fail(`diagnostic paths differ: expected ${setStr(expPaths)}, got {${JSON.stringify(err.path)}}`);
+    }
+    const expCodes = new Set(expected.map((d) => d.code));
+    if (!setsEqual(expCodes, new Set([err.code]))) {
+      return fail(`diagnostic codes differ: expected ${setStr(expCodes)}, got {${JSON.stringify(err.code)}}`);
+    }
+  }
+  return pass();
+}
+
+function runParseSchemaBytesHex(v: Vector): Result {
+  const expect = v.expect;
+  const bytes = hexToBytes(v.input.bytes_hex as string);
+  const { code, stdout, stderr } = runCli(["schema", "format", "-", "--json"], bytes);
+  if (expect.ok === true) {
+    // Defensive: a failing CLI invocation always writes its error to
+    // stderr in this codebase (main()'s own catch, both the UsageError
+    // and OmnistError branches) -- the "|| stdout" fallback covers a
+    // hypothetical stderr-silent failure no real vector produces.
+    /* v8 ignore next */
+    if (code !== 0) return fail(`expected success, CLI exited ${code}: ${stderr || stdout}`);
+    return pass();
+  }
+  if (code === 0) return fail("expected failure, CLI exited 0");
+  if (expect.diagnostics !== undefined) {
+    const err = parseCliJsonError(stdout);
+    // jsonError (src/cli.ts) only ever emits an error object with both
+    // `path` and `code` set (from `.errors`, whose `OmnistIssue` shape
+    // requires both, or from the top-level-code/path fallback, which
+    // requires both before using either) or with neither (the final
+    // fallback, `errors: []`, caught above as `err === undefined`) -- a
+    // path-without-code or code-without-path payload cannot come from
+    // this CLI's own error rendering, so only one side of this check is
+    // reachable through a real subprocess run.
+    /* v8 ignore next */
+    if (err?.path === undefined || err?.code === undefined) {
+      return fail(`CLI's --json error payload carried no structured path/code: ${stdout || stderr}`);
+    }
+    const expected = asDiagnostics(expect.diagnostics);
+    const expPaths = paths(expected);
+    if (!setsEqual(expPaths, new Set([err.path]))) {
+      return fail(`diagnostic paths differ: expected ${setStr(expPaths)}, got {${JSON.stringify(err.path)}}`);
+    }
+    const expCodes = new Set(expected.map((d) => d.code));
+    if (!setsEqual(expCodes, new Set([err.code]))) {
+      return fail(`diagnostic codes differ: expected ${setStr(expCodes)}, got {${JSON.stringify(err.code)}}`);
+    }
+  }
+  return pass();
+}
+
 function runParse(v: Vector): Result {
   const inp = v.input;
+  if (inp.bytes_hex !== undefined) {
+    return runParseBytesHex(v);
+  }
   if (inp.declared_max_alias_expansion !== undefined) {
     // Sec8.5.5 E-20 "not yet implemented": D-18 (alias expansion factor) is
     // not enforced here, and there is no configuration surface to set the
@@ -347,8 +505,12 @@ function runParse(v: Vector): Result {
 
 function runParseSchema(v: Vector): Result {
   const expect = v.expect;
+  if (v.input.bytes_hex !== undefined) {
+    return runParseSchemaBytesHex(v);
+  }
+  let schema: ReturnType<typeof parseSchema>;
   try {
-    parseSchema(v.input.text as string);
+    schema = parseSchema(v.input.text as string);
   } catch (e) {
     if (expect.ok === false) {
       if (expect.diagnostics !== undefined) {
@@ -359,6 +521,34 @@ function runParseSchema(v: Vector): Result {
     return fail(`expected success, threw: ${errorMessage(e)}`);
   }
   if (expect.ok !== true) return fail("expected failure, parse_schema succeeded");
+  // OSD-15 (Sec5.9): the `osd-grammar/canonical-output/*` vectors pin the
+  // *writer*'s canonical escaping, not just that parsing succeeded -- the
+  // vector's `expect.schema` is the exact OSD text `toOsd` must reproduce
+  // from what `parseSchema` built. Not every parse_schema vector carries
+  // this field (most only assert `ok`), so it's compared only when present.
+  if (expect.schema !== undefined) {
+    let written: string;
+    // Defensive: OSD-14 (Sec5.9) means toOsd can only ever throw for a
+    // label with a C0 control character, and parseSchema -- the only way
+    // a real vector schema reaches this driver -- can never build one
+    // (Sec5.3.1 bans the raw byte in a string body, escape context
+    // included, so it never survives tokenization). The only way to
+    // construct such a Schema is the builder API (src/schema.ts field/
+    // record/schema), which no vector-driven code path uses -- see
+    // test/osd.test.ts's "OSD-14" describe block for the tests that
+    // exercise this throw for real. Unreachable through this driver by
+    // construction, not by omission; kept as a backstop.
+    /* v8 ignore start */
+    try {
+      written = toOsd(schema);
+    } catch (e) {
+      return fail("expected write to succeed, threw: " + errorMessage(e));
+    }
+    /* v8 ignore stop */
+    if (!compareSchema(written, expect.schema as string, "exact")) {
+      return fail("written schema does not match expected: got " + JSON.stringify(written));
+    }
+  }
   return pass();
 }
 

@@ -156,13 +156,41 @@ describeIfVendored("main() against the real vendor/omnist-spec/test-suite", () =
     // errors now carry parse.invalid-date/-time at the token start, and
     // document.unlabeled-element carries a Document path, so 7 skips became
     // passes; the 20 schema.* skips cite omnist-ts#149).
+    //
+    // Bumped to v0.21.0-beta (273 vectors, +24): OML-26/OML-27 (top-level
+    // trailing-content vs. in-bracket unexpected-token) were already correct
+    // per the #148 sweep -- the five new vectors just confirm it, no code
+    // change. OSD-15 (canonical escaping) needed a real fix: `toOsd`'s
+    // `renderField` escaped nothing at all, and `runParseSchema` never even
+    // checked `expect.schema`, so the four label vectors were a false pass
+    // before the fix -- both are now real (osd.ts's `escapeLabel`,
+    // vectorRunner.ts's schema-text comparison). OSD-14 (a C0-control-
+    // character label has no OSD spelling) is new: `toOsd` now throws
+    // `WriteError("write.unsupported-value", <record path>)`
+    // unconditionally; no vector can pin it (DIV-5), so it's covered by
+    // `test/osd.test.ts` unit and property tests instead. All 14 new
+    // `bytes_hex` vectors (E-27/D-14) pass, driven through the CLI as a real
+    // subprocess fed raw bytes on stdin -- this package's one byte-oriented
+    // entry point (`src/cli.ts`'s `decodeStrictUtf8`); Node's own
+    // `fs.readFileSync(path, "utf-8")` silently substitutes `U+FFFD` for
+    // invalid bytes (measured live), which is exactly the "decode with
+    // replacement" E-27 forbids, so a `TextDecoder("utf-8", { fatal: true
+    // })` replaces it there and on stdin.
+    // Net: 213 pass, 0 fail, 60 skip (the skip set is unchanged in kind: the
+    // 20 schema.* structured-diagnostic skips (omnist-ts#149), the 6
+    // compile-time-safety-limit skips, the 6 alias-expansion skips (DIV-3),
+    // and 28 extensions-osd-oml "no driver wired up" skips -- OSD-OML
+    // extension support is out of this sweep's scope, same as every port).
     expect(exitCode).toBe(0);
     expect(logs.at(-1)).toBe(
-      "\n189 passed, 0 failed, 60 skipped (of 249 vectors) -- " +
+      "\n213 passed, 0 failed, 60 skipped (of 273 vectors) -- " +
         "diagnostic paths always compared, codes compared where the error carries one (Sec8.5.2)",
     );
-  });
+  }, 60000);
 
+  // bytes_hex vectors spawn a real `node --import tsx src/cli.ts` subprocess
+  // per vector (14 of them) -- routinely 5-15s total on this machine, well
+  // past vitest's 5s default.
   it("every skip cites an explicit, reasoned category", () => {
     const { logs } = withCapturedConsole(() => main());
     const skipLines = logs.filter((l) => l.startsWith("[SKIP]"));
@@ -177,10 +205,10 @@ describeIfVendored("main() against the real vendor/omnist-spec/test-suite", () =
         /: (not yet implemented|no driver wired up yet for operation)/,
       );
     }
-  });
+  }, 60000);
 
-  it("iterVectors discovers all 249 real vectors", () => {
-    expect(iterVectors(REAL_SUITE_DIR).length).toBe(249);
+  it("iterVectors discovers all 273 real vectors", () => {
+    expect(iterVectors(REAL_SUITE_DIR).length).toBe(273);
   });
 });
 
@@ -1021,4 +1049,182 @@ describe("infer / infer_with_report", () => {
     const r = runVector(vec("infer_with_report", { samples: ["a: 1\n", 'a: "x"\n'] }, { ok: false }));
     expect(r).toEqual({ status: "pass", message: "ok" });
   });
+});
+
+// ---------------------------------------------------------------------------
+// bytes_hex (D-14/E-27): the two drivers that route through a real CLI
+// subprocess rather than this library directly (see vectorRunner.ts's
+// runParseBytesHex/runParseSchemaBytesHex doc comment). Each of these spawns
+// `node --import tsx src/cli.ts`, so this block is slower than the rest of
+// the file; a generous per-test timeout covers CI machine variance.
+// ---------------------------------------------------------------------------
+
+function hex(s: string): string {
+  return Buffer.from(s, "utf-8").toString("hex");
+}
+
+describe("bytes_hex driver: runParseBytesHex (parse operation, format != oml)", () => {
+  it("passes for valid bytes matching the expected document", () => {
+    const r = runVector(
+      vec(
+        "parse",
+        { format: "json", bytes_hex: hex('{"a":1}') },
+        { ok: true, document: { edges: [["a", { scalar: { kind: "integer", value: 1 } }]] } },
+      ),
+    );
+    expect(r).toEqual({ status: "pass", message: "ok" });
+  }, 20000);
+
+  it("passes for valid bytes when expect carries no document to compare", () => {
+    const r = runVector(vec("parse", { format: "json", bytes_hex: hex('{"a":1}') }, { ok: true }));
+    expect(r).toEqual({ status: "pass", message: "ok" });
+  }, 20000);
+
+  it("fails when the CLI exits nonzero but success was expected", () => {
+    const r = runVector(vec("parse", { format: "json", bytes_hex: "80" }, { ok: true }));
+    expect(r.status).toBe("fail");
+    expect(r.message).toContain("expected success, CLI exited");
+  }, 20000);
+
+  it("fails when the parsed document does not match expected", () => {
+    const r = runVector(
+      vec(
+        "parse",
+        { format: "json", bytes_hex: hex('{"a":1}') },
+        { ok: true, document: { edges: [["a", { scalar: { kind: "integer", value: 2 } }]] } },
+      ),
+    );
+    expect(r).toEqual({ status: "fail", message: "parsed document does not match expected" });
+  }, 20000);
+
+  it("fails when the CLI exits 0 but failure was expected", () => {
+    const r = runVector(vec("parse", { format: "json", bytes_hex: hex('{"a":1}') }, { ok: false, diagnostics: [] }));
+    expect(r).toEqual({ status: "fail", message: "expected failure, CLI exited 0" });
+  }, 20000);
+
+  it("passes when the reported diagnostic path/code match expected", () => {
+    const r = runVector(
+      vec("parse", { format: "json", bytes_hex: "80" }, { ok: false, diagnostics: [{ path: "1:1", code: "parse.invalid-encoding" }] }),
+    );
+    expect(r).toEqual({ status: "pass", message: "ok" });
+  }, 20000);
+
+  it("fails when the reported diagnostic path differs from expected", () => {
+    const r = runVector(
+      vec("parse", { format: "json", bytes_hex: "80" }, { ok: false, diagnostics: [{ path: "9:9", code: "parse.invalid-encoding" }] }),
+    );
+    expect(r.status).toBe("fail");
+    expect(r.message).toContain("diagnostic paths differ");
+  }, 20000);
+
+  it("fails when the reported diagnostic code differs from expected", () => {
+    const r = runVector(
+      vec("parse", { format: "json", bytes_hex: "80" }, { ok: false, diagnostics: [{ path: "1:1", code: "parse.codec-syntax" }] }),
+    );
+    expect(r.status).toBe("fail");
+    expect(r.message).toContain("diagnostic codes differ");
+  }, 20000);
+
+  it("handles format oml through the `format` subcommand", () => {
+    const r = runVector(vec("parse", { format: "oml", bytes_hex: hex("a: 1\n") }, { ok: true, document: { edges: [["a", { scalar: { kind: "integer", value: 1 } }]] } }));
+    expect(r).toEqual({ status: "pass", message: "ok" });
+  }, 20000);
+});
+
+describe("bytes_hex driver: runParseSchemaBytesHex (parse_schema operation)", () => {
+  const VALID_SCHEMA = 'record R {\n    "a": string,\n}\nroot R\n';
+
+  it("passes for valid schema bytes", () => {
+    const r = runVector(vec("parse_schema", { bytes_hex: hex(VALID_SCHEMA) }, { ok: true }));
+    expect(r).toEqual({ status: "pass", message: "ok" });
+  }, 20000);
+
+  it("fails when the CLI exits nonzero but success was expected", () => {
+    const r = runVector(vec("parse_schema", { bytes_hex: "80" }, { ok: true }));
+    expect(r.status).toBe("fail");
+    expect(r.message).toContain("expected success, CLI exited");
+  }, 20000);
+
+  it("fails when the CLI exits 0 but failure was expected", () => {
+    const r = runVector(vec("parse_schema", { bytes_hex: hex(VALID_SCHEMA) }, { ok: false, diagnostics: [] }));
+    expect(r).toEqual({ status: "fail", message: "expected failure, CLI exited 0" });
+  }, 20000);
+
+  it("passes when the reported diagnostic path/code match expected", () => {
+    const r = runVector(
+      vec("parse_schema", { bytes_hex: "80" }, { ok: false, diagnostics: [{ path: "1:1", code: "parse.invalid-encoding" }] }),
+    );
+    expect(r).toEqual({ status: "pass", message: "ok" });
+  }, 20000);
+
+  it("fails when the reported diagnostic path differs from expected", () => {
+    const r = runVector(
+      vec("parse_schema", { bytes_hex: "80" }, { ok: false, diagnostics: [{ path: "9:9", code: "parse.invalid-encoding" }] }),
+    );
+    expect(r.status).toBe("fail");
+    expect(r.message).toContain("diagnostic paths differ");
+  }, 20000);
+
+  it("fails when the reported diagnostic code differs from expected", () => {
+    const r = runVector(
+      vec("parse_schema", { bytes_hex: "80" }, { ok: false, diagnostics: [{ path: "1:1", code: "parse.codec-syntax" }] }),
+    );
+    expect(r.status).toBe("fail");
+    expect(r.message).toContain("diagnostic codes differ");
+  }, 20000);
+});
+
+describe("bytes_hex driver: a CLI failure with no --json structure (UsageError bypasses --json)", () => {
+  it("runParseBytesHex fails clearly when the CLI's stdout carries no parseable JSON", () => {
+    // An invalid --from choice trips a UsageError, which -- like every
+    // UsageError -- writes plain usage text to stderr regardless of
+    // --json (main()'s own catch handles UsageError before the ctx.json
+    // branch: src/cli.ts's dispatch try/catch), so stdout stays empty and
+    // JSON.parse("") throws inside parseCliJsonError.
+    const r = runVector(
+      vec("parse", { format: "bogus", bytes_hex: "61" }, { ok: false, diagnostics: [{ path: "1:1", code: "parse.invalid-encoding" }] }),
+    );
+    expect(r.status).toBe("fail");
+    expect(r.message).toContain("CLI's --json error payload carried no structured path/code");
+  }, 20000);
+});
+
+describe("bytes_hex driver: runParseSchemaBytesHex against a code-less SchemaError", () => {
+  it("fails clearly when the CLI's --json payload has no structured path/code (most SchemaError sites carry neither)", () => {
+    const r = runVector(
+      vec(
+        "parse_schema",
+        { bytes_hex: Buffer.from("not a valid schema at all {{{", "utf-8").toString("hex") },
+        { ok: false, diagnostics: [{ path: "1:1", code: "parse.unexpected-token" }] },
+      ),
+    );
+    expect(r.status).toBe("fail");
+    expect(r.message).toContain("CLI's --json error payload carried no structured path/code");
+  }, 20000);
+});
+
+describe("runParseSchema: expect.schema mismatch is a real fail, not a false pass", () => {
+  it("fails when the written OSD text does not match expect.schema", () => {
+    const r = runVector(
+      vec(
+        "parse_schema",
+        { text: 'record R {\n    "a": string,\n}\nroot R\n' },
+        { ok: true, schema: 'record R {\n    "a": integer,\n}\nroot R\n' },
+      ),
+    );
+    expect(r.status).toBe("fail");
+    expect(r.message).toContain("written schema does not match expected");
+  });
+});
+
+describe("bytes_hex driver: expect.ok === false with no diagnostics field to compare", () => {
+  it("runParseBytesHex passes on failure alone when the vector asserts no specific diagnostics", () => {
+    const r = runVector(vec("parse", { format: "json", bytes_hex: "80" }, { ok: false }));
+    expect(r).toEqual({ status: "pass", message: "ok" });
+  }, 20000);
+
+  it("runParseSchemaBytesHex passes on failure alone when the vector asserts no specific diagnostics", () => {
+    const r = runVector(vec("parse_schema", { bytes_hex: "80" }, { ok: false }));
+    expect(r).toEqual({ status: "pass", message: "ok" });
+  }, 20000);
 });

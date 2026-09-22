@@ -6,6 +6,74 @@ the first documented release of the TypeScript port; the public API
 mirrors the upstream Python package's `__all__` (camelCase names of the
 same functions).
 
+## [v0.4.0-alpha] -- spec v0.21.0-beta sweep: OSD-14/OSD-15, D-14/bytes_hex
+
+`vendor/omnist-spec` bumped from v0.19.0-beta to **v0.21.0-beta** (273
+vectors, was 249). Conformance (vector track): **213 pass / 0 fail / 60 skip**
+(was 189 / 0 / 60 at the old pin). Fixture track: 19 / 0 / 0 throughout.
+
+Real behavior changes:
+
+- **OSD-15 (canonical escaping):** the canonical OSD writer (`toOsd`) now
+  escapes exactly a backslash as `\\` and a double quote as `\"` in a field
+  label, nothing else. It previously escaped nothing at all: a label like
+  `a\b` was written as the unescaped `"a\b"`, which reads back as `ab` --
+  silent corruption, a different schema with no diagnostic. This was also a
+  false pass in this repo's own vector runner: `runParseSchema`
+  (`tools/conformance/vectorRunner.ts`) never checked a `parse_schema`
+  vector's `expect.schema` field at all, so the four
+  `osd-grammar/canonical-output/label-*` vectors reported green without the
+  writer's output ever being compared. Both are fixed together.
+- **OSD-14 (the unwritable label), new:** `toOsd` now throws `WriteError`
+  with `code: "write.unsupported-value"` and `path` set to the Schema path
+  of the *record* holding the field, unconditionally (not only under
+  `strict`), for a field label containing a C0 control character (U+0000 to
+  U+001F). `WriteError` gained optional `code`/`path` fields for this (an
+  additive widening, same pattern as `ParseError`/`SchemaError`/
+  `DocumentError` -- no existing call site or catch site needs updating).
+  No conformance vector can pin this rule (a vector's schema input is OSD
+  text, and a schema with an unwritable label has none -- `omnist-spec`
+  DIV-5); covered instead by new unit and property tests in
+  `test/osd.test.ts` (arbitrary-label round-trip via `fast-check`).
+- **D-14 (invalid UTF-8) and new `bytes_hex` vectors:** this package's one
+  byte-oriented entry point -- the CLI's file/stdin reading (`src/cli.ts`'s
+  `readInput`) -- now decodes strictly. Node's own
+  `fs.readFileSync(path, "utf-8")` silently substitutes `U+FFFD` for
+  invalid UTF-8 (measured live) rather than failing, which is exactly the
+  "decode with replacement" `omnist-spec` E-27 forbids; a new
+  `decodeStrictUtf8` helper (`TextDecoder("utf-8", { fatal: true })`)
+  replaces it on both the file-read and real-stdin paths and reports
+  `parse.invalid-encoding` at `1:1` (a new `ParseError`) on failure. The
+  CLI's `--json` error payload (`jsonError`) now also surfaces a thrown
+  error's own top-level `code`/`path` when `.errors` is empty, so this
+  diagnostic (and any future top-level-coded error) is structured under
+  `--json`, not just in the free-text message. All 14 new `bytes_hex`
+  vectors (`omnist-spec` E-27) are run for real: the vector runner spawns
+  the actual CLI as a subprocess, feeding it raw bytes on stdin -- the only
+  way to present genuinely ill-formed UTF-8 without decoding it first, per
+  `omnist-spec` §8.5.3/DIV-6. All 14 pass.
+- **OML-26/OML-27 (top-level trailing-content vs. in-bracket
+  unexpected-token):** confirmed already correct against the five new
+  vectors (this port implemented the general rule in PR #148, ahead of the
+  spec text landing it); no code change.
+- **DIV-3 unchanged:** the six `declared_max_alias_expansion` vectors still
+  skip, citing DIV-3 (D-18 alias expansion limits remain unimplemented,
+  same as every port).
+
+Other:
+
+- The vector runner's byte-oriented drivers (`runParseBytesHex`,
+  `runParseSchemaBytesHex`) and the OSD-14/OSD-15 fixes are covered by new
+  tests reaching this repo's 100%-lines/100%-branches coverage standard;
+  several genuinely unreachable defensive branches (e.g. a `spawnSync`
+  result's signal-killed/launch-failure fields, and a CLI error payload
+  shape `jsonError` can never actually produce) are marked
+  `/* v8 ignore */` with an inline justification rather than forced by a
+  contrived test.
+- Version bumped `0.3.1-alpha` -> `0.4.0-alpha` (new behavior, not just a
+  fix: OSD-14 is new enforced writer behavior, OSD-15 changes writer
+  output).
+
 ## [v0.3.1-alpha] -- spec v0.19.0-beta sweep: D-15/D-21 BOM, data-XML profile, E-23, OML-25, D-18 allowlist
 
 `vendor/omnist-spec` bumped from v0.9.1-beta to **v0.19.0-beta** (249
