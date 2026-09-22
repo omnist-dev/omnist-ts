@@ -125,21 +125,40 @@ export class DocumentError extends OmnistError {
 export class DetachedNode extends DocumentError {}
 
 /**
- * A document cannot be represented losslessly in the target format.
+ * A document -- or, since issue #150 (OSD-14, `omnist-spec` Sec5.9), a
+ * Schema -- cannot be represented losslessly (or at all) in the target
+ * format.
  *
- * Raised only in `strict: true` mode. `.report` holds the full
+ * Most throw sites are `strict: true`-only: `.report` holds the full
  * `WriteReport` of every adjustment that would have been needed, so callers
- * can inspect the structured list, not just the text.
+ * can inspect the structured list, not just the text. OSD-14 is the one
+ * exception -- a field label carrying a C0 control character (U+0000 to
+ * U+001F) has no OSD spelling at all (Sec5.3.1 bans the raw byte in a
+ * string body, and OSD's unescaping is weak), so `toOsd` throws this
+ * unconditionally, `strict` or not, the same "fail, don't invent" rule
+ * Sec8.3.8's E-6 already applies to every other writer case of this shape.
+ * `.code`/`.path` are populated only there (`write.unsupported-value`, the
+ * Schema path of the *record* holding the offending field -- Sec8.4 offers
+ * no way to quote a label inside a path); every other `WriteError` throw
+ * site continues to pass neither, so both are simply `undefined`. This is
+ * an additive widening of an existing public type, not a breaking change:
+ * no existing call site or catch site needs updating.
  */
 export class WriteError extends OmnistError {
   // Typed `unknown` here rather than importing WriteReport, to avoid a
   // circular import between errors.ts and report.ts; report.ts narrows it.
   /** Attached adjustment report when written in strict mode or reporting is enabled. */
   readonly report: unknown;
+  /** Stable machine-readable error code (omnist-spec Sec8.3), when the throw site has one. */
+  readonly code: string | undefined;
+  /** Schema/Document path of the offending construct (Sec8.4), when known. */
+  readonly path: string | undefined;
 
-  constructor(message: string, report: unknown = undefined) {
+  constructor(message: string, report: unknown = undefined, code?: string, path?: string) {
     super(message);
     this.report = report;
+    this.code = code;
+    this.path = path;
   }
 }
 

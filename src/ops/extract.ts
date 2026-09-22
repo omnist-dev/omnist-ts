@@ -107,8 +107,16 @@ export function extract(s: Schema, keep: Iterable<string>): Schema {
     }
     /* v8 ignore stop */
     const [label, recordName] = firstOffender;
+    // A-11 (docs/06-schema-algebra.md Sec6.9): `algebra.extract-invalidates-root`,
+    // path = the record whose mandatory field the `keep` set deleted (not
+    // the root -- the offending record can be several hops from it, e.g.
+    // extract/first-bad/global-pass-not-scoped-to-one-record). Structured
+    // per the vendored conformance vectors, which pin exactly this
+    // (code, path) pair.
     throw new SchemaError(
       `no valid subschema: removing label ${JSON.stringify(label)} deletes a mandatory field of record ${JSON.stringify(recordName)}`,
+      "algebra.extract-invalidates-root",
+      recordName,
     );
   }
 

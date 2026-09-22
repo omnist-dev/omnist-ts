@@ -488,6 +488,9 @@ export function writeXml(node: Node, opts: WriteXmlOptions = {}): string {
   if (!Array.isArray(node) || node.length !== 1) {
     throw new WriteError(
       "XML needs exactly one document element; the root node must have a single top-level edge (a single-rooted Document)",
+      undefined,
+      "format.multiple-roots",
+      "$",
     );
   }
   const rep = scanXml(node);
@@ -522,6 +525,9 @@ function scanXmlNode(node: Node, path: string, rep: WriteReport, depth: number):
         "path " + path + ": an empty internal node (no edges) has no XML spelling -- " +
           "it would write as the same <tag /> as an empty-string leaf and be " +
           "indistinguishable from one on read-back",
+        undefined,
+        "write.unsupported-value",
+        path,
       );
     }
     const counts = new Map<string, number>();
@@ -538,6 +544,9 @@ function scanXmlNode(node: Node, path: string, rep: WriteReport, depth: number):
         // read-back. Unconditional failure, not a strict-only adjustment.
         throw new WriteError(
           "path " + p + ": label " + JSON.stringify(label) + " isn't a valid XML name and has no safe substitute",
+          undefined,
+          "write.unsupported-value",
+          p,
         );
       }
       scanXmlNode(target, p, rep, depth + 1);
@@ -572,6 +581,9 @@ function scanXmlNode(node: Node, path: string, rep: WriteReport, depth: number):
       throw new WriteError(
         "path " + path + ": string contains a character XML 1.0 cannot represent " +
           "(e.g. a C0 control other than tab/LF/CR) and has no safe substitute",
+        undefined,
+        "write.unsupported-value",
+        path,
       );
     }
     // issue #129: a literal '\r' is NOT reported as lossy any more --

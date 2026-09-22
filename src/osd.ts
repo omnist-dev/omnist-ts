@@ -23,7 +23,7 @@
  */
 
 import { stripLeadingBom } from "./bom.js";
-import { SchemaError } from "./errors.js";
+import { SchemaError, WriteError } from "./errors.js";
 import {
   ANY,
   SCALAR_KINDS,
@@ -382,21 +382,64 @@ export function toOsd(schema: Schema, opts: ToOsdOptions = {}): string {
 
 function renderRecord(name: string, rec: OmnistRecord, indent: number | null): string {
   if (indent === null) {
-    const fields = rec.fields.map(renderField).join(", ");
+    const fields = rec.fields.map((f) => renderField(f, name)).join(", ");
     return `record ${name} { ${fields} }`;
   }
   const pad = " ".repeat(indent);
   const out = [`record ${name} {`];
   for (const f of rec.fields) {
-    out.push(`${pad}${renderField(f)},`);
+    out.push(`${pad}${renderField(f, name)},`);
   }
   out.push("}");
   return out.join("\n");
 }
 
-function renderField(f: { label: string; type: FieldType; min: number; max: number | null }): string {
+// A raw byte below U+0020 (a C0 control character, tab and newline
+// included) has no OSD spelling: Sec5.3.1 bans the byte in a string body
+// even in escape context, and OSD-15's unescaping is weak (`\X` -> `X`),
+// so there is no escape sequence that could stand for it either. Field
+// labels are the only place this can arise in practice -- S-8 keeps record
+// names and `root` out of reach on every route (Sec5.3's tokenizer on the
+// OSD side, R-3a on the OSD-OML side) -- so this is checked only here.
+// eslint-disable-next-line no-control-regex -- the whole point is to match a C0 control character
+const C0_CONTROL = /[\u0000-\u001f]/;
+
+/**
+ * OSD-15 (Sec5.9): the canonical spelling of a label escapes exactly two
+ * characters -- a backslash as `\\`, a double quote as `\"` -- and nothing
+ * else, since Sec5.3.1's weak unescaping (`\X` -> `X`) makes that the only
+ * spelling that reads back as the original label. Escaping any other
+ * character would still read back correctly (weak unescaping strips the
+ * backslash either way) but breaks OSD-11's byte-identical guarantee
+ * between two writers that disagree about which characters to escape, so
+ * it is deliberately not done here.
+ */
+function escapeLabel(label: string): string {
+  return label.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
+
+function renderField(
+  f: { label: string; type: FieldType; min: number; max: number | null },
+  recordName: string,
+): string {
+  // OSD-14 (Sec5.9/Sec8.3.9): a label with no OSD spelling fails the write
+  // unconditionally ("fail, don't invent" -- Sec8.3.8's E-6 applies to
+  // every writer case of this shape, not only under `strict`). The path is
+  // the Schema path of the *record* holding the field, `recordName` (e.g.
+  // `R`), not `R.<label>` -- Sec8.4 offers no way to quote a label inside a
+  // path, and putting the very byte that has no spelling into a
+  // byte-for-byte-compared path would restate the problem instead of
+  // reporting it. New `E-26` (Sec8.3.9): "target format" includes OSD.
+  if (C0_CONTROL.test(f.label)) {
+    throw new WriteError(
+      `field label ${JSON.stringify(f.label)} contains a control character, which OSD cannot represent`,
+      undefined,
+      "write.unsupported-value",
+      recordName,
+    );
+  }
   const card = f.min === 1 && f.max === 1 ? "" : ` ${renderCard(f.min, f.max)}`;
-  return `"${f.label}"${card}: ${renderType(f.type)}`;
+  return `"${escapeLabel(f.label)}"${card}: ${renderType(f.type)}`;
 }
 
 function renderCard(lo: number, hi: number | null): string {

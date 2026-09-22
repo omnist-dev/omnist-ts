@@ -98,17 +98,51 @@ function pyJson(value: unknown): string {
 // IO plumbing
 // ---------------------------------------------------------------------------
 
+/**
+ * Decodes raw bytes as strict UTF-8 (D-14, `omnist-spec` Sec2.5): rejects
+ * with `parse.invalid-encoding` at `1:1` rather than repairing anything.
+ *
+ * This is the one byte-oriented decode point in the whole package -- every
+ * reader below it (`READERS`, `parseSchema`) takes a JS `string`, which is
+ * UTF-16 and simply cannot hold a raw invalid UTF-8 byte, so Sec2.5's
+ * string-typed clause covers them and they stay untouched. `readInput` is
+ * where bytes from a file or stdin first become a `string`, so it is the
+ * package's byte-oriented entry point E-27 refers to (its CLI, since this
+ * is the only one) and D-14 binds here.
+ *
+ * Node's own `Buffer#toString("utf8")` (and `fs.readFileSync(path,
+ * "utf-8")`) is `TextDecoder`'s **non**-fatal mode under the hood: it
+ * silently substitutes `U+FFFD` for anything it cannot decode -- exactly
+ * the "decode with replacement" Sec2.5/E-27 forbid, verified live (a lone
+ * continuation byte 0x80 comes back as `"a\uFFFDb"`, no error, no
+ * diagnostic). `TextDecoder("utf-8", { fatal: true })` is the strict
+ * decoder that actually enforces D-14.
+ */
+function decodeStrictUtf8(bytes: Uint8Array): string {
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    throw new ParseError("input is not valid UTF-8", [], "parse.invalid-encoding", "1:1");
+  }
+}
+
 /** Reads `path`, or stdin when `path === "-"`. Stdin is read via
  * `ctx.readStdin` -- a real process's stdin (fd 0) by default, or an
  * injected string for in-process testing (mirroring how the Python suite
  * monkeypatches `sys.stdin`; Node's `fs.readFileSync` on built-in modules
  * isn't reliably spy-able across environments, so this is done via
- * explicit injection through {@link main}'s second argument instead). */
+ * explicit injection through {@link main}'s second argument instead). The
+ * injected-string seam can't itself carry ill-formed UTF-8 (a JS string is
+ * always well-formed UTF-16, decoded upstream of the seam), so D-14
+ * coverage for stdin is exercised by driving the real CLI as a subprocess
+ * (`test/cli.test.ts`'s byte-level cases; see also the vector runner's
+ * `bytes_hex` handling, `tools/conformance/vectorRunner.ts`), not by
+ * `opts.stdin` injection. */
 function readInput(ctx: Ctx, path: string): string {
   if (path === "-") {
     return ctx.readStdin();
   }
-  return fs.readFileSync(path, "utf-8");
+  return decodeStrictUtf8(fs.readFileSync(path));
 }
 
 function writeOutput(stdout: Writer, path: string | undefined, text: string): void {
@@ -192,6 +226,21 @@ function jsonValidateErrors(message: string, errors: readonly OmnistIssue[]): st
 
 function jsonError(exc: unknown): string {
   const errors = exc instanceof ParseError ? exc.errors : [];
+  if (errors.length > 0) {
+    return jsonValidateErrors(errorMessage(exc), errors);
+  }
+  // A ParseError/SchemaError/WriteError/DocumentError populated only with
+  // its own top-level `code`/`path` (issue #108/#149/#150's structured
+  // lexical and write-side diagnostics -- e.g. D-14's
+  // `parse.invalid-encoding` at `1:1`) carries nothing in `.errors`, but
+  // `--json` should still surface the structure it does have rather than
+  // falling back to an empty `errors: []` and forcing callers to scrape
+  // the message text.
+  const codeable = exc as { code?: string; path?: string };
+  if (codeable?.code !== undefined && codeable?.path !== undefined) {
+    const message = errorMessage(exc);
+    return jsonValidateErrors(message, [{ path: codeable.path, code: codeable.code, message }]);
+  }
   return jsonValidateErrors(errorMessage(exc), errors);
 }
 
@@ -803,7 +852,7 @@ export function main(
   // throws "Cannot redefine property" here), so `opts.stdin` injection is
   // the tested seam instead -- see readInput's doc comment.
   /* v8 ignore next */
-  const readStdin = (): string => (opts?.stdin !== undefined ? opts.stdin : fs.readFileSync(0, "utf-8"));
+  const readStdin = (): string => (opts?.stdin !== undefined ? opts.stdin : decodeStrictUtf8(fs.readFileSync(0)));
   const args = [...argv];
 
   if (args.includes("--version")) {

@@ -278,6 +278,9 @@ function scanJson(node: Node): WriteReport {
       // on read-back). Unconditional failure, not a strict-only adjustment.
       throw new WriteError(
         "path " + path + ": " + String(v) + " has no JSON representation and no safe substitute",
+        undefined,
+        "write.unsupported-value",
+        path,
       );
     }
   }
