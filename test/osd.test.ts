@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
+import fc from "fast-check";
 import { doc } from "../src/document.js";
-import { SchemaError } from "../src/errors.js";
+import { SchemaError, WriteError } from "../src/errors.js";
 import { parseSchema, toOsd } from "../src/osd.js";
 import {
   ANY,
@@ -466,5 +467,106 @@ describe("OSD string body: control characters (spec Sec5.3.1)", () => {
   });
   it("still accepts an ordinary escaped character", () => {
     expect(() => parseSchema('record R { "a\\"b": string } root R\n')).not.toThrow();
+  });
+});
+
+describe("OSD-15: canonical output escapes exactly backslash and double-quote, nothing else (spec Sec5.9)", () => {
+  it.each([
+    ["a\\b", 'record R {\n    "a\\\\b": string,\n}\nroot R\n'],
+    ['a"b', 'record R {\n    "a\\"b": string,\n}\nroot R\n'],
+    ['a\\"b', 'record R {\n    "a\\\\\\"b": string,\n}\nroot R\n'],
+    ["a\\", 'record R {\n    "a\\\\": string,\n}\nroot R\n'],
+  ])("escapes %j to the exact canonical text", (label, expected) => {
+    const s = schema(ref("R"), { R: record(field(label, t.string)) });
+    expect(toOsd(s)).toBe(expected);
+  });
+
+  it("a backslash/quote-carrying label round-trips through parseSchema -> toOsd -> parseSchema unchanged", () => {
+    for (const label of ["a\\b", 'a"b', 'a\\"b', "a\\"]) {
+      const s = schema(ref("R"), { R: record(field(label, t.string)) });
+      const s2 = parseSchema(toOsd(s));
+      expect(schemaEquals(s, s2)).toBe(true);
+      expect(s2.env.get("R")?.fields[0]?.label).toBe(label);
+    }
+  });
+
+  it("does not escape ordinary characters (no spurious backslashes)", () => {
+    const s = schema(ref("R"), { R: record(field("plain label", t.string)) });
+    expect(toOsd(s)).toContain('"plain label"');
+  });
+});
+
+describe("OSD-14: a field label with a C0 control character has no OSD spelling (spec Sec5.9/Sec8.3.9)", () => {
+  it("toOsd throws WriteError unconditionally (not only under strict) for a label built programmatically", () => {
+    // parseSchema itself can never produce this Schema (Sec5.3.1 bans the
+    // raw byte in a string body, escape context included -- see "OSD
+    // string body: control characters" above) -- the only way to reach
+    // this case is the builder API, exactly the "no OSD spelling at all"
+    // situation OSD-14 exists for.
+    const s = schema(ref("R"), { R: record(field("a\tb", t.string)) });
+    let threw: unknown;
+    try {
+      toOsd(s);
+    } catch (e) {
+      threw = e;
+    }
+    expect(threw).toBeInstanceOf(WriteError);
+    expect((threw as WriteError).code).toBe("write.unsupported-value");
+    // Sec8.4: the Schema path of the *record* holding the field, not
+    // `R.<label>` -- there is no way to quote a label inside a path.
+    expect((threw as WriteError).path).toBe("R");
+  });
+
+  it.each([
+    ["tab", "\t"],
+    ["newline", "\n"],
+    ["carriage return", "\r"],
+    ["NUL", "\u0000"],
+    ["a mid-range C0 control (U+000B)", "\u000b"],
+    ["the last C0 control (U+001F)", "\u001f"],
+  ])("rejects a label containing %s", (_name, ch) => {
+    const s = schema(ref("R"), { R: record(field(`x${ch}y`, t.string)) });
+    expect(() => toOsd(s)).toThrow(WriteError);
+    expect(() => toOsd(s)).toThrow(/control character/);
+  });
+
+  it("does not throw for a label with no control character, including ordinary punctuation", () => {
+    const s = schema(ref("R"), { R: record(field("a-b_c.d", t.string)) });
+    expect(() => toOsd(s)).not.toThrow();
+  });
+
+  it("is unconditional: {indent: null} (compact) also throws", () => {
+    const s = schema(ref("R"), { R: record(field("a\u0000b", t.string)) });
+    expect(() => toOsd(s, { indent: null })).toThrow(WriteError);
+  });
+});
+
+describe("OSD-14/OSD-15 property: parseSchema(toOsd(s)) round-trips for arbitrary safe labels", () => {
+  // Excludes: C0 controls (OSD-14: no OSD spelling), `[`/`]` (S-8/OSD-2:
+  // not a legal label at all, rejected by the model itself, unrelated to
+  // OSD-15), and the empty label (also OSD-2). Every other single UTF-16
+  // code point is fair game, including backslash and double-quote
+  // themselves -- the exact characters OSD-15 exists to escape.
+  const safeLabelChar = fc
+    .fullUnicodeString({ minLength: 1, maxLength: 1 })
+    .filter((c) => {
+      const code = c.codePointAt(0) ?? 0;
+      if (code <= 0x1f) return false; // C0 control (OSD-14)
+      if (c === "[" || c === "]") return false; // S-8 (not a legal label)
+      return true;
+    });
+  const safeLabel = fc.array(safeLabelChar, { minLength: 1, maxLength: 12 }).map((cs) => cs.join(""));
+
+  it("round-trips for 200 arbitrary generated labels", () => {
+    fc.assert(
+      fc.property(safeLabel, (label) => {
+        const s = schema(ref("R"), { R: record(field(label, t.string)) });
+        const written = toOsd(s);
+        const s2 = parseSchema(written);
+        expect(s2.env.get("R")?.fields[0]?.label).toBe(label);
+        expect(schemaEquals(s, s2)).toBe(true);
+      }),
+      { numRuns: 200 },
+    );
   });
 });

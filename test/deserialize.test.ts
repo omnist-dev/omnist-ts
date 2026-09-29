@@ -148,7 +148,7 @@ describe("materialize: shape and cardinality errors", () => {
     const errors = caught?.errors ?? [];
     expect(errors).toHaveLength(3);
     const codes = new Set(errors.map((err) => err.code));
-    expect(codes).toEqual(new Set(["materialize.inexact-conversion", "materialize.unexpected-field", "materialize.cardinality"]));
+    expect(codes).toEqual(new Set(["materialize.inexact-conversion", "validate.unexpected-field", "validate.cardinality"]));
     expect(errors.every((err) => err.path.startsWith("$"))).toBe(true);
     expect(errors.every((err) => typeof err.message === "string" && err.message.length > 0)).toBe(
       true,

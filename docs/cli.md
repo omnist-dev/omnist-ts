@@ -108,7 +108,7 @@ exits `2`, `--json` or not.
 
 ```sh
 $ omnist check examples/cli/lossy.json --from json --to toml --json
-{"ok": false, "message": "path $.age: a null-valued leaf has no TOML representation and no safe substitute (TOML has no null token, and silently dropping the edge is unrecoverable data loss)", "errors": []}
+{"ok": false, "message": "path $.age: a null-valued leaf has no TOML representation and no safe substitute (TOML has no null token, and silently dropping the edge is unrecoverable data loss)", "errors": [{"path": "$.age", "code": "write.unsupported-value", "message": "path $.age: a null-valued leaf has no TOML representation and no safe substitute (TOML has no null token, and silently dropping the edge is unrecoverable data loss)"}]}
 # exit 2 -- a null-valued leaf has no TOML representation at all (issue #127); a
 # hard failure, not a reported-and-still-successful adjustment
 
@@ -126,6 +126,34 @@ write); its stdout is the JSON result. A non-zero-with-`{"ok": false}` on stdout
 is a data/IO error you can parse for `message`/`errors`. The only thing that
 still lands on stderr is a usage error (exit `2`, no JSON) -- a bug in
 how you invoked the tool, worth surfacing loudly rather than parsing.
+
+### Encoding: invalid UTF-8 is rejected, not repaired
+
+Every command that reads a file or stdin (`format`, `convert`, `check`,
+`infer`, `validate`, and every `schema` subcommand that takes a schema
+file) requires the input to be valid UTF-8. As of this port's v0.4.0-alpha,
+invalid UTF-8 is rejected outright -- exit `2`, `error: input is not valid
+UTF-8` on stderr (or, under `--json`, `{"ok": false, "message": "input is
+not valid UTF-8", "errors": [{"path": "1:1", "code":
+"parse.invalid-encoding", "message": "input is not valid UTF-8"}]}` on
+stdout). Before v0.4.0-alpha this CLI silently repaired invalid bytes by
+substituting the Unicode replacement character (`U+FFFD`) and ran the
+repaired text through as if it were the real input -- a correctness bug
+(`omnist-spec`'s D-14/E-27), not a documented behavior; there is no flag to
+restore it.
+
+```sh
+$ printf '{"a": 1\x80}' | omnist convert --from json --to json -
+error: input is not valid UTF-8
+```
+<!-- doc-illustrative -->
+
+This only binds the CLI's own file/stdin reading -- the one place in this
+package that turns bytes into a JS `string`. The library's readers
+(`readJson`, `readOml`, `parseSchema`, and so on) take a `string`, which is
+always well-formed UTF-16, and simply cannot receive invalid UTF-8 at all;
+per `omnist-spec` §2.5, a string-typed reader is free to treat its input as
+already decoded, and this package's readers do exactly that.
 
 ## `omnist format`
 
