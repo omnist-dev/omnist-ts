@@ -76,6 +76,7 @@
 import type { Edge, Node, Scalar } from "./document.js";
 import { ParseError, WriteError } from "./errors.js";
 import { stripLeadingBom } from "./bom.js";
+import { lineCol } from "./position.js";
 import { WriteReport } from "./report.js";
 import type { Schema } from "./schema.js";
 import { materialize } from "./deserialize.js";
@@ -297,17 +298,7 @@ class Scanner {
   }
 
   lineCol(pos: number): [number, number] {
-    const s = this.s;
-    let line = 1;
-    let lastNl = -1;
-    for (let i = 0; i < pos; i++) {
-      if (s[i] === "\n") {
-        line++;
-        lastNl = i;
-      }
-    }
-    const col = lastNl !== -1 ? pos - lastNl : pos + 1;
-    return [line, col];
+    return lineCol(this.s, pos);
   }
 
   errorAt(pos: number, msg: string, code?: string): ParseError {
@@ -725,6 +716,11 @@ class Parser {
         );
       }
       this.skipSep();
+      // OML-26: at top level, after a separator only a STRING or IDENT can
+      // begin the next edge; anything else is left over and the document
+      // reports it as parse.trailing-content (inside braces the loop's own
+      // label check reports parse.unexpected-token, OML-27).
+      if (depth === 0 && this.kind !== "STRING" && this.kind !== "IDENT") break;
     }
     return edges;
   }

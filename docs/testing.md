@@ -86,7 +86,7 @@ implementation. Two independent tracks, from the same submodule pin:
 - **The JSON-vector suite** (`tools/conformance/vectorRunner.ts`) runs
   `test-suite/`'s JSON-envelope vectors (`name`/`operation`/`input`/
   `expect`) against the same functions. Currently
-  **189 passed, 0 failed, 60 skipped** (of 249).
+  **227 passed, 0 failed, 60 skipped** (of 287, spec v0.22.0-beta).
 
 Every skip cites an explicit, checkable reason, per
 [`docs/08-conformance-and-errors.md` Sec8.5.5](https://github.com/omnist-dev/omnist-spec/blob/master/docs/08-conformance-and-errors.md)

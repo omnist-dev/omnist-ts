@@ -181,9 +181,16 @@ describeIfVendored("main() against the real vendor/omnist-spec/test-suite", () =
     // compile-time-safety-limit skips, the 6 alias-expansion skips (DIV-3),
     // and 28 extensions-osd-oml "no driver wired up" skips -- OSD-OML
     // extension support is out of this sweep's scope, same as every port).
+    //
+    // Bumped to v0.22.0-beta (287 vectors, +14): OML-26 now applies with or
+    // without a separator before the leftover token (parseNodeEdges stops the
+    // top-level edge list unless a separator is followed by a STRING/IDENT),
+    // and E-28 counts line:col columns in code points (src/position.ts) for
+    // OML and OSD. Codec positions are untouched (omnist-spec#114).
+    // Net: 227 pass, 0 fail, 60 skip (the skip set does not grow).
     expect(exitCode).toBe(0);
     expect(logs.at(-1)).toBe(
-      "\n213 passed, 0 failed, 60 skipped (of 273 vectors) -- " +
+      "\n227 passed, 0 failed, 60 skipped (of 287 vectors) -- " +
         "diagnostic paths always compared, codes compared where the error carries one (Sec8.5.2)",
     );
   }, 120000);
@@ -207,8 +214,8 @@ describeIfVendored("main() against the real vendor/omnist-spec/test-suite", () =
     }
   }, 120000);
 
-  it("iterVectors discovers all 273 real vectors", () => {
-    expect(iterVectors(REAL_SUITE_DIR).length).toBe(273);
+  it("iterVectors discovers all 287 real vectors", () => {
+    expect(iterVectors(REAL_SUITE_DIR).length).toBe(287);
   });
 });
 
