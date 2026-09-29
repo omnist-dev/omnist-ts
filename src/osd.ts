@@ -23,6 +23,7 @@
  */
 
 import { stripLeadingBom } from "./bom.js";
+import { lineCol } from "./position.js";
 import { SchemaError, WriteError } from "./errors.js";
 import {
   ANY,
@@ -64,16 +65,7 @@ const TOKEN_RE =
 
 /** 1-based `line:col` text-position path for a `parse.*` diagnostic (spec Sec8.4). */
 function posToPath(text: string, pos: number): string {
-  let line = 1;
-  let col = 1;
-  for (let i = 0; i < pos; i++) {
-    if (text[i] === "\n") {
-      line += 1;
-      col = 1;
-    } else {
-      col += 1;
-    }
-  }
+  const [line, col] = lineCol(text, pos);
   return `${line}:${col}`;
 }
 

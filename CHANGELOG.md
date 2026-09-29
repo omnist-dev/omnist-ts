@@ -6,6 +6,43 @@ the first documented release of the TypeScript port; the public API
 mirrors the upstream Python package's `__all__` (camelCase names of the
 same functions).
 
+## [v0.4.1-alpha] -- spec v0.22.0-beta sweep: OML-26 with a separator, E-28/E-29 code-point columns
+
+`vendor/omnist-spec` bumped from v0.21.0-beta to **v0.22.0-beta** (287
+vectors, was 273). Conformance (vector track): **227 pass / 0 fail / 60 skip**
+(was 213 / 0 / 60 at the old pin; at the new pin, before any code change,
+218 pass / 9 fail / 60 skip). Fixture track 19 / 0 / 0 and referee self-test
+10/10 throughout. The skip set does not grow.
+
+The 9 baseline failures, all now passing:
+
+- 7 x `oml-grammar/shape/separator-then-*-after-a-top-level-edge-is-trailing-content`
+  (`,`, `]`, a non-label token, `nan`, `{`, an array, `:`): OML-26 now holds
+  with or without a separator in front of the leftover token. Code changed
+  from `parse.unexpected-token` to `parse.trailing-content`, same position
+  (the leftover token). The top-level edge list continues only if a
+  separator is followed by a STRING or IDENT; that token is the next edge
+  and reports its own error if malformed (`a: 1` LF `null: 2` is
+  `parse.reserved-word-label` at `2:1`). Inside `{...}`/`[...]` the code stays
+  `parse.unexpected-token` (OML-27); unterminated arrays and
+  `parse.separator-in-array` are unchanged.
+- `oml-grammar/errors/column-counts-code-points-after-an-astral-character`
+  (`1:13` -> `1:12`) and `osd-grammar/errors/column-counts-code-points-after-an-astral-character`
+  (`2:19` -> `2:18`): E-28. OML and OSD columns are now 1-based counts of
+  Unicode code points from the start of the line (an astral character is one,
+  not two UTF-16 units); `line` advances at LF (E-29). Shared helper
+  `src/position.ts`, used by both. It scans once, only when a diagnostic is
+  created, so parsing stays linear. Codec (JSON/YAML/TOML/XML) positions are
+  untouched (omnist-spec#114).
+
+Timings (error at the end of one very long line, before -> after): 5 MB
+single-line string 50 -> 48 ms; 5M UTF-16 units of emoji 64 -> 49 ms;
+40k edges on one line (~200k tokens) 278 -> 309 ms; 100k-element array 335 ->
+362 ms; 5 MB OSD line 54 -> 35 ms (run-to-run noise).
+
+Version bumped `0.4.0-alpha` -> `0.4.1-alpha` (positions and codes for
+malformed input only; no valid input changes meaning).
+
 ## [v0.4.0-alpha] -- spec v0.21.0-beta sweep: OSD-14/OSD-15, D-14/bytes_hex
 
 `vendor/omnist-spec` bumped from v0.19.0-beta to **v0.21.0-beta** (273
