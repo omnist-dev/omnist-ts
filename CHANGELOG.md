@@ -6,6 +6,61 @@ the first documented release of the TypeScript port; the public API
 mirrors the upstream Python package's `__all__` (camelCase names of the
 same functions).
 
+## [v0.4.2-alpha] -- spec v0.24.0-beta sweep: codec syntax errors carry a code and a position (E-31, E-32, DIV-8)
+
+`vendor/omnist-spec` bumped from v0.22.0-beta to **v0.24.0-beta** (302
+vectors, was 287). Conformance (vector track): **242 pass / 0 fail / 60 skip**
+(was 227 / 0 / 60 at the old pin). At the new pin, before any code change,
+238 pass / 0 fail / 64 skip: the four new `line:col` codec vectors SKIPPED
+because the readers threw a bare `ParseError` and the runner had no
+placeholder. With the runner implementing E-32 but the readers unchanged they
+FAILED (238 / 4 / 60), which is what DIV-8 records for TypeScript. Fixture
+track 19 / 0 / 0 and referee self-test 10/10 throughout. The skip set is
+unchanged: 20 `schema.*` (omnist-ts#149), 6 limits, 6 alias-expansion (DIV-3),
+28 OSD-OML (omnist-ts#145). The four array vectors (OML-28, v0.24.0-beta) and
+the seven other new vectors already passed.
+
+The 4 vectors that failed (or skipped) at baseline, all now passing:
+`formats-json/syntax/missing-value-is-a-codec-syntax-error`,
+`formats-yaml/syntax/nested-mapping-value-is-a-codec-syntax-error`,
+`formats-toml/syntax/key-without-value-is-a-codec-syntax-error`,
+`formats-xml/syntax/mismatched-closing-tag-is-a-codec-syntax-error`.
+
+Behaviour change (codes and positions for malformed codec input, and CLI
+`--json`):
+
+- Every JSON, YAML, TOML and XML SYNTAX error the readers raise is now
+  `parse.codec-syntax` with a `line:col` `path` inside the input (E-31, E-11),
+  as `ParseError.code`/`.path`; before, `ParseError` carried only a message.
+  The message reads `invalid FMT: line L, col C: <library text>`. The position
+  is the library's own, converted to a code-point column (E-28):
+  `JSON.parse` by the `at position N` offset (the original text is re-parsed,
+  since the integer-tagged text has shifted offsets; "Unexpected end of JSON
+  input" stands at the end; a message with no position, as some older Node
+  versions emit, is `1:1`); YAML by `YAMLParseError.pos`; TOML by
+  `TomlError.line`/`.column` (UTF-16 units, converted); XML by the validator's
+  `line`/`col` (converted). Where a library names nothing (an unresolved YAML
+  alias, a self-referential YAML merge that overflows the stack, several
+  top-level XML elements) the position is `1:1`, never omitted and never `0:0`.
+  D-21's fixed `1:1`, D-14, and the `format.*` refusals (DOCTYPE, entities,
+  mixed content) and `document.*` errors are unchanged.
+- Several top-level XML elements are a syntax error (they validate as
+  well-formed under fast-xml-parser but are not): now coded, at `1:1`. The
+  former "unreachable" coverage exclusion on that branch is gone; it is tested.
+- `omnist validate --json` now reports a thrown error's own code and path in
+  `errors` (the other commands already did): a codec syntax error is one
+  `parse.codec-syntax` entry instead of `errors: []`.
+- Runner (`tools/conformance/vectorRunner.ts`): the E-32 `"line:col"`
+  placeholder. The code must match exactly and the path must match
+  `^[1-9][0-9]*:[1-9][0-9]*$` and lie inside the input (E-31 bound, code
+  points); a missing code or path FAILS instead of skipping; every other path
+  is still byte-compared and the canonical schema comparison is untouched.
+  Verified to bite: changing one expected code in a scratch copy of the suite
+  produced a named FAIL.
+- Tests: `test/formats/codec-syntax.test.ts` (per-codec tables, multi-line and
+  multi-byte inputs, CLI `--json`), placeholder unit tests with near-misses
+  (`0:0`, `1:0`, empty, missing path). Coverage stays at 100%.
+
 ## [v0.4.1-alpha] -- spec v0.22.0-beta sweep: OML-26 with a separator, E-28/E-29 code-point columns
 
 `vendor/omnist-spec` bumped from v0.21.0-beta to **v0.22.0-beta** (287

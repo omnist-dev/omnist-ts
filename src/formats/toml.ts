@@ -37,6 +37,7 @@ import { parseDateToken, parseDatetimeToken, dateKind } from "../temporal.js";
 import { materialize } from "../deserialize.js";
 import type { Schema } from "../schema.js";
 import { rejectSecondLeadingBom, stripLeadingBom } from "../bom.js";
+import { codecSyntaxError, type CodecBlame } from "./codec-error.js";
 import { checkInputSize } from "./input-size.js";
 
 // Matches src/formats/json.ts's own copy of the same guard constant -- see
@@ -268,7 +269,11 @@ export function readToml(text: string, opts: ReadTomlOptions = {}): Node {
     // convention as json.ts's readJson catch.
     /* v8 ignore next */
     const message = exc instanceof Error ? exc.message : String(exc);
-    throw new ParseError("invalid TOML: " + message);
+    // smol-toml's TomlError carries a 1-based `line` and `column` (UTF-16 units).
+    // Every TomlError sets both (smol-toml's constructor), so no fallback.
+    const e = exc as { line: number; column: number };
+    const at: CodecBlame = { line: e.line, col: e.column };
+    throw codecSyntaxError("TOML", message.split(String.fromCharCode(10))[0] as string, text, at);
   }
   const node = buildNode(convertTomlDates(parsed));
   if (opts.schema === undefined) return node;

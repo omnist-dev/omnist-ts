@@ -270,31 +270,80 @@ function errorMessage(e: unknown): string {
  * Compare the (path, code) the error itself carries against the expected
  * set (Sec8.5.2: paths compared as a set, message text never). SKIP only
  * when the error genuinely lacks the structure the vector compares -- no
- * `path` and/or no `code` (a bare message, e.g. a JSON/TOML/YAML codec
- * syntax error or a schema-conformance failure raised as a plain
- * ParseError). Whatever the error does carry is verified, never assumed.
+ * `path` and/or no `code` (a bare message, e.g. a schema-conformance
+ * failure raised as a plain ParseError). Whatever the error does carry is
+ * verified, never assumed. A vector whose expected path is the E-32
+ * `line:col` placeholder NEVER skips: a missing code or path FAILS
+ * (E-31, E-32b); the code must match exactly and the path must match
+ * `^[1-9][0-9]*:[1-9][0-9]*$` and lie inside the input, and no other
+ * path is ever relaxed.
  */
-function compareThrownDiagnostics(e: unknown, expected: readonly Diagnostic[]): Result {
+function compareThrownDiagnostics(e: unknown, expected: readonly Diagnostic[], inputText?: string): Result {
   // The thrown error's own class names the reason (never a guess from the vector).
   const kind = (e as object).constructor.name;
   const err = e as { path?: string; code?: string };
-  if (err.path === undefined || err.code === undefined) {
+  const placeholder = expected.some((d) => d.path === LINE_COL_PLACEHOLDER);
+  if (!placeholder && (err.path === undefined || err.code === undefined)) {
     // E-20 "not yet implemented" (no ledger entry required): the diagnostic
     // values exist in the message text but not as structured `code`/`path`
     // fields. Tracked by omnist-ts#149 for SchemaError (the schema.* codes of
     // Sec8.3.3/Sec8.4.1: 20 vectors today); any other error class that reaches
     // this branch is skipped for the same reason, named honestly, uncited.
+    // Never taken for an E-32 placeholder vector: a codec syntax error that
+    // omits its code or path FAILS (E-31, E-32b).
     const tracked = kind === "SchemaError" ? " (omnist-ts#149)" : "";
     return skip(`not yet implemented -- ${kind} carries no structured code/path for this diagnostic${tracked}`);
   }
+  return compareReported(expected, err.path, err.code, inputText);
+}
+
+/** E-32: the literal placeholder a vector may use for a codec syntax error's path. */
+const LINE_COL_PLACEHOLDER = "line:col";
+/** E-32b: a well-formed text position. */
+const LINE_COL_PATTERN = /^[1-9][0-9]*:[1-9][0-9]*$/;
+
+/**
+ * E-31 / E-32b: is `path` a well-formed `line:col` -- and, when the input is
+ * known, inside it (line at most one more than the LF count, col at most one
+ * more than the code points on that line)?
+ */
+export function isWellFormedPosition(path: string | undefined, inputText?: string): boolean {
+  if (path === undefined || !LINE_COL_PATTERN.test(path)) return false;
+  if (inputText === undefined) return true;
+  const [line, col] = path.split(":").map(Number) as [number, number];
+  const lines = inputText.split("\n");
+  if (line > lines.length) return false;
+  return col <= Array.from(lines[line - 1] as string).length + 1;
+}
+
+/**
+ * Compare one reported (path, code) against the expected set. An expected
+ * entry whose path is the E-32 placeholder is satisfied by the same code and
+ * a well-formed in-bounds position; every other path is compared byte for byte.
+ */
+function compareReported(
+  expected: readonly Diagnostic[],
+  path: string | undefined,
+  code: string | undefined,
+  inputText?: string,
+): Result {
+  const expCodes = new Set(expected.map((d) => d.code));
+  if (expected.length === 1 && expected[0]?.path === LINE_COL_PLACEHOLDER) {
+    if (!setsEqual(expCodes, new Set([code]))) {
+      return fail(`diagnostic codes differ: expected ${setStr(expCodes)}, got ${setStr(new Set([code]))}`);
+    }
+    if (!isWellFormedPosition(path, inputText)) {
+      return fail(`diagnostic path is not a well-formed in-bounds line:col position: got ${JSON.stringify(path)}`);
+    }
+    return pass();
+  }
   const expPaths = paths(expected);
-  const actPaths = new Set([err.path]);
+  const actPaths = new Set([path]);
   if (!setsEqual(expPaths, actPaths)) {
     return fail(`diagnostic paths differ: expected ${setStr(expPaths)}, got ${setStr(actPaths)}`);
   }
-  const expCodes = new Set(expected.map((d) => d.code));
-  if (!setsEqual(expCodes, new Set([err.code]))) {
-    return fail(`diagnostic codes differ: expected ${setStr(expCodes)}, got ${setStr(new Set([err.code]))}`);
+  if (!setsEqual(expCodes, new Set([code]))) {
+    return fail(`diagnostic codes differ: expected ${setStr(expCodes)}, got ${setStr(new Set([code]))}`);
   }
   return pass();
 }
@@ -397,15 +446,8 @@ function runParseBytesHex(v: Vector): Result {
     if (err?.path === undefined || err?.code === undefined) {
       return fail(`CLI's --json error payload carried no structured path/code: ${stdout || stderr}`);
     }
-    const expected = asDiagnostics(expect.diagnostics);
-    const expPaths = paths(expected);
-    if (!setsEqual(expPaths, new Set([err.path]))) {
-      return fail(`diagnostic paths differ: expected ${setStr(expPaths)}, got {${JSON.stringify(err.path)}}`);
-    }
-    const expCodes = new Set(expected.map((d) => d.code));
-    if (!setsEqual(expCodes, new Set([err.code]))) {
-      return fail(`diagnostic codes differ: expected ${setStr(expCodes)}, got {${JSON.stringify(err.code)}}`);
-    }
+    const r = compareReported(asDiagnostics(expect.diagnostics), err.path, err.code);
+    if (r.status !== "pass") return r;
   }
   return pass();
 }
@@ -486,7 +528,7 @@ function runParse(v: Vector): Result {
   } catch (e) {
     if (expect.ok === false) {
       if (expect.diagnostics !== undefined) {
-        return compareThrownDiagnostics(e, asDiagnostics(expect.diagnostics));
+        return compareThrownDiagnostics(e, asDiagnostics(expect.diagnostics), text);
       }
       return pass();
     }

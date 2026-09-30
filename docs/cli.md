@@ -406,7 +406,11 @@ printed, and its shape, differ from the default.
 - Success: `{"ok": true}`.
 - Conformance failure: `{"ok": false, "message": str, "errors": [{"path": str, "code": str, "message": str}, ...]}` -- one entry per problem.
 - Format-syntax failure (invalid `FMT` text, or a malformed `--schema`):
-  same shape, but `"errors"` is always `[]`.
+  same shape. For a JSON, YAML, TOML or XML syntax error, `"errors"` holds one
+  entry with code `parse.codec-syntax` and a `line:col` `path` inside the
+  input (spec E-31; `1:1` where the codec's library names no position). A
+  malformed `--schema` carries its own structure where the error has any, else
+  `"errors"` is `[]`.
 
 ```sh
 $ omnist validate examples/cli/person.json --from json --schema examples/cli/person.osd --json
@@ -417,14 +421,18 @@ $ omnist validate examples/cli/invalid-person.json --from json --schema examples
 # exit 1
 
 $ echo '{not valid json' | omnist validate - --from json --schema examples/cli/person.osd --json
-{"ok": false, "message": "invalid JSON: ...", "errors": []}
+{"ok": false, "message": "invalid JSON: line 1, col 2: ...", "errors": [{"path": "1:2", "code": "parse.codec-syntax", "message": "invalid JSON: line 1, col 2: ..."}]}
 # exit 2
 ```
 <!-- verified-by: test/cli-examples.test.ts::validate examples invalid-person.json --json -->
 
-(The exact JSON-syntax-error wording after `"invalid JSON: "` comes from the
-JS engine's own `JSON.parse` and isn't part of the stability contract --
-only `code` values and exit codes are pinned, per `docs/stability.md`.)
+(The exact JSON-syntax-error wording after `"invalid JSON: line 1, col 2: "`
+comes from the JS engine's own `JSON.parse` and isn't part of the stability
+contract -- only `code` values and exit codes are pinned, per
+`docs/stability.md`. Which character a codec blames is the codec library's
+(E-31): `path` is always a well-formed `line:col` inside the input, counted
+in code points, and `1:1` where the library reports none -- as older Node
+versions do for some `JSON.parse` messages.)
 
 ## `omnist schema format`
 

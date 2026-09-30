@@ -62,14 +62,17 @@ export interface OmnistIssue {
 /**
  * A document could not be read from its format (outside the supported profile).
  *
- * Format-syntax failures (invalid JSON/YAML/TOML/XML text) carry only the
- * message -- `.errors` is empty. Schema-conformance failures from
+ * Format-syntax failures (invalid JSON/YAML/TOML/XML text) carry a
+ * `parse.codec-syntax` `code` and a `line:col` `path` (spec E-31: a real
+ * position inside the input, `1:1` where the codec library names none);
+ * `.errors` is empty. Schema-conformance failures from
  * `materialize` carry the full structured list of every problem found (path,
  * message, machine-readable code), not just the first one.
  *
  * `code` and `path` are optional and populated only where the throw site has
  * a stable machine-readable code to offer (currently: `oml.ts`'s
- * lexer/parser errors, using the `parse.*` family from `omnist-spec`
+ * lexer/parser errors and the four codec readers' syntax errors, using the
+ * `parse.*` family from `omnist-spec`
  * Sec8.3.1, with a `line:col` `path` per Sec8.4 -- see issue #108, the same
  * "only the codes the actual grammar can produce" discipline #105 already
  * used for `SchemaError`/`osd.ts`). Every other `ParseError` throw site in

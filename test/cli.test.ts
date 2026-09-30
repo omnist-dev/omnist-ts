@@ -455,7 +455,7 @@ describe("validate", () => {
     expect(payload.errors.length).toBe(2);
   });
 
-  it("--json flag syntax failure has empty errors", () => {
+  it("--json flag syntax failure carries parse.codec-syntax and a position", () => {
     const docF = writeTmp("d.json", "{not valid json");
     const schemaF = writeTmp("s.osd", SCHEMA);
     const { code, out, err } = run(["validate", docF, "--from", "json", "--schema", schemaF, "--json"]);
@@ -463,7 +463,9 @@ describe("validate", () => {
     expect(err).toBe("");
     const payload = JSON.parse(out);
     expect(payload.ok).toBe(false);
-    expect(payload.errors).toEqual([]);
+    expect(payload.errors).toHaveLength(1);
+    expect(payload.errors[0].code).toBe("parse.codec-syntax");
+    expect(payload.errors[0].path).toMatch(/^[1-9][0-9]*:[1-9][0-9]*$/);
     expect(payload.message).toContain("invalid JSON");
   });
 
