@@ -69,6 +69,7 @@ import { finishWrite, WriteReport } from "../report.js";
 import { materialize } from "../deserialize.js";
 import type { Schema } from "../schema.js";
 import { rejectSecondLeadingBom, stripLeadingBom } from "../bom.js";
+import { codecSyntaxError, type CodecBlame } from "./codec-error.js";
 import { checkInputSize } from "./input-size.js";
 
 // Matches src/document.ts's own MAX_DEPTH (locally redefined here, same as
@@ -252,7 +253,13 @@ export function readYaml(text: string, opts: ReadYamlOptions = {}): Node {
     // defensive fallback that's never actually reached.
     /* v8 ignore next */
     const message = exc instanceof Error ? exc.message : String(exc);
-    throw new ParseError("invalid YAML: " + message);
+    // A YAMLParseError carries `pos: [start, end]` (UTF-16 offsets into the
+    // text). Anything else the library throws (an unresolved alias, a
+    // self-referential merge overflowing the stack) names no position: 1:1.
+    const pos = (exc as { pos?: unknown }).pos;
+    const at: CodecBlame =
+      Array.isArray(pos) && typeof pos[0] === "number" ? { offset: pos[0] } : undefined;
+    throw codecSyntaxError("YAML", message.split(String.fromCharCode(10))[0] as string, text, at);
   }
   const node = buildNode(parsed);
   if (opts.schema === undefined) return node;

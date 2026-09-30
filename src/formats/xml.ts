@@ -56,6 +56,7 @@ import { dateKind } from "../temporal.js";
 import { materialize } from "../deserialize.js";
 import { recordField, type FieldType, type Schema, type ScalarType } from "../schema.js";
 import { rejectSecondLeadingBom, stripLeadingBom } from "../bom.js";
+import { codecSyntaxError } from "./codec-error.js";
 import { checkInputSize } from "./input-size.js";
 
 const MAX_DEPTH = 200;
@@ -243,7 +244,8 @@ export function readXml(text: string, opts: ReadXmlOptions = {}): Node {
   // refusal below, and it rejects `<r><a>&foo;</a>` (unclosed) on its own.
   const valid = XMLValidator.validate(text);
   if (valid !== true) {
-    throw new ParseError("invalid XML: " + valid.err.msg);
+    // The validator reports a 1-based `line` (and usually `col`, UTF-16 units).
+    throw codecSyntaxError("XML", valid.err.msg, text, { line: valid.err.line, col: valid.err.col });
   }
   refuseOutOfProfile(text);
   let parsed: XmlEntry[];
@@ -252,7 +254,7 @@ export function readXml(text: string, opts: ReadXmlOptions = {}): Node {
   } catch (exc) {
     /* v8 ignore next */
     const message = exc instanceof Error ? exc.message : String(exc);
-    throw new ParseError("invalid XML: " + message);
+    throw codecSyntaxError("XML", message, text);
   }
   // fast-xml-parser's preserveOrder output keeps top-level non-element
   // nodes alongside the real root: an XML declaration ("<?xml ...?>")
@@ -267,16 +269,12 @@ export function readXml(text: string, opts: ReadXmlOptions = {}): Node {
   const roots = parsed.filter(
     (e) => !("#text" in e) && Object.keys(e).length > 0 && !Object.keys(e)[0]?.startsWith("?"),
   );
-  /* v8 ignore start -- defensive backstop: XMLValidator.validate already
-   * requires exactly one element node for well-formed XML, and the "?"-key
-   * filter above accounts for the one non-element top-level entry
-   * (the XML declaration) empirically observed in preserveOrder output.
-   * No known well-formed input reaches this branch; kept rather than
-   * asserted non-null, per this file's own defensive-check convention. */
+  // Several top-level elements (`<a/><b/>`) validate as true under
+  // fast-xml-parser but are not well-formed XML: a syntax error, with no
+  // position from the library (E-31: 1:1).
   if (roots.length !== 1) {
-    throw new ParseError("invalid XML: expected exactly one document element");
+    throw codecSyntaxError("XML", "expected exactly one document element", text);
   }
-  /* v8 ignore stop */
   const root = roots[0] as XmlEntry;
   const tag = tagKeyOf(root);
   const rootLabel = local(tag);

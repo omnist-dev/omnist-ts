@@ -31,7 +31,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { main, runVector, iterVectors } from "../tools/conformance/vectorRunner.js";
+import { main, runVector, iterVectors, isWellFormedPosition } from "../tools/conformance/vectorRunner.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REAL_SUITE_DIR = path.resolve(HERE, "..", "vendor", "omnist-spec", "test-suite");
@@ -41,6 +41,9 @@ type V = Parameters<typeof runVector>[0];
 function vec(operation: string, input: object, expect: object, name = "test-vector"): V {
   return { name, spec: "test", operation, purpose: "edge-case", input, expect } as V;
 }
+
+const BIG = "1".repeat(4400);
+const ASTRAL = String.fromCodePoint(0x1f600);
 
 function withCapturedConsole<T>(fn: () => T): { result: T; logs: string[]; errs: string[] } {
   const logs: string[] = [];
@@ -188,9 +191,16 @@ describeIfVendored("main() against the real vendor/omnist-spec/test-suite", () =
     // and E-28 counts line:col columns in code points (src/position.ts) for
     // OML and OSD. Codec positions are untouched (omnist-spec#114).
     // Net: 227 pass, 0 fail, 60 skip (the skip set does not grow).
+    //
+    // Bumped again to v0.24.0-beta (issues #114/#115/#117): +15 vectors
+    // (302). Four are the E-32 "line:col" codec-syntax vectors (json, yaml,
+    // toml, xml), which the runner used to have to SKIP because the readers
+    // carried no code/path and now PASS for real; the eleven others already
+    // passed. 242 pass, 0 fail, 60 skip (20 schema.* omnist-ts#149, 6
+    // limits, 6 alias-expansion DIV-3, 28 OSD-OML).
     expect(exitCode).toBe(0);
     expect(logs.at(-1)).toBe(
-      "\n227 passed, 0 failed, 60 skipped (of 287 vectors) -- " +
+      "\n242 passed, 0 failed, 60 skipped (of 302 vectors) -- " +
         "diagnostic paths always compared, codes compared where the error carries one (Sec8.5.2)",
     );
   }, 120000);
@@ -214,8 +224,8 @@ describeIfVendored("main() against the real vendor/omnist-spec/test-suite", () =
     }
   }, 120000);
 
-  it("iterVectors discovers all 287 real vectors", () => {
-    expect(iterVectors(REAL_SUITE_DIR).length).toBe(287);
+  it("iterVectors discovers all 302 real vectors", () => {
+    expect(iterVectors(REAL_SUITE_DIR).length).toBe(302);
   });
 });
 
@@ -332,15 +342,76 @@ describe("parse", () => {
     expect(r).toEqual({ status: "fail", message: "expected failure, parse succeeded" });
   });
 
-  it("skips a syntax failure asserting structured diagnostics ONLY when the error carries no path/code", () => {
-    // A codec syntax error (bare message, no code/path) genuinely lacks the
-    // structure the vector compares.
+  it("skips a non-placeholder diagnostic ONLY when the error carries no path/code", () => {
+    // A limit failure (too many integer digits) is a bare ParseError, no
+    // code/path: a vector comparing a fixed path genuinely cannot be judged.
     const r = runVector(
-      vec("parse", { format: "json", text: "{not json" }, { ok: false, diagnostics: [{ path: "1:1", code: "parse.codec-syntax" }] }),
+      vec("parse", { format: "json", text: `{"a": ${BIG}}` }, { ok: false, diagnostics: [{ path: "1:1", code: "parse.codec-syntax" }] }),
     );
     expect(r).toEqual({
       status: "skip",
       message: "not yet implemented -- ParseError carries no structured code/path for this diagnostic",
+    });
+  });
+
+  describe("E-32 line:col placeholder", () => {
+    const PH = { ok: false, diagnostics: [{ path: "line:col", code: "parse.codec-syntax" }] };
+    it.each([
+      ["json", '{"a": }'],
+      ["yaml", "a: b: c"],
+      ["toml", "a = "],
+      ["xml", "<a><b></a>"],
+    ])("passes a real %s syntax error (code matches, position well-formed)", (format, text) => {
+      expect(runVector(vec("parse", { format, text }, PH))).toEqual({ status: "pass", message: "ok" });
+    });
+    it("FAILS (never skips) when the error carries no code/path", () => {
+      const r = runVector(vec("parse", { format: "json", text: `{"a": ${BIG}}` }, PH));
+      expect(r.status).toBe("fail");
+    });
+    it("fails when the code differs", () => {
+      const r = runVector(
+        vec("parse", { format: "json", text: '{"a": }' }, { ok: false, diagnostics: [{ path: "line:col", code: "parse.unexpected-token" }] }),
+      );
+      expect(r.status).toBe("fail");
+      expect(r.message).toContain("diagnostic codes differ");
+    });
+    it("passes a multi-line TOML error whose position is on line 2", () => {
+      // The TOML error stands past the first line; the vector text handed to
+      // the runner for the bound is the same text, so a real error passes;
+      // a mismatch is forced through the helper in the tests below.
+      expect(runVector(vec("parse", { format: "toml", text: "a = 1\nb = \n" }, PH))).toEqual({ status: "pass", message: "ok" });
+    });
+    it("fails a matching code whose path is not a line:col at all (near-miss: `$`)", () => {
+      const r = runVector(
+        vec("parse", { format: "xml", text: "<!DOCTYPE a><a/>" }, { ok: false, diagnostics: [{ path: "line:col", code: "format.dtd-forbidden" }] }),
+      );
+      expect(r.status).toBe("fail");
+      expect(r.message).toContain("not a well-formed in-bounds line:col position");
+    });
+    it("does not relax a non-placeholder path (byte-compared)", () => {
+      const r = runVector(
+        vec("parse", { format: "oml", text: "a: [1\n2]\n" }, { ok: false, diagnostics: [{ path: "2:1 ", code: "parse.separator-in-array" }] }),
+      );
+      expect(r.status).toBe("fail");
+      expect(r.message).toContain("diagnostic paths differ");
+    });
+    it.each([
+      ["0:0", false], ["1:0", false], ["0:1", false], ["", false], ["01:1", false], ["1:01", false],
+      [" 1:1", false], ["1:1 ", false], ["+1:1", false], ["1:1:1", false], ["line:col", false],
+      ["1", false], ["-1:1", false], ["1:1", true], ["12:345", true],
+    ])("well-formedness of %j is %s", (p, ok) => {
+      expect(isWellFormedPosition(p)).toBe(ok);
+    });
+    it("a missing path is not well-formed", () => {
+      expect(isWellFormedPosition(undefined)).toBe(false);
+    });
+    it("checks the E-31 bound against the input, in code points", () => {
+      expect(isWellFormedPosition("2:3", "ab\ncd")).toBe(true);
+      expect(isWellFormedPosition("2:4", "ab\ncd")).toBe(false);
+      expect(isWellFormedPosition("3:1", "ab\ncd")).toBe(false);
+      expect(isWellFormedPosition("1:4", "ab\ncd")).toBe(false);
+      expect(isWellFormedPosition("1:2", ASTRAL)).toBe(true);
+      expect(isWellFormedPosition("1:3", ASTRAL)).toBe(false);
     });
   });
 

@@ -353,10 +353,12 @@ describe("validate examples", () => {
     // stability contract (only `code` values and exit codes are pinned,
     // per docs/stability.md) -- assert the stable shape and exit code,
     // not the engine-specific parse-error wording.
-    const payload = JSON.parse(out) as { ok: boolean; message: string; errors: unknown[] };
+    const payload = JSON.parse(out) as { ok: boolean; message: string; errors: { code: string; path: string }[] };
     expect(payload.ok).toBe(false);
     expect(payload.message).toContain("invalid JSON");
-    expect(payload.errors).toEqual([]);
+    // E-31/DIV-8: a codec syntax error carries its code and a real position.
+    expect(payload.errors).toHaveLength(1);
+    expect(payload.errors[0]).toMatchObject({ code: "parse.codec-syntax", path: expect.stringMatching(/^[1-9][0-9]*:[1-9][0-9]*$/) });
   });
 });
 

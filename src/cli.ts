@@ -474,8 +474,9 @@ function cmdValidate(p: ParsedArgs, ctx: Ctx): number {
       // of silently swallowing anything else.
       /* v8 ignore next */
       if (!(exc instanceof ParseError || exc instanceof SchemaError || isFsError(exc))) throw exc;
-      const errors = exc instanceof ParseError ? exc.errors : [];
-      ctx.stdout.write(jsonValidateErrors(errorMessage(exc), errors) + "\n");
+      // jsonError surfaces the structure the error carries (a codec syntax
+      // error's `parse.codec-syntax` code and `line:col` path, E-31/DIV-8).
+      ctx.stdout.write(jsonError(exc) + "\n");
       return 2;
     }
     const result = s.validate(d);

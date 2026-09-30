@@ -20,6 +20,7 @@ import { finishWrite, WriteReport } from "../report.js";
 import { dateKind } from "../temporal.js";
 import { materialize } from "../deserialize.js";
 import { rejectSecondLeadingBom, stripLeadingBom } from "../bom.js";
+import { codecSyntaxError, type CodecBlame } from "./codec-error.js";
 import { checkInputSize } from "./input-size.js";
 import type { Schema } from "../schema.js";
 
@@ -214,6 +215,28 @@ export interface ReadJsonOptions {
   schema?: Schema;
 }
 
+/**
+ * Where JSON.parse blamed. The parse runs on the integer-TAGGED text, whose
+ * offsets are shifted, so the original text is re-parsed plainly to get an
+ * offset that is valid in the input. V8 words it "... at position N" (newer
+ * Node adds "(line L column C)"); "Unexpected end of JSON input" blames the
+ * end of the text; a bare "Unexpected token" message carries no position in
+ * older Node, which is `1:1` (E-31).
+ */
+function jsonBlame(text: string, taggedMessage: string): CodecBlame {
+  let message = taggedMessage;
+  try {
+    JSON.parse(text);
+  } catch (exc) {
+    /* v8 ignore next -- JSON.parse only ever throws a SyntaxError (an Error) */
+    message = exc instanceof Error ? exc.message : taggedMessage;
+  }
+  const pos = /position (\d+)/.exec(message);
+  if (pos !== null) return { offset: Number(pos[1]) };
+  if (message.startsWith("Unexpected end of JSON input")) return { offset: text.length };
+  return undefined;
+}
+
 /** Parse JSON text into a Document node. */
 export function readJson(text: string, opts: ReadJsonOptions = {}): Node {
   text = stripLeadingBom(text); // D-15: one leading U+FEFF
@@ -229,7 +252,7 @@ export function readJson(text: string, opts: ReadJsonOptions = {}): Node {
     // a defensive fallback that's never actually reached.
     /* v8 ignore next */
     const message = exc instanceof Error ? exc.message : String(exc);
-    throw new ParseError("invalid JSON: " + message);
+    throw codecSyntaxError("JSON", message, text, jsonBlame(text, message));
   }
   const node = buildNode(parsed);
   if (opts.schema === undefined) return node;
