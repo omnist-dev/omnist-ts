@@ -276,10 +276,10 @@ describe("OSD lexical error codes (spec Sec8.3.1, extended by spec#46 to cover O
     expect(() => parseSchema('record R { "a\\qb": integer }\nroot R')).not.toThrow();
   });
 
-  it("non-lexical SchemaError throw sites still carry no code/path (unchanged, additive-only scope)", () => {
+  it("a structural SchemaError with no spec code still carries no code/path", () => {
     let err: SchemaError | undefined;
     try {
-      parseSchema('record R { "a": integer }');
+      parseSchema("not a schema");
     } catch (e) {
       err = e as SchemaError;
     }

@@ -158,6 +158,23 @@ interface RawField {
   max: number | null;
 }
 
+/**
+ * The public constructors (`field()`, `record()`) know a diagnostic's code but
+ * not which record they are building, so they cannot build its Schema path
+ * (Sec8.4.1). The parser does know: it runs `build`, and the coded
+ * `SchemaError` they throw is re-thrown with the path `pathFor(code)`.
+ */
+function atPath<T>(build: () => T, pathFor: (code: string) => string): T {
+  try {
+    return build();
+  } catch (e) {
+    // Every throw site `field()` / `record()` can reach over parser-built
+    // arguments is a coded, pathless SchemaError.
+    const err = e as SchemaError;
+    throw new SchemaError(err.message, err.code, pathFor(err.code as string));
+  }
+}
+
 class Parser {
   private readonly toks: readonly Token[];
   private i = 0;
@@ -214,7 +231,7 @@ class Parser {
       }
     }
     if (root === null) {
-      throw new SchemaError("a schema must declare a root");
+      throw new SchemaError("a schema must declare a root", "schema.no-root", "$");
     }
     return new Schema(ref(root), env);
   }
@@ -222,16 +239,22 @@ class Parser {
   private define(env: Map<string, OmnistRecord>, name: string, rec: OmnistRecord, namePos: number): void {
     if (RESERVED_TYPE_NAMES.has(name)) {
       if (name === "any") {
-        throw new SchemaError(`'any' is a reserved type name and cannot be used as a record name at ${namePos}`);
+        throw new SchemaError(
+          `'any' is a reserved type name and cannot be used as a record name at ${namePos}`,
+          "schema.reserved-name",
+          name,
+        );
       }
       throw new SchemaError(
         `${JSON.stringify(name)} is a reserved scalar name; a record cannot be ` +
           "defined with this name, or it could never be referenced " +
           "(a bare name in a type position always means the builtin scalar)",
+          "schema.reserved-name",
+          name,
       );
     }
     if (env.has(name)) {
-      throw new SchemaError(`duplicate definition ${JSON.stringify(name)}`);
+      throw new SchemaError(`duplicate definition ${JSON.stringify(name)}`, "schema.duplicate-record", name);
     }
     env.set(name, rec);
   }
@@ -243,7 +266,7 @@ class Parser {
     this.expect("punct", "{");
     const fields: RawField[] = [];
     while (this.peek().text !== "}") {
-      fields.push(this.parseField());
+      fields.push(this.parseField(name));
       if (this.peek().text === ",") {
         this.next();
       } else {
@@ -251,30 +274,42 @@ class Parser {
       }
     }
     this.expect("punct", "}");
-    return [name, record(...fields.map((f) => field(f.label, f.type, f.min, f.max))), nameTok.pos];
+    const built = fields.map((f) =>
+      atPath(
+        () => field(f.label, f.type, f.min, f.max),
+        // E-30: a label problem is reported at the record, a cardinality problem at the field.
+        (code) => (code.endsWith("-label") ? name : `${name}.${f.label}`),
+      ),
+    );
+    return [name, atPath(() => record(...built), () => name), nameTok.pos];
   }
 
-  private parseField(): RawField {
+  private parseField(recordName: string): RawField {
     const labelTok = this.next();
     if (labelTok.kind !== "string") {
-      throw new SchemaError(`expected a quoted field name at ${labelTok.pos}, got ${JSON.stringify(labelTok.text)}`);
+      // E-30: lexical -- the declaration is not a field yet, so the record path.
+      throw new SchemaError(
+        `expected a quoted field name at ${labelTok.pos}, got ${JSON.stringify(labelTok.text)}`,
+        "schema.unquoted-label",
+        recordName,
+      );
     }
     const label = unquote(labelTok.text);
     let lo = 1;
     let hi: number | null = 1;
     if (this.peek().text === "[") {
-      [lo, hi] = this.parseCardinality();
+      [lo, hi] = this.parseCardinality(`${recordName}.${label}`);
     }
     this.expect("punct", ":");
-    const typ = this.parseType();
+    const typ = this.parseType(recordName, `${recordName}.${label}`);
     return { label, type: typ, min: lo, max: hi };
   }
 
-  private parseCardinality(): [number, number | null] {
+  private parseCardinality(fieldPath: string): [number, number | null] {
     this.expect("punct", "[");
     let first: number | null = null;
     if (this.peek().kind === "number") {
-      first = this.parseCardinalityInt();
+      first = this.parseCardinalityInt(fieldPath);
     }
     let lo: number;
     let hi: number | null;
@@ -282,13 +317,13 @@ class Parser {
       this.next();
       let second: number | null = null;
       if (this.peek().kind === "number") {
-        second = this.parseCardinalityInt();
+        second = this.parseCardinalityInt(fieldPath);
       }
       lo = first ?? 0;
       hi = second;
     } else {
       if (first === null) {
-        throw new SchemaError(`empty cardinality at ${this.peek().pos}`);
+        throw new SchemaError(`empty cardinality at ${this.peek().pos}`, "schema.empty-cardinality", fieldPath);
       }
       lo = hi = first;
     }
@@ -296,15 +331,19 @@ class Parser {
     return [lo, hi];
   }
 
-  private parseCardinalityInt(): number {
+  private parseCardinalityInt(fieldPath: string): number {
     const t2 = this.next();
     if (t2.text.includes(".")) {
-      throw new SchemaError(`cardinality must be a whole number, got ${JSON.stringify(t2.text)} at ${t2.pos}`);
+      throw new SchemaError(
+        `cardinality must be a whole number, got ${JSON.stringify(t2.text)} at ${t2.pos}`,
+        "schema.non-integer-cardinality",
+        fieldPath,
+      );
     }
     return parseInt(t2.text, 10);
   }
 
-  private parseType(): FieldType {
+  private parseType(recordName: string, fieldPath: string): FieldType {
     const t2 = this.next();
     if (t2.kind !== "name") {
       throw new SchemaError(
@@ -312,12 +351,18 @@ class Parser {
           "(enums and literal-valued fields are not supported -- a " +
           "field's type is always one scalar or a reference to a " +
           "named record)",
+        t2.kind === "string" ? "schema.quoted-type" : undefined,
+        t2.kind === "string" ? recordName : undefined,
       );
     }
     if (t2.text === "any") {
       if (this.peek().text === "?") {
         const q = this.next();
-        throw new SchemaError(`'any' already includes null; 'any?' is redundant at ${q.pos}`);
+        throw new SchemaError(
+          `'any' already includes null; 'any?' is redundant at ${q.pos}`,
+          "schema.nullable-any",
+          fieldPath,
+        );
       }
       return ANY;
     }
@@ -334,6 +379,8 @@ class Parser {
       throw new SchemaError(
         `'?' cannot apply to the reference ${JSON.stringify(t2.text)}; use ` +
           "cardinality [0,1] for an optional field",
+        "schema.nullable-ref",
+        fieldPath,
       );
     }
     return ref(t2.text);

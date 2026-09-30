@@ -286,13 +286,12 @@ function compareThrownDiagnostics(e: unknown, expected: readonly Diagnostic[], i
   if (!placeholder && (err.path === undefined || err.code === undefined)) {
     // E-20 "not yet implemented" (no ledger entry required): the diagnostic
     // values exist in the message text but not as structured `code`/`path`
-    // fields. Tracked by omnist-ts#149 for SchemaError (the schema.* codes of
-    // Sec8.3.3/Sec8.4.1: 20 vectors today); any other error class that reaches
-    // this branch is skipped for the same reason, named honestly, uncited.
+    // fields. Every schema.* throw site of Sec8.3.3/Sec8.4.1 carries both since
+    // omnist-ts#149, so this branch is only reached by an error that still lacks
+    // one (a bare-message SchemaError/ParseError), skipped for the same reason.
     // Never taken for an E-32 placeholder vector: a codec syntax error that
     // omits its code or path FAILS (E-31, E-32b).
-    const tracked = kind === "SchemaError" ? " (omnist-ts#149)" : "";
-    return skip(`not yet implemented -- ${kind} carries no structured code/path for this diagnostic${tracked}`);
+    return skip(`not yet implemented -- ${kind} carries no structured code/path for this diagnostic`);
   }
   return compareReported(expected, err.path, err.code, inputText);
 }
@@ -834,7 +833,7 @@ function runExtract(v: Vector): Result {
       // invariant ever changes.
       /* v8 ignore next 3 */
       if (err.path === undefined || err.code === undefined) {
-        return skip("not yet implemented -- SchemaError carries no structured code/path for extract's A-11 failure (omnist-ts#149)");
+        return skip("not yet implemented -- SchemaError carries no structured code/path for extract's A-11 failure");
       }
       const expected = asDiagnostics(expect.diagnostics);
       const expPaths = paths(expected);

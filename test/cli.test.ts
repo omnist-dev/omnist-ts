@@ -480,13 +480,24 @@ describe("validate", () => {
 
   it("--json flag with a malformed schema (SchemaError) is a clean json error", () => {
     const docF = writeTmp("d.json", '{"a": 1}');
-    const schemaF = writeTmp("s.osd", 'record R { "a": integer }\n'); // no root
+    const schemaF = writeTmp("s.osd", "not a schema\n"); // bare-message SchemaError: no code/path
     const { code, out, err } = run(["validate", docF, "--from", "json", "--schema", schemaF, "--json"]);
     expect(code).toBe(2);
     expect(err).toBe("");
     const payload = JSON.parse(out);
     expect(payload.ok).toBe(false);
     expect(payload.errors).toEqual([]);
+  });
+
+  it("--json flag surfaces a schema.* SchemaError's code and Schema path (issue #149)", () => {
+    const docF = writeTmp("d.json", '{"a": 1}');
+    const schemaF = writeTmp("s.osd", 'record R { "a": integer }\n'); // no root
+    const { code, out } = run(["validate", docF, "--from", "json", "--schema", schemaF, "--json"]);
+    expect(code).toBe(2);
+    const payload = JSON.parse(out);
+    expect(payload.ok).toBe(false);
+    expect(payload.errors).toHaveLength(1);
+    expect(payload.errors[0]).toMatchObject({ path: "$", code: "schema.no-root" });
   });
 
   it("--json flag with a missing document file is a clean json error", () => {

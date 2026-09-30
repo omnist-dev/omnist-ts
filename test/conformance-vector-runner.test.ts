@@ -198,9 +198,12 @@ describeIfVendored("main() against the real vendor/omnist-spec/test-suite", () =
     // carried no code/path and now PASS for real; the eleven others already
     // passed. 242 pass, 0 fail, 60 skip (20 schema.* omnist-ts#149, 6
     // limits, 6 alias-expansion DIV-3, 28 OSD-OML).
+    // v0.4.3-alpha (issue #149): the 20 schema.* vectors now run for real
+    // (SchemaError carries code + Schema path at every Sec8.3.3 throw site):
+    // 262 pass, 0 fail, 40 skip (6 limits, 6 alias-expansion DIV-3, 28 OSD-OML).
     expect(exitCode).toBe(0);
     expect(logs.at(-1)).toBe(
-      "\n242 passed, 0 failed, 60 skipped (of 302 vectors) -- " +
+      "\n262 passed, 0 failed, 40 skipped (of 302 vectors) -- " +
         "diagnostic paths always compared, codes compared where the error carries one (Sec8.5.2)",
     );
   }, 120000);
@@ -211,7 +214,7 @@ describeIfVendored("main() against the real vendor/omnist-spec/test-suite", () =
   it("every skip cites an explicit, reasoned category", () => {
     const { logs } = withCapturedConsole(() => main());
     const skipLines = logs.filter((l) => l.startsWith("[SKIP]"));
-    expect(skipLines.length).toBe(60);
+    expect(skipLines.length).toBe(40);
     for (const line of skipLines) {
       // D-6 (integer/number kind collapse) is CLOSED as of issue #98 --
       // no vector cites it anymore (see tools/conformance/vectorRunner.ts).
@@ -606,7 +609,7 @@ describe("parse_schema", () => {
     const r = runVector(vec("parse_schema", { text: "not a schema" }, { ok: false, diagnostics: [{ path: "R", code: "x" }] }));
     expect(r).toEqual({
       status: "skip",
-      message: "not yet implemented -- SchemaError carries no structured code/path for this diagnostic (omnist-ts#149)",
+      message: "not yet implemented -- SchemaError carries no structured code/path for this diagnostic",
     });
   });
 
