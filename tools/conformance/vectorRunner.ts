@@ -124,7 +124,7 @@ const LIMIT_KEYS = [
   "declared_max_depth",
   "declared_max_nodes",
   "declared_max_int_digits",
-  "declared_max_alias_expansion", // Sec2.4.1 D-18; enforced by no port yet (ledger DIV-3)
+  "declared_max_alias_expansion", // Sec2.4.1 D-18; enforced via ReadYamlOptions.maxAliasExpansion
 ] as const;
 
 interface Diagnostic {
@@ -497,18 +497,7 @@ function runParse(v: Vector): Result {
   if (inp.bytes_hex !== undefined) {
     return runParseBytesHex(v);
   }
-  if (inp.declared_max_alias_expansion !== undefined) {
-    // Sec8.5.5 E-20 "not yet implemented": D-18 (alias expansion factor) is
-    // not enforced here, and there is no configuration surface to set the
-    // vector's declared limit on either. Cites DIV-3 (docs/09 Sec9.4), the
-    // spec's own record of the rollout gap. All six vectors in
-    // formats-yaml/alias-expansion.json carry this key, so all six skip
-    // rather than some reporting a false pass at this port's own default.
-    return skip(
-      "not yet implemented -- D-18 alias expansion limit is not enforced and has no runtime configuration surface (DIV-3)",
-    );
-  }
-  if (LIMIT_KEYS.some((k) => inp[k] !== undefined)) {
+  if (LIMIT_KEYS.some((k) => k !== "declared_max_alias_expansion" && inp[k] !== undefined)) {
     return skip("not yet implemented -- omnist-ts's safety limits are compile-time constants, no runtime configuration surface");
   }
   const expect = v.expect;
@@ -523,7 +512,14 @@ function runParse(v: Vector): Result {
   const report = new WriteReport();
   let node: Node;
   try {
-    node = getFormat(fmt).read(text, { report }) as Node;
+    // D-18: `declared_max_alias_expansion` is a vector-local maximum. It is
+    // handed to the reader through the `maxAliasExpansion` option, and ONLY
+    // for a vector that carries it -- every other vector runs at the default.
+    const readOpts: { report: WriteReport; maxAliasExpansion?: number } = { report };
+    if (inp.declared_max_alias_expansion !== undefined) {
+      readOpts.maxAliasExpansion = Number(inp.declared_max_alias_expansion);
+    }
+    node = getFormat(fmt).read(text, readOpts) as Node;
   } catch (e) {
     if (expect.ok === false) {
       if (expect.diagnostics !== undefined) {

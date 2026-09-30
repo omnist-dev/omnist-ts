@@ -201,9 +201,17 @@ describeIfVendored("main() against the real vendor/omnist-spec/test-suite", () =
     // v0.4.3-alpha (issue #149): the 20 schema.* vectors now run for real
     // (SchemaError carries code + Schema path at every Sec8.3.3 throw site):
     // 262 pass, 0 fail, 40 skip (6 limits, 6 alias-expansion DIV-3, 28 OSD-OML).
+    //
+    // v0.5.0-alpha: omnist-spec v0.25.0-beta (312 vectors, +10). D-18/D-19/D-20
+    // alias expansion limit implemented (src/formats/yaml-alias.ts). The runner
+    // passes each vector's declared_max_alias_expansion through
+    // ReadYamlOptions.maxAliasExpansion, for those vectors only. All 16
+    // formats-yaml/alias-expansion vectors run for real: 278 pass, 0 fail,
+    // 34 skip (6 limits, 28 OSD-OML). No alias vector is skipped or
+    // known-failing.
     expect(exitCode).toBe(0);
     expect(logs.at(-1)).toBe(
-      "\n262 passed, 0 failed, 40 skipped (of 302 vectors) -- " +
+      "\n278 passed, 0 failed, 34 skipped (of 312 vectors) -- " +
         "diagnostic paths always compared, codes compared where the error carries one (Sec8.5.2)",
     );
   }, 120000);
@@ -214,7 +222,7 @@ describeIfVendored("main() against the real vendor/omnist-spec/test-suite", () =
   it("every skip cites an explicit, reasoned category", () => {
     const { logs } = withCapturedConsole(() => main());
     const skipLines = logs.filter((l) => l.startsWith("[SKIP]"));
-    expect(skipLines.length).toBe(40);
+    expect(skipLines.length).toBe(34);
     for (const line of skipLines) {
       // D-6 (integer/number kind collapse) is CLOSED as of issue #98 --
       // no vector cites it anymore (see tools/conformance/vectorRunner.ts).
@@ -227,8 +235,8 @@ describeIfVendored("main() against the real vendor/omnist-spec/test-suite", () =
     }
   }, 120000);
 
-  it("iterVectors discovers all 302 real vectors", () => {
-    expect(iterVectors(REAL_SUITE_DIR).length).toBe(302);
+  it("iterVectors discovers all 312 real vectors", () => {
+    expect(iterVectors(REAL_SUITE_DIR).length).toBe(312);
   });
 });
 
@@ -308,14 +316,30 @@ describe("parse", () => {
     });
   });
 
-  it("skips a vector declaring declared_max_alias_expansion, citing DIV-3 (never a false pass at the default)", () => {
-    // Runs at this port's own (absent) D-18 threshold if not allowlisted:
-    // an anchor-free doc would "pass" while pinning nothing.
+  it("runs a vector declaring declared_max_alias_expansion with that maximum, not the default", () => {
+    const text = "x: &x {a: 1, b: 2, c: 3, d: 4}" + String.fromCharCode(10) + "y: &y {inner: *x}" + String.fromCharCode(10);
+    const reject = { ok: false, diagnostics: [{ path: "$", code: "document.limit.alias-expansion" }] };
+    // E(y) = 6/2 = 3: over a declared maximum of 2 ...
+    expect(runVector(vec("parse", { format: "yaml", declared_max_alias_expansion: 2, text }, reject))).toEqual({
+      status: "pass",
+      message: "ok",
+    });
+    // ... and the same text is accepted at 3, so the declared value is the one in force.
+    expect(runVector(vec("parse", { format: "yaml", declared_max_alias_expansion: 3, text }, reject)).status).toBe("fail");
+  });
+
+  it("passes the declared maximum through ONLY for a vector that carries it (others run at the default 50)", () => {
+    const text = "x: &x {a: 1, b: 2, c: 3, d: 4}" + String.fromCharCode(10) + "y: &y {inner: *x}" + String.fromCharCode(10);
+    // No declared key: E = 3 is far under the default of 50, so the parse succeeds.
     const r = runVector(
-      vec("parse", { format: "yaml", declared_max_alias_expansion: 3, text: "a: 1\n" }, { ok: true }),
+      vec("parse", { format: "yaml", text }, { ok: false, diagnostics: [{ path: "$", code: "document.limit.alias-expansion" }] }),
     );
+    expect(r).toEqual({ status: "fail", message: "expected failure, parse succeeded" });
+  });
+
+  it("still skips a vector declaring one of the other (unconfigurable) limits", () => {
+    const r = runVector(vec("parse", { format: "yaml", declared_max_depth: 3, text: "a: 1" + String.fromCharCode(10) }, { ok: true }));
     expect(r.status).toBe("skip");
-    expect(r.message).toMatch(/^not yet implemented .*DIV-3/);
   });
 
   it("passes when the parsed document matches expected", () => {

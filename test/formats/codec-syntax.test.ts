@@ -33,7 +33,6 @@ const CASES: [string, string, string][] = [
   ["yaml", "bad indentation", "a:\n  b: 1\n c: 2"],
   ["yaml", "tab indentation", "\ta: 1"],
   ["yaml", "unresolved alias", "a: *nope"],
-  ["yaml", "self-referential merge (stack overflow)", "m: &a\n  <<: *a"],
   ["yaml", "multi-byte before the error", `k: ${ASTRAL}\nb: c: d`],
   ["toml", "key without value", "a = "],
   ["toml", "bad table header", "[a"],
@@ -86,7 +85,6 @@ describe("codec syntax errors carry parse.codec-syntax and a real position", () 
 
   it("uses 1:1 where the library names no position", () => {
     expect(thrown("yaml", "a: *nope").path).toBe("1:1");
-    expect(thrown("yaml", "m: &a\n  <<: *a").path).toBe("1:1");
     expect(thrown("xml", "<a></a><b/>").path).toBe("1:1");
   });
 

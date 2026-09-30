@@ -33,7 +33,7 @@ each group.
   resource-limit throw sites (MAX_DEPTH/MAX_NODES/MAX_INT_DIGITS) leave both
   `undefined`.
 - `class WriteError extends OmnistError`
-- `class DocumentError extends OmnistError`
+- `class DocumentError extends OmnistError` -- `code?: string` and `path?: string`; the YAML alias expansion limit (D-18/D-20) throws it with `code` `document.limit.alias-expansion` and `path` `$`.
 - `class DetachedNode extends OmnistError`
 - `class UnsafeXMLWarning extends OmnistError`
 - `type OmnistIssue` -- the shape of a single validation/lint finding.
@@ -130,7 +130,7 @@ Every format module exports the same three-function shape:
 - `readOml(text, opts?): Node` / `writeOml(node, opts?: WriteOmlOptions): string` / `checkOml(node): WriteReport`
 - `readXml(text, opts?: ReadXmlOptions): Node` / `writeXml(node, opts?: WriteXmlOptions): string` / `checkXml(node): WriteReport`
 - `readToml(text, opts?: ReadTomlOptions): Node` / `writeToml(node, opts?: WriteTomlOptions): string` / `checkToml(node): WriteReport`
-- `readYaml(text, opts?: ReadYamlOptions): Node` / `writeYaml(node, opts?: WriteYamlOptions): string` / `checkYaml(node): WriteReport`
+- `readYaml(text, opts?: ReadYamlOptions): Node` (`ReadYamlOptions.maxAliasExpansion`: the D-18 maximum expansion factor, default `DEFAULT_MAX_ALIAS_EXPANSION` = 50, at most `MAX_RECOMMENDED_ALIAS_EXPANSION` = 10000) / `writeYaml(node, opts?: WriteYamlOptions): string` / `checkYaml(node): WriteReport`
 
 See [Formats](formats/overview.md) for the per-format mapping and caveats.
 

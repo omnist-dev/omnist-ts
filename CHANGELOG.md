@@ -6,6 +6,37 @@ the first documented release of the TypeScript port; the public API
 mirrors the upstream Python package's `__all__` (camelCase names of the
 same functions).
 
+## [v0.5.0-alpha] -- YAML alias expansion limit (D-18, D-19, D-20); spec v0.25.0-beta
+
+`vendor/omnist-spec` bumped to **v0.25.0-beta** (commit `3febae9`, 312
+vectors). Conformance (vector track): **278 pass / 0 fail / 34 skip** (was
+262 / 0 / 40 at 302 vectors). All 16 `formats-yaml/alias-expansion` vectors
+now run for real (none skipped, none known-failing); the remaining 34 skips
+are 6 limits and 28 OSD-OML. This closes ledger `DIV-3` for TypeScript, the
+last spec feature this port lacked.
+
+- **Security fix (DoS).** `readYaml` now bounds alias expansion before
+  materializing anything. Every anchored node, every mapping and sequence,
+  the document root and every inline merge source is a candidate whose
+  expansion factor `E = W / S` must not exceed the maximum (default **50**).
+  Over-limit input, and any self-referential anchor (D-20), is rejected with
+  `DocumentError` code `document.limit.alias-expansion` at path `$`, with the
+  offending line and column in the message. One linear pass with memoized,
+  arbitrary-precision (`bigint`) counts, so it is fast and cannot overflow.
+- **New public option** `ReadYamlOptions.maxAliasExpansion` (integer 1 to
+  10000; zero or negative selects the default; larger or fractional values
+  throw `RangeError`) and exports `DEFAULT_MAX_ALIAS_EXPANSION` /
+  `MAX_RECOMMENDED_ALIAS_EXPANSION`. Documented in `docs/formats/yaml.md`.
+- **Behaviour to know.** A mapping merging a large anchor reads about
+  `(keys + 2) / 3`: one merging a 150-key anchor with one own key reads
+  50.67 and is rejected at the default; raise the option if you need it.
+- `readYaml` now parses to the `yaml` package's Document AST and materializes
+  with the package's own alias guard (`maxAliasCount`, a fixed 100) switched
+  off, since the new check supersedes it. A document that aliases a scalar
+  over 100 times, previously rejected by that guard, is now accepted.
+- The vector runner passes `declared_max_alias_expansion` through the new
+  option for the vectors that declare it, and only those.
+
 ## [v0.4.3-alpha] -- `schema.*` well-formedness errors carry a code and a Schema path (#149)
 
 Conformance (vector track): **262 pass / 0 fail / 40 skip** (was 242 / 0 / 60)
