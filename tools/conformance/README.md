@@ -102,12 +102,10 @@ Sec9.4) by number. `vectorRunner.ts`'s current skips break down as:
   constants, no runtime configuration surface"** -- vectors that probe
   runtime-configurable safety limits Python exposes but this repo
   currently bakes in as constants.
-- **"not yet implemented -- SchemaError carries no structured code/path
-  for this diagnostic (omnist-ts#149)"** -- the 20 `schema.*`
-  well-formedness vectors (Schema paths, Sec8.3.3/Sec8.4.1): the values are
-  in the message text but `SchemaError.code`/`.path` are absent at those
-  throw sites. Any other error class with no structured fields is skipped
-  the same way, uncited.
+- **"not yet implemented -- <Class> carries no structured code/path for
+  this diagnostic"** -- an error with no structured fields. No vector skips
+  this way today: since omnist-ts#149 every `schema.*` throw site
+  (Sec8.3.3/Sec8.4.1) carries `code` and `path`.
 
 A skip with no reason, or a reason not tied to one of the categories
 above (or a newly added ledger entry), is a reporting bug in the runner,

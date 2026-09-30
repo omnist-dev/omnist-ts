@@ -163,11 +163,12 @@ export const DATETIME: ScalarType = t.datetime;
  * given `any` -- `any` already includes `null`, so `any?` is redundant. */
 export function nullable(scalarType: ScalarType | AnyFieldType | RefType): ScalarType {
   if (scalarType.tag === "any") {
-    throw new SchemaError("any already includes null; 'any?' is redundant");
+    throw new SchemaError("any already includes null; 'any?' is redundant", "schema.nullable-any");
   }
   if (scalarType.tag === "ref") {
     throw new SchemaError(
       "nullable() cannot be applied to a Ref; use cardinality [0,1] for an optional record",
+      "schema.nullable-ref",
     );
   }
   return scalarType.nullable ? scalarType : { ...scalarType, nullable: true };
@@ -207,13 +208,13 @@ export function field(
       `field ${JSON.stringify(label)} type must be a Ref, Scalar, or t.any, got ${JSON.stringify(type)}`,
     );
   }
-  if (
-    min < 0 ||
-    (max !== null && max < min) ||
-    !Number.isInteger(min) ||
-    (max !== null && !Number.isInteger(max)) ||
-    (min === 0 && max === 0)
-  ) {
+  if (!Number.isInteger(min) || (max !== null && !Number.isInteger(max))) {
+    throw new SchemaError(
+      `field ${JSON.stringify(label)} has a non-integer cardinality [${min},${max ?? ""}]`,
+      "schema.non-integer-cardinality",
+    );
+  }
+  if (min < 0 || (max !== null && max < min) || (min === 0 && max === 0)) {
     // min === 0 && max === 0 (issue #125, omnist-spec Sec5.5): a field that
     // must occur zero times is indistinguishable from a field never
     // declared at all -- records are closed by default, so this is folded
@@ -221,13 +222,14 @@ export function field(
     // bounds, not a separate code.
     throw new SchemaError(
       `field ${JSON.stringify(label)} has an invalid cardinality [${min},${max ?? ""}]`,
+      "schema.invalid-cardinality",
     );
   }
   if (label === "") {
     // issue #130, omnist-spec Sec5.4: an empty-string label names nothing a
     // caller could ever reference. Path is the enclosing record, per the
     // same convention used for "the label itself is the problem".
-    throw new SchemaError("field label must not be the empty string (schema.empty-label)");
+    throw new SchemaError("field label must not be the empty string (schema.empty-label)", "schema.empty-label");
   }
   if (label.includes("[") || label.includes("]")) {
     // issue #133, omnist-spec Sec5.4: '[' and ']' are reserved for the
@@ -236,6 +238,7 @@ export function field(
     // path for a different field.
     throw new SchemaError(
       `field label ${JSON.stringify(label)} must not contain '[' or ']' (schema.bracket-in-label)`,
+      "schema.bracket-in-label",
     );
   }
   return { label, type, min, max };
@@ -261,7 +264,7 @@ export function record(...fields: Field[]): Record {
   const seen = new Set<string>();
   for (const f of fields) {
     if (seen.has(f.label)) {
-      throw new SchemaError(`duplicate field label ${JSON.stringify(f.label)} in a record`);
+      throw new SchemaError(`duplicate field label ${JSON.stringify(f.label)} in a record`, "schema.duplicate-field");
     }
     seen.add(f.label);
   }
@@ -549,26 +552,34 @@ export class Schema {
     for (const [name, rec] of this.env) {
       if (RESERVED_RECORD_NAMES.has(name)) {
         if (name === "any") {
-          throw new SchemaError(`'any' is a reserved type name and cannot be used as a record name`);
+          throw new SchemaError(
+            `'any' is a reserved type name and cannot be used as a record name`,
+            "schema.reserved-name",
+            name,
+          );
         }
         throw new SchemaError(
           `${JSON.stringify(name)} is a reserved scalar name; a record cannot be ` +
             "defined with this name, or it could never be referenced " +
             "(a bare name in a type position always means the builtin scalar)",
+          "schema.reserved-name",
+          name,
         );
       }
       if (rec === null || typeof rec !== "object" || !Array.isArray(rec.fields)) {
         throw new SchemaError(`environment entry ${JSON.stringify(name)} must be a Record, got ${JSON.stringify(rec)}`);
       }
     }
-    const walk = (type: FieldType): void => {
+    const walk = (type: FieldType, path: string): void => {
       if (type.tag === "ref" && !this.env.has(type.name)) {
-        throw new SchemaError(`unknown type ${JSON.stringify(type.name)}`);
+        // E-30 / Sec8.4.1: a dangling field type is reported at the field path
+        // `R.a`; a dangling root has no field, so it takes `$`.
+        throw new SchemaError(`unknown type ${JSON.stringify(type.name)}`, "schema.unknown-type", path);
       }
     };
-    walk(this.root);
-    for (const rec of this.env.values()) {
-      for (const f of rec.fields) walk(f.type);
+    walk(this.root, "$");
+    for (const [name, rec] of this.env) {
+      for (const f of rec.fields) walk(f.type, `${name}.${f.label}`);
     }
   }
 

@@ -78,8 +78,8 @@ describe("Field / Record construction errors", () => {
   });
 
   it("field() requires min and max to be integers", () => {
-    expect(() => field("x", t.string, 1.5, 2)).toThrow(/invalid cardinality/);
-    expect(() => field("x", t.string, 1, 2.5)).toThrow(/invalid cardinality/);
+    expect(() => field("x", t.string, 1.5, 2)).toThrow(/non-integer cardinality/);
+    expect(() => field("x", t.string, 1, 2.5)).toThrow(/non-integer cardinality/);
     expect(() => field("x", t.string, 1)).not.toThrow();
     expect(() => field("x", t.string, 1, null)).not.toThrow();
   });

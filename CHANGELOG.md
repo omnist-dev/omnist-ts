@@ -6,6 +6,25 @@ the first documented release of the TypeScript port; the public API
 mirrors the upstream Python package's `__all__` (camelCase names of the
 same functions).
 
+## [v0.4.3-alpha] -- `schema.*` well-formedness errors carry a code and a Schema path (#149)
+
+Conformance (vector track): **262 pass / 0 fail / 40 skip** (was 242 / 0 / 60)
+at the unchanged v0.24.0-beta pin. Fixture track 19 / 0 / 0. The 20 `schema.*`
+vectors that skipped as "not yet implemented" (E-20) now run for real; the
+remaining 40 skips are 6 limits, 6 alias-expansion (DIV-3) and 28 OSD-OML
+(omnist-ts#145).
+
+- `SchemaError.code` / `.path` are now set at every `schema.*` throw site
+  (Sec8.3.3), with the Schema path kind fixed per code (Sec8.4.1, E-30):
+  field path `R.a` for cardinality/nullability/unknown-type, record path `R`
+  for label, quoted-type, duplicate-field and duplicate-record, the bare name
+  for `schema.reserved-name`, `$` for no-root and a dangling root.
+- `field()`, `record()` and `nullable()` throw with the `code`; their `path`
+  is filled in by the OSD parser / `Schema` constructor, which know the record.
+  `field()` splits the former single cardinality check so a non-integer bound
+  is `schema.non-integer-cardinality`, not `schema.invalid-cardinality`.
+- Additive: messages are unchanged; no catch site needs updating.
+
 ## [v0.4.2-alpha] -- spec v0.24.0-beta sweep: codec syntax errors carry a code and a position (E-31, E-32, DIV-8)
 
 `vendor/omnist-spec` bumped from v0.22.0-beta to **v0.24.0-beta** (302

@@ -20,14 +20,15 @@ export class OmnistError extends Error {
 /**
  * The schema text or structure is invalid.
  *
- * `code` and `path` are optional and populated only where the throw site
- * has a stable machine-readable code to offer (currently: `osd.ts`'s
- * lexical/tokenization errors, using the `parse.*` family from
- * `omnist-spec` Sec8.3.1 -- extended by spec#46 to cover OSD's own lexing
- * stage the same way it already covered OML's -- with a `line:col` `path`
- * per Sec8.4). Every other `SchemaError` throw site in this package
- * continues to pass only a message; both fields are simply `undefined`
- * there. This is an additive widening of an existing public type, not a
+ * `code` and `path` are optional and populated where the throw site has a
+ * stable machine-readable code to offer: `osd.ts`'s lexical errors (the
+ * `parse.*` family, Sec8.3.1, with a `line:col` `path` per Sec8.4) and every
+ * well-formedness failure (the `schema.*` family, Sec8.3.3, with a Schema
+ * path per Sec8.4.1; since #149). Public constructors (`field()`,
+ * `record()`, `nullable()`) carry the `code` but have no enclosing record
+ * to build a path from, so `path` is `undefined` there unless the OSD
+ * parser or `Schema` supplies it. Remaining throw sites (e.g. an invalid
+ * programmatic type) pass only a message. This is an additive widening of an existing public type, not a
  * breaking change: no existing call site or catch site needs updating.
  */
 export class SchemaError extends OmnistError {
