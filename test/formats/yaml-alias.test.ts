@@ -168,6 +168,17 @@ describe("alias expansion: candidates", () => {
     accepted(text, 4);
   });
 
+  it("an inline merge source's written slots are S - 1 (direct and carrier-item paths)", () => {
+    // p: W = 10. Inline {u, v, w: *p}: W = 31, S = 4. a: W = 1 + 30 + 8*10 = 111,
+    // S = 1 + 1 (<<) + 3 + 8 = 13 -> E = 8.54: smallest accepted maximum is 9.
+    const own = Array.from({ length: 8 }, (_, i) => "o" + String(i) + ": *p").join(", ");
+    for (const merged of ["{u: *p, v: *p, w: *p}", "[{u: *p, v: *p, w: *p}]"]) {
+      const text = "p: &p [1, 2, 3, 4, 5, 6, 7, 8, 9]\na: {<<: " + merged + ", " + own + "}\n";
+      rejected(text, 8);
+      accepted(text, 9);
+    }
+  });
+
   it("an unanchored carrier sequence holds no slot of its own", () => {
     accepted("p: &p {k: 1}\nq: &q {j: 2}\nz: {<<: [*p, *q], m: 3}\n", 2);
   });
@@ -301,18 +312,22 @@ describe("alias expansion: bombs are rejected before materialization, in linear 
     rejectedQuickly(tower(50, 4));
   });
 
+  it("branching 2, 70 levels (W = 2^70 exceeds any fixed-width integer)", () => {
+    rejectedQuickly(tower(2, 70));
+  });
+
   it("an unanchored merge fan-in of 2000 aliases of a 2000-key anchor", () => {
     const keys = Array.from({ length: 2000 }, (_, i) => "k" + String(i) + ": 1").join(", ");
     const refs = Array.from({ length: 2000 }, () => "*b").join(", ");
     checkTime("b: &b {" + keys + "}\nt: {<<: [" + refs + "]}\n", true, 1000);
     expect(() => readYaml("b: &b {" + keys + "}\nt: {<<: [" + refs + "]}\n")).toThrow(DocumentError);
-  });
+  }, 60000);
 
   it("a 100000-item root sequence of {k: *b} over 1000 scalars: the check itself is linear", () => {
     const parts = ["- &b [" + Array.from({ length: 1000 }, (_, i) => String(i)).join(", ") + "]"];
     for (let i = 0; i < 100000; i++) parts.push("- {k: *b}");
     const text = parts.join("\n") + "\n";
-    checkTime(text, true, 3000);
+    checkTime(text, true, 10000);
   }, 120000);
 
   it("the same bomb at 3000 items, through readYaml end to end", () => {

@@ -89,6 +89,20 @@ switched off here: it counts aliases against a fixed number rather than
 measuring expansion, so it would reject legitimate documents (a scalar aliased
 500 times) and pre-empt this check's coded error on the dangerous ones.
 
+**What the check does not bound.** It bounds expansion, not parse cost: the
+`yaml` library's own parse of a huge text is not covered. That parse is
+superlinear in the number of anchors (about 50,000 anchors take around 150 s to
+parse while the check takes about 0.2 s), a cost that predates this limit.
+`MAX_NODES` counts only mappings, not scalars, so scalar-heavy expansion is
+bounded by the expansion check alone (whole-document `W` is at most the
+maximum times `S(root)`).
+
+**Known unspecified edges.** An anchored literal merge sequence
+(`<<: &s [*p, ...]`) and a merge alias to a sequence of aliases are counted
+conservatively, and differently from a literal merge sequence. The spec is
+silent on both (omnist-spec#124, Option A chosen); this port will change when
+it is settled.
+
 ## Adjustment codes
 
 `writeYaml`/`checkYaml` can report one adjustment code -- the full set
