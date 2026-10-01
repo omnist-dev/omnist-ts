@@ -39,6 +39,14 @@ See [the spec's Schema Model chapter](https://spec.omnist.dev/03-schema-model) f
 this port implements against, or [the quickstart](docs/quickstart.md) for
 the shortest possible tour.
 
+## Safety limits
+
+Reading untrusted input is bounded: nesting depth 200, 1,000,000 nodes, 4,300
+integer digits, and, for YAML, an alias expansion factor of 50 (spec D-18;
+configurable with `readYaml(text, { maxAliasExpansion })`, rejected input
+reports `document.limit.alias-expansion`). See
+[YAML](docs/formats/yaml.md#alias-expansion-limit).
+
 ## Development
 
 ```bash

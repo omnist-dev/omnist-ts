@@ -71,6 +71,7 @@ import type { Schema } from "../schema.js";
 import { rejectSecondLeadingBom, stripLeadingBom } from "../bom.js";
 import { codecSyntaxError, type CodecBlame } from "./codec-error.js";
 import { checkInputSize } from "./input-size.js";
+import { checkAliasExpansion, resolveMaxAliasExpansion } from "./yaml-alias.js";
 
 // Matches src/document.ts's own MAX_DEPTH (locally redefined here, same as
 // src/formats/json.ts's own copy of the same guard constant -- see that
@@ -229,14 +230,51 @@ function* labeledEdges(
 export interface ReadYamlOptions {
   /** Optional {@link Schema} for schema-directed materialization (spec §4). */
   schema?: Schema;
+  /**
+   * The maximum alias expansion factor (spec D-18, §2.4.1): the ratio of the
+   * value slots an anchored node, mapping, or sequence materializes to the
+   * slots it is written with. Input over it is rejected with
+   * `document.limit.alias-expansion`, before any alias is expanded. Default
+   * 50; an integer from 1 to 10000. Zero or negative selects the default
+   * (never "no limit"); a larger or non-integer value throws a `RangeError`.
+   */
+  maxAliasExpansion?: number;
+}
+
+/** Turn a failure from the `yaml` package into the `parse.codec-syntax` error. */
+function yamlSyntaxError(exc: unknown, text: string): ParseError {
+  // The library always throws an Error instance (a YAMLParseError, or a
+  // ReferenceError for an unresolved alias / a merge of a non-map), never a
+  // bare value, so the non-Error branch below is a defensive fallback that's
+  // never actually reached.
+  /* v8 ignore next */
+  const message = exc instanceof Error ? exc.message : String(exc);
+  // A YAMLParseError carries `pos: [start, end]` (UTF-16 offsets into the
+  // text). Anything else the library throws (an unresolved alias, a
+  // merge of a non-map) names no position: 1:1.
+  const pos = (exc as { pos?: unknown }).pos;
+  const at: CodecBlame = Array.isArray(pos) && typeof pos[0] === "number" ? { offset: pos[0] } : undefined;
+  return codecSyntaxError("YAML", message.split(String.fromCharCode(10))[0] as string, text, at);
 }
 
 /** Parse YAML text into a Document node. */
 export function readYaml(text: string, opts: ReadYamlOptions = {}): Node {
+  const maxAliasExpansion = resolveMaxAliasExpansion(opts.maxAliasExpansion);
   text = stripLeadingBom(text); // D-15: one leading U+FEFF
   rejectSecondLeadingBom(text, "YAML"); // D-21: a second one is an error
   checkInputSize(text, "YAML");
   checkYamlIntegerDigits(text);
+  // Parse to the library's Document AST, which keeps Alias nodes, so the
+  // D-18 check can run on the reference graph BEFORE anything is expanded.
+  let doc: YAML.Document.Parsed;
+  try {
+    doc = YAML.parseDocument(text, { schema: "yaml-1.1", customTags: customBoolTags, intAsBigInt: true });
+    // What YAML.parse itself does with a failed parse: throw the first error.
+    if (doc.errors.length > 0) throw doc.errors[0];
+  } catch (exc) {
+    throw yamlSyntaxError(exc, text);
+  }
+  checkAliasExpansion(doc.contents, maxAliasExpansion, text);
   let parsed: unknown;
   try {
     // mapAsMap preserves each mapping key's own resolved type (so a key
@@ -246,20 +284,13 @@ export function readYaml(text: string, opts: ReadYamlOptions = {}): Node {
     // object always would -- see the file-top comment's second bullet
     // and issue #89's vector 2. buildNode (src/document.ts) already
     // rejects a Map with a non-string key with a DocumentError.
-    parsed = YAML.parse(text, { schema: "yaml-1.1", mapAsMap: true, customTags: customBoolTags, intAsBigInt: true });
+    // maxAliasCount: -1 switches off the library's own alias guard (a
+    // count against a fixed 100 that would pre-empt the D-18 check above
+    // with a bare codec-syntax error); the D-18 check has already bounded
+    // the expansion, so the library's guard has nothing left to do.
+    parsed = doc.toJS({ mapAsMap: true, maxAliasCount: -1 });
   } catch (exc) {
-    // YAML.parse always throws a YAMLError (an Error instance) on malformed
-    // input, never a bare value, so the non-Error branch below is a
-    // defensive fallback that's never actually reached.
-    /* v8 ignore next */
-    const message = exc instanceof Error ? exc.message : String(exc);
-    // A YAMLParseError carries `pos: [start, end]` (UTF-16 offsets into the
-    // text). Anything else the library throws (an unresolved alias, a
-    // self-referential merge overflowing the stack) names no position: 1:1.
-    const pos = (exc as { pos?: unknown }).pos;
-    const at: CodecBlame =
-      Array.isArray(pos) && typeof pos[0] === "number" ? { offset: pos[0] } : undefined;
-    throw codecSyntaxError("YAML", message.split(String.fromCharCode(10))[0] as string, text, at);
+    throw yamlSyntaxError(exc, text);
   }
   const node = buildNode(parsed);
   if (opts.schema === undefined) return node;

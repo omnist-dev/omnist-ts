@@ -37,6 +37,58 @@ string, readYaml rejects that document with a DocumentError rather
 than silently stringifying the resolved boolean back to the string
 "true".
 
+## Alias expansion limit
+
+YAML anchors and aliases let a small input materialize into an enormous
+Document. `readYaml` enforces omnist-spec's alias expansion limit (D-18,
+D-19, D-20, `02-document-model.md` Sec2.4.1) and rejects an over-limit input
+with a `DocumentError` whose `code` is `document.limit.alias-expansion` and
+whose `path` is `$` (the message carries the `line`/`col` of the offending
+node), *before* any alias is expanded. The check is one linear pass over the
+parsed document's anchor/reference graph, with memoized counts in arbitrary
+precision, so a "billion laughs" input is refused in milliseconds however
+large the expansion it describes.
+
+For every anchored node, every mapping and sequence (anchored or not), the
+document root, and every inline merge source, `E = W / S` is computed: `W` is
+the number of value slots the node materializes, `S` the number it is written
+with (an alias counts one slot in `S` and its target's `W` in `W`; a merge-key
+reference `<<: *b` contributes `W(b) - 1`). Scalars are never checked. If any
+`E` exceeds the maximum, the input is rejected. An anchor that refers to
+itself, directly or through other anchors (`a: &a [*a]`, `a: &a {<<: *a}`),
+has unbounded `W` and is rejected with the same code.
+
+The maximum is **50** by default (the spec's reference value). Raise or lower
+it with `maxAliasExpansion`, an integer from 1 to 10000; zero or a negative
+value selects the default and is never "no limit", and a larger or
+fractional value throws a `RangeError`. This port has no other configurable
+limit: `MAX_DEPTH`, `MAX_NODES` and `MAX_INT_DIGITS` are compile-time
+constants.
+
+```ts
+import { readYaml } from "@omnist-dev/omnist";
+
+readYaml(text, { maxAliasExpansion: 200 });
+```
+<!-- doc-illustrative -->
+
+**Legitimate merges are not free.** A mapping that merges a large anchor and
+writes little of its own reads `E` of about `(keys + 2) / 3`:
+`job: {<<: *base, script: x}` is written with three slots and materializes
+`keys + 2`. A 100-service compose file each merging a 20-key defaults block
+reads at most 7.33, and a 100-service one merging a 60-key block 20.67, both
+well inside 50. But a mapping that merges a 150-key anchor and writes one key
+of its own reads about 50.67 and is rejected at the default; a 100-key block
+aliased 100 times at the document root reads 50.50 and is too. If a real
+workload needs it, raise `maxAliasExpansion`. `W` is a structural upper bound,
+blind to key collisions (a merged key overridden by a local key is still
+counted), so the limit errs toward rejection.
+
+The `yaml` package's own alias guard (`maxAliasCount`, default 100) is
+switched off here: it counts aliases against a fixed number rather than
+measuring expansion, so it would reject legitimate documents (a scalar aliased
+500 times) and pre-empt this check's coded error on the dangerous ones.
+
 ## Adjustment codes
 
 `writeYaml`/`checkYaml` can report one adjustment code -- the full set
