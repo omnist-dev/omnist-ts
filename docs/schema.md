@@ -68,7 +68,10 @@ label that cannot encode to UTF-8, i.e. one holding a lone surrogate
 without a path). A `[0,0]` field is representable but has no OSD spelling, so
 `toOsd` fails on one with `write.unsupported-value` at the record path; call
 `prune()` first. This port has no caller-supplied record ordering, so
-`schema.unknown-record` (S-23) cannot arise. None of these has a conformance
+`schema.unknown-record` (S-23) cannot arise. **Known divergence:** `field(label, type, 0, 0)` rejects `[0,0]` with
+`schema.invalid-cardinality` (omnist-ts#125) although S-15 keeps it
+representable; the `toOsd` rule is therefore reachable only through a
+hand-built `Field` literal. None of these has a conformance
 vector (spec DIV-5); `test/schema-v028.test.ts` is the only pin.
 
 All of this is defined formally, with proofs, in

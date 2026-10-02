@@ -6,10 +6,10 @@ the first documented release of the TypeScript port; the public API
 mirrors the upstream Python package's `__all__` (camelCase names of the
 same functions).
 
-## [v0.6.2-alpha] -- adopt omnist-spec v0.28.0-beta (programmatic schema diagnostics)
+## [v0.7.0-alpha] -- adopt omnist-spec v0.28.0-beta (programmatic schema diagnostics)
 
-`vendor/omnist-spec` bumped to **v0.28.0-beta** (commit `1a7d0de`; the spec tag
-was not yet pushed, so the commit is the pin). Vector count stays 338 (no
+`vendor/omnist-spec` bumped to **v0.28.0-beta** (commit `1a7d0de`, the
+v0.28.0-beta tag). Vector count stays 338 (no
 vector reaches these rules, DIV-5), so conformance is unchanged: vector track
 **304 pass / 0 fail / 34 skip**, fixture track 19 / 0 / 0. The new behaviour is
 pinned by `test/schema-v028.test.ts` alone.
@@ -29,6 +29,16 @@ pinned by `test/schema-v028.test.ts` alone.
   `write.unsupported-value` at the record path `R`. `field()` still rejects
   `[0,0]` (`schema.invalid-cardinality`, #125), so this is reachable only through
   a hand-built `Field` literal.
+- **`infer()` record names** are now always valid S-8 names: each key
+  character outside `[A-Za-z0-9_]` becomes `_`, leading digits and underscores
+  are stripped, the first letter is capitalised, and a key with nothing usable
+  left (`123`, `9`, `日本`) becomes `Rec`; collisions get `2`, `3`, ... suffixes.
+  Before, `{"123": {...}}` inferred an unreadable `record 123`. An empty key
+  still fails with `schema.empty-label`, as it did on the previous release.
+- **Known divergence:** `field(label, type, 0, 0)` rejects `[0,0]` with
+  `schema.invalid-cardinality` although S-15 keeps it representable.
+- **Compatibility:** previously accepted programmatic inputs (malformed names)
+  are now rejected, so this is a minor bump.
 - **S-23 (`schema.unknown-record`) does not apply**: TypeScript has no
   caller-supplied record ordering (`Schema` takes an unordered env; `toOsd` uses
   insertion order), so there is nothing to check.
