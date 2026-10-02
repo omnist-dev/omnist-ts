@@ -6,6 +6,17 @@ the first documented release of the TypeScript port; the public API
 mirrors the upstream Python package's `__all__` (camelCase names of the
 same functions).
 
+## [v0.6.1-alpha] -- adopt omnist-spec v0.27.0-beta (empty merge sequence)
+
+`vendor/omnist-spec` bumped to **v0.27.0-beta** (commit `a6a6090`, 338
+vectors, +7). D-18a now says an empty merge sequence `<<: []` is a well-formed
+carrier that merges nothing (W 0, S one slot for the `<<` entry), likewise
+`s: &s []` then `<<: *s`; an empty sequence outside merge position is an
+ordinary node. No library code change was needed: the reader already behaved
+this way. Conformance (vector track): **304 pass / 0 fail / 34 skip** (6
+limits, 28 OSD-OML); fixture track 19 / 0 / 0. New
+`test/formats/yaml-empty-merge.test.ts` pins the contract.
+
 ## [v0.6.0-alpha] -- merge carriers (D-18a), the expanded-size limit (D-22); spec v0.26.0-beta
 
 `vendor/omnist-spec` bumped to **v0.26.0-beta** (commit `7744a5c`, 331
