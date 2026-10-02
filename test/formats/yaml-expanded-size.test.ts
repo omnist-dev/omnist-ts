@@ -1,7 +1,7 @@
 // D-18a and D-22 (omnist-spec v0.26.0-beta, Sec2.4.1): merge carriers, malformed
 // merge shapes, and the expanded-size limit. Companion to yaml-alias.test.ts.
 import YAML from "yaml";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { main } from "../../src/cli.js";
 import { DocumentError, ParseError } from "../../src/errors.js";
 import { getFormat } from "../../src/registry.js";
@@ -222,6 +222,58 @@ describe("D-18a: malformed merge shapes are parse.codec-syntax, at a line:col", 
     const payload = JSON.parse(out.join("")) as { errors: { code: string; path: string }[] };
     expect(payload.errors[0]?.code).toBe("parse.codec-syntax");
     expect(payload.errors[0]?.path).toBe("2:7");
+  });
+});
+
+describe("tagged collections whose items are Pairs (!!omap, !!pairs) and root aliases", () => {
+  it.each([
+    ["!!omap of mappings", "a: !!omap [{x: 1}, {y: 2}]\n"],
+    ["!!pairs of mappings", "a: !!pairs [{x: 1}, {x: 2}]\n"],
+    ["!!omap of scalar-valued entries", "a: !!omap [x: 1, y: 2]\n"],
+    ["!!pairs of scalar-valued entries", "a: !!pairs [x: 1, x: 2]\n"],
+    ["a root !!omap", "!!omap [{x: 1}]\n"],
+    ["a block !!omap", "a: !!omap\n  - x: 1\n  - y: 2\n"],
+    ["!!timestamp and a custom tag", "c: !!timestamp 2001-12-14\nd: !foo 1\n"],
+  ])("%s is accepted as before", (_name, text) => {
+    ok(text, {});
+  });
+
+  it("an anchor defined inside a Pair is known to a later alias, in the shape pass and in the count", () => {
+    ok("a: !!pairs [{x: &z {q: 1}}]\nb: *z\n", {});
+    ok("a: !!omap [x: &z {q: 1}]\nb: {<<: *z}\n", {});
+  });
+
+  it("a ratio bomb written inside !!pairs is still counted", () => {
+    const text = "p: &p " + flow(10) + "\na: !!pairs [{x: {u: *p, v: *p, w: *p}}]\n";
+    ratio(text, 5);
+    okRatio(text, 10000);
+  });
+
+  it("a genuinely malformed merge inside !!pairs is parse.codec-syntax at its real position", () => {
+    expect(syntax("a: !!pairs [{x: {<<: 5}}]\n").path).toBe("1:22");
+    expect(syntax("a: !!omap [x: {<<: 5}]\n").path).toBe("1:20");
+  });
+
+  it("a root alias is an unresolved alias, positioned, not a bare 1:1 library error", () => {
+    expect(syntax("*a\n").path).toBe("1:1");
+    expect(syntax("--- *a\n").path).toBe("1:5");
+    expect(syntax("---\n\n  *a\n").path).toBe("3:3");
+  });
+});
+
+describe("a library failure while materializing", () => {
+  it("is still parse.codec-syntax, at 1:1 where the error names no position", () => {
+    // toJS recurses on the JS stack, so a deep-but-parseable document can overflow it with a bare RangeError.
+    const spy = vi.spyOn(YAML.Document.prototype, "toJS").mockImplementation(() => {
+      throw new RangeError("Maximum call stack size exceeded");
+    });
+    try {
+      const err = syntax("a: 1\n");
+      expect(err.path).toBe("1:1");
+      expect(err.message).toContain("Maximum call stack size exceeded");
+    } finally {
+      spy.mockRestore();
+    }
   });
 });
 
@@ -475,6 +527,18 @@ describe("D-22: realistic documents are accepted at the defaults (false-positive
     okSize(text, 6262);
     size(text, 6261);
   });
+
+  it("nested under a `services:` mapping the same documents read the spec's 2 223 / 6 263 / 62 063", () => {
+    const nested = (services: number, keys: number): string => {
+      const lines = ["x-base: &base " + flow(keys), "services:"];
+      for (let i = 0; i < services; i++) lines.push("  svc" + String(i) + ": {<<: *base, image: img" + String(i) + "}");
+      return lines.join("\n") + "\n";
+    };
+    for (const [services, keys, w] of [[100, 20, 2223], [100, 60, 6263], [1000, 60, 62063]] as const) {
+      okSize(nested(services, keys), w);
+      size(nested(services, keys), w - 1);
+    }
+  }, 120000);
 
   it("1000 services merging a 60-key block: W = 62 062", () => {
     const text = compose(1000, 60);

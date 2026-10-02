@@ -263,8 +263,6 @@ function yamlSyntaxError(exc: unknown, text: string): ParseError {
   // A YAMLParseError carries `pos: [start, end]` (UTF-16 offsets into the
   // text). Anything else the library throws names no position: 1:1.
   const pos = (exc as { pos?: unknown }).pos;
-  // The no-position arm is reached only from the (unreachable) toJS catch below.
-  /* v8 ignore next */
   const at: CodecBlame = Array.isArray(pos) && typeof pos[0] === "number" ? { offset: pos[0] } : undefined;
   return codecSyntaxError("YAML", message.split(String.fromCharCode(10))[0] as string, text, at);
 }
@@ -302,15 +300,9 @@ export function readYaml(text: string, opts: ReadYamlOptions = {}): Node {
     // with a bare codec-syntax error); the D-18/D-22 checks have already
     // bounded the expansion, so the library's guard has nothing left to do.
     parsed = doc.toJS({ mapAsMap: true, maxAliasCount: -1 });
-    /* v8 ignore start -- unreachable today: the two things `toJS` throws on
-       (an alias with no anchor, a merge of a non-mapping) are both refused,
-       with a position, by the shape pass in checkAliasExpansion above. Kept
-       so that any other library failure still surfaces as parse.codec-syntax
-       rather than a bare Error. */
   } catch (exc) {
     throw yamlSyntaxError(exc, text);
   }
-  /* v8 ignore stop */
   const node = buildNode(parsed);
   if (opts.schema === undefined) return node;
   return materialize(node, opts.schema);

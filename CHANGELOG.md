@@ -48,7 +48,7 @@ track 19 / 0 / 0.
   structural, collision-blind `W`, so a document whose merged keys are all
   overridden can be refused by the cap though it materializes fewer slots. The
   `yaml` library's own parse is quadratic in the keys of one block mapping
-  (20,000 keys took about 15 s); that cost is not bounded by these checks.
+  (20,000 keys took 22.8 s, a 1 MB single mapping about three minutes); that cost is not bounded by these checks.
 
 ## [v0.5.0-alpha] -- YAML alias expansion limit (D-18, D-19, D-20); spec v0.25.0-beta
 

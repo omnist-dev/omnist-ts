@@ -202,6 +202,11 @@ function limitError(node: Located, text: string, detail: string, code: string): 
   return new DocumentError("line " + String(line) + ", col " + String(col) + ": " + detail, code, "$");
 }
 
+/** Work-list marker of the shape pass: the value of this `<<` pair is to be checked. */
+class MergeCheck {
+  constructor(readonly pair: YAML.Pair) {}
+}
+
 /**
  * D-18a: a merge value is a mapping, or a sequence whose members are all
  * mappings. A scalar value, a scalar member, a sequence inside a merge
@@ -218,8 +223,9 @@ function limitError(node: Located, text: string, detail: string, code: string): 
  */
 function validateMergeShapes(root: unknown, text: string): void {
   const anchors = new Map<string, unknown>();
-  // The work list holds nodes, and a `<<` pair (a YAML.Pair is never a node)
-  // standing for "check this pair's value, its subtree now fully visited".
+  // The work list holds nodes, a bare Pair (an item of an !!omap or !!pairs
+  // sequence: walked, not a merge), and a MergeCheck standing for "check this
+  // `<<` pair's value, its subtree now fully visited".
   const todo: unknown[] = [root];
   const reject = (at: Located, detail: string): ParseError => {
     const [line, col] = startOf(at, text);
@@ -240,11 +246,15 @@ function validateMergeShapes(root: unknown, text: string): void {
   };
   while (todo.length > 0) {
     const node = todo.pop();
-    if (YAML.isPair(node)) {
-      const bad = malformed(node.value);
+    if (node instanceof MergeCheck) {
+      const bad = malformed(node.pair.value);
       if (bad !== undefined) {
         throw reject(bad, "a merge key's value must be a mapping or a sequence of mappings");
       }
+      continue;
+    }
+    if (YAML.isPair(node)) {
+      todo.push(node.value, node.key);
       continue;
     }
     if (YAML.isAlias(node)) {
@@ -255,7 +265,7 @@ function validateMergeShapes(root: unknown, text: string): void {
     if (YAML.isMap(node)) {
       for (let i = node.items.length - 1; i >= 0; i--) {
         const pair = node.items[i] as YAML.Pair;
-        if (isMergeKey(pair.key)) todo.push(pair);
+        if (isMergeKey(pair.key)) todo.push(new MergeCheck(pair));
         todo.push(pair.value, pair.key);
       }
     } else if (YAML.isSeq(node)) {
@@ -281,8 +291,8 @@ export function checkAliasExpansion(
   text: string,
   maxSlots: number = DEFAULT_MAX_EXPANDED_SLOTS,
 ): void {
+  validateMergeShapes(root, text); // also refuses a root alias, which has no anchor
   if (!YAML.isMap(root) && !YAML.isSeq(root)) return; // a scalar root has no candidate
-  validateMergeShapes(root, text);
   const limit = BigInt(max);
   const slotLimit = BigInt(maxSlots);
   const anchors = new Map<string, AnchorSlots>();
@@ -369,6 +379,13 @@ export function checkAliasExpansion(
       } else {
         child = (f.node as YAML.YAMLSeq).items[j];
         role = "plain";
+        if (YAML.isPair(child)) {
+          // An !!omap / !!pairs item: counted as the one-entry mapping it stands for.
+          const entry = new YAML.YAMLMap();
+          entry.items.push(child);
+          entry.range = (child.key as YAML.Node).range as [number, number, number];
+          child = entry;
+        }
       }
       if (YAML.isAlias(child)) {
         sawReference = true;

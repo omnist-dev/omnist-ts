@@ -137,10 +137,17 @@ measuring expansion, so it would reject legitimate documents (a scalar aliased
 superlinear in the number of anchors (about 50,000 anchors take around 150 s to
 parse while the check takes about 0.2 s), a cost that predates these limits. It
 is also quadratic in the number of keys of one block mapping, with or without
-aliases (measured with `yaml` 2.9.0: 10,000 keys about 5 s, 20,000 keys about
-15 s), while a sequence of the same size parses in a fraction of a second. The
-cost is the library's, not the check's, and `MAX_INPUT_BYTES` is the bound on
-it. `MAX_NODES` counts only mappings, not scalars, so scalar-heavy expansion is
+aliases (measured with `yaml` 2.9.0: 20,000 keys took 22.8 s, and a 1.19 MB
+single block mapping of 50,000 keys took 191.7 s, identical before this limit
+existed), while a sequence of the same size parses in a fraction of a second.
+So a roughly 1 MB input that is one big mapping is about three minutes of CPU
+whatever D-18 and D-22 say, and `MAX_INPUT_BYTES` (256 MB) is far too high to
+stop it. The cost is the library's, not the check's. Two compose-style figures
+in this port's tests: a `services:` mapping of 100 services each merging a
+20-key block has `W(root)` 2,223 (1 + 21 for the root and block, 1 for the
+`services` mapping, 100 x 22); with the services at the top level, as in the
+tests, it is 2,222. 60 keys give 6,263 / 6,262 and 1,000 services 62,063 / 62,062.
+`MAX_NODES` counts only mappings, not scalars, so scalar-heavy expansion is
 bounded by the checks above alone (`W(root)` is at most the ratio maximum times
 `S(root)`, and at most the cap).
 
