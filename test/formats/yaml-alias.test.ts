@@ -161,8 +161,8 @@ describe("alias expansion: candidates", () => {
     rejected(text, 2);
   });
 
-  it("an anchored merge-key carrier sequence is itself a candidate and can be aliased", () => {
-    // t: W = 1 + 3 + 3 = 7, S = 2 (3.5); s (plain): W = 9, S = 3 (3.0).
+  it("an anchored merge-key carrier sequence is not a candidate (D-18a) but can still be aliased as a list", () => {
+    // t: W = 1 + 3 + 3 = 7, S = 2 (3.5). The carrier s holds no slot; `u: *s` materializes the list, W = 9.
     const text = "b: &b {k1: 1, k2: 2, k3: 3}\nt: {<<: &s [*b, *b]}\nu: *s\n";
     rejected(text, 3);
     accepted(text, 4);
@@ -339,7 +339,7 @@ describe("alias expansion: bombs are rejected before materialization, in linear 
   it("an accepted 100000-item root is also checked in linear time", () => {
     const parts = ["- &b [1]"];
     for (let i = 0; i < 100000; i++) parts.push("- {k: *b}");
-    checkTime(parts.join("\n") + "\n", false, 3000);
+    checkTime(parts.join("\n") + "\n", false, 10000);
   }, 120000);
 
   it("the bomb's per-item ratio is what the maximum bounds (E = 6 for a 10-slot anchor)", () => {

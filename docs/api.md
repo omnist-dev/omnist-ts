@@ -33,7 +33,7 @@ each group.
   resource-limit throw sites (MAX_DEPTH/MAX_NODES/MAX_INT_DIGITS) leave both
   `undefined`.
 - `class WriteError extends OmnistError`
-- `class DocumentError extends OmnistError` -- `code?: string` and `path?: string`; the YAML alias expansion limit (D-18/D-20) throws it with `code` `document.limit.alias-expansion` and `path` `$`.
+- `class DocumentError extends OmnistError` -- `code?: string` and `path?: string`; the YAML alias expansion limit (D-18/D-20) throws it with `code` `document.limit.alias-expansion` and `path` `$`, and the YAML expanded-size limit (D-22) with `code` `document.limit.expanded-size` and `path` `$`.
 - `class DetachedNode extends OmnistError`
 - `class UnsafeXMLWarning extends OmnistError`
 - `type OmnistIssue` -- the shape of a single validation/lint finding.

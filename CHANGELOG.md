@@ -6,6 +6,50 @@ the first documented release of the TypeScript port; the public API
 mirrors the upstream Python package's `__all__` (camelCase names of the
 same functions).
 
+## [v0.6.0-alpha] -- merge carriers (D-18a), the expanded-size limit (D-22); spec v0.26.0-beta
+
+`vendor/omnist-spec` bumped to **v0.26.0-beta** (commit `7744a5c`, 331
+vectors). Conformance (vector track): **297 pass / 0 fail / 34 skip**. Before
+the change 7 of the 19 new vectors failed (290 / 7 / 34); all 35
+`formats-yaml/alias-expansion` vectors now run for real, none skipped, none
+known-failing. The 34 skips are unchanged: 6 limits and 28 OSD-OML. Fixture
+track 19 / 0 / 0.
+
+- **Security fix (DoS).** `readYaml` now also refuses a large expansion that
+  the ratio check cannot see (D-22). An input that contains at least one alias
+  or merge key is rejected with `DocumentError` code
+  `document.limit.expanded-size` at path `$` when `W(root)` exceeds the maximum
+  (default **1,000,000** slots; exactly at the cap is accepted), after the ratio
+  check (an input that crosses both reports `document.limit.alias-expansion`)
+  and before anything is materialized. An alias-free document is exempt however
+  large: a plain 2M-slot file passes, and one added alias subjects it to the
+  cap. A 40,000-container document sharing a 49-slot block (every `E` about 25,
+  `W(root)` 2,000,050) is now refused.
+- **New public option** `ReadYamlOptions.maxExpandedSlots` (integer 1 to
+  10,000,000; zero, negative and NaN select the default; larger or fractional
+  values throw `RangeError`), and exports `DEFAULT_MAX_EXPANDED_SLOTS` /
+  `MAX_RECOMMENDED_EXPANDED_SLOTS`. Documented in `docs/formats/yaml.md`.
+- **Fix: merge carriers (D-18a).** A sequence in merge-value position is a
+  carrier whether or not it is anchored, and an alias to such a sequence
+  (`<<: *s`) contributes the sum over its members of `W(member) - 1`. Before,
+  an anchored carrier was counted as a candidate and a merge alias to a
+  sequence as `W(s) - 1`, so two valid inputs at the limit were rejected. A
+  plain alias to a carrier materializes the list.
+- **Fix: malformed merges are `parse.codec-syntax`, and win over limits.** A
+  merge value that is not a mapping or a sequence of mappings (a scalar value,
+  a scalar member, a sequence inside a merge sequence, an alias to a sequence of
+  scalars) is now rejected before anything is counted, at the offending
+  `line:col`, so a bomb followed by a malformed merge reports the syntax error.
+  An alias with no anchor is reported the same way, at its own position, rather
+  than as a bare library error at `1:1`.
+- The vector runner passes `declared_max_expanded_slots` through the new option
+  for the vectors that declare it, and only those.
+- **Behaviour to know.** The ratio check's counts and the cap's are the same
+  structural, collision-blind `W`, so a document whose merged keys are all
+  overridden can be refused by the cap though it materializes fewer slots. The
+  `yaml` library's own parse is quadratic in the keys of one block mapping
+  (20,000 keys took about 15 s); that cost is not bounded by these checks.
+
 ## [v0.5.0-alpha] -- YAML alias expansion limit (D-18, D-19, D-20); spec v0.25.0-beta
 
 `vendor/omnist-spec` bumped to **v0.25.0-beta** (commit `3febae9`, 312

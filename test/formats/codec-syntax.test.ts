@@ -84,8 +84,9 @@ describe("codec syntax errors carry parse.codec-syntax and a real position", () 
   });
 
   it("uses 1:1 where the library names no position", () => {
-    expect(thrown("yaml", "a: *nope").path).toBe("1:1");
     expect(thrown("xml", "<a></a><b/>").path).toBe("1:1");
+    // An unresolved YAML alias is blamed at the alias itself (the D-18a shape pass), not at 1:1.
+    expect(thrown("yaml", "a: *nope").path).toBe("1:4");
   });
 
   it("a JSON error at end of input stands at the end", () => {

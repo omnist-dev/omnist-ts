@@ -44,7 +44,11 @@ the shortest possible tour.
 Reading untrusted input is bounded: nesting depth 200, 1,000,000 nodes, 4,300
 integer digits, and, for YAML, an alias expansion factor of 50 (spec D-18;
 configurable with `readYaml(text, { maxAliasExpansion })`, rejected input
-reports `document.limit.alias-expansion`). See
+reports `document.limit.alias-expansion`) and an expanded size of 1,000,000
+value slots (spec D-22; `readYaml(text, { maxExpandedSlots })`, rejected input
+reports `document.limit.expanded-size`; it applies only to a document that
+contains an alias or a merge key). A merge value that is not a mapping or a
+sequence of mappings is a `parse.codec-syntax` error. See
 [YAML](docs/formats/yaml.md#alias-expansion-limit).
 
 ## Development
