@@ -192,6 +192,34 @@ export interface Field {
   readonly max: number | null;
 }
 
+const NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
+// A UTF-16 lone surrogate: the one way a JS string fails to encode to UTF-8.
+const LONE_SURROGATE = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/;
+
+/** S-8: throws `schema.invalid-name` at `$` (the name appears in the message only). */
+function requireValidName(name: string, what: string): void {
+  if (!NAME_RE.test(name)) {
+    throw new SchemaError(
+      `${what} ${JSON.stringify(name)} must match [A-Za-z_][A-Za-z0-9_]* (schema.invalid-name)`,
+      "schema.invalid-name",
+      "$",
+    );
+  }
+}
+
+/** S-22: a field label must encode to valid UTF-8. Throws `schema.invalid-label`
+ * at the record path `recordPath` (a valid record name, S-8; `undefined` where
+ * no record is known yet, as in `field()`); the label never appears in the path. */
+export function requireWellFormedLabel(label: string, recordPath?: string): void {
+  if (LONE_SURROGATE.test(label)) {
+    throw new SchemaError(
+      "field label is not valid UTF-8 (a lone surrogate) (schema.invalid-label)",
+      "schema.invalid-label",
+      recordPath,
+    );
+  }
+}
+
 /** Builds a `Field`, validating its type and cardinality. */
 export function field(
   label: string,
@@ -225,6 +253,7 @@ export function field(
       "schema.invalid-cardinality",
     );
   }
+  requireWellFormedLabel(label);
   if (label === "") {
     // issue #130, omnist-spec Sec5.4: an empty-string label names nothing a
     // caller could ever reference. Path is the enclosing record, per the
@@ -263,6 +292,7 @@ export interface Record {
 export function record(...fields: Field[]): Record {
   const seen = new Set<string>();
   for (const f of fields) {
+    requireWellFormedLabel(f.label);
     if (seen.has(f.label)) {
       throw new SchemaError(`duplicate field label ${JSON.stringify(f.label)} in a record`, "schema.duplicate-field");
     }
@@ -549,6 +579,13 @@ export class Schema {
   }
 
   private checkRefs(): void {
+    // S-8 (v0.28.0-beta): a record name or a Ref's target name that does not
+    // match [A-Za-z_][A-Za-z0-9_]* is schema.invalid-name at `$` on this
+    // programmatic route, the offending name in the message only (it may be
+    // malformed; E-12 / Sec8.4.1). Checked first so a malformed name is never
+    // reported as a reserved or dangling one.
+    for (const name of this.env.keys()) requireValidName(name, "record name");
+    requireValidName(this.root.name, "root reference");
     for (const [name, rec] of this.env) {
       if (RESERVED_RECORD_NAMES.has(name)) {
         if (name === "any") {
@@ -568,6 +605,10 @@ export class Schema {
       }
       if (rec === null || typeof rec !== "object" || !Array.isArray(rec.fields)) {
         throw new SchemaError(`environment entry ${JSON.stringify(name)} must be a Record, got ${JSON.stringify(rec)}`);
+      }
+      for (const f of rec.fields) {
+        if (f.type.tag === "ref") requireValidName(f.type.name, "reference target");
+        requireWellFormedLabel(f.label, name);
       }
     }
     const walk = (type: FieldType, path: string): void => {

@@ -87,31 +87,29 @@ describe("normalize: partition refinement", () => {
     expect(equivalent(n, s)).toBe(true);
   });
 
-  // issue #136: the representative-name tie-break (and every other
-  // alphabetical-fallback sort in this module) must compare by Unicode
-  // codepoint, never by UTF-16 code unit -- omnist-spec Sec3.3 principle 3.
-  // "￿" (a lone BMP code unit, codepoint U+FFFF) and "\u{10000}" (a
-  // supplementary-plane codepoint encoded as the surrogate pair
-  // 𐀀) disagree under the two orderings: by UTF-16 code unit,
-  // the surrogate pair's leading unit \uD800 (0xD800) sorts before ￿
-  // (0xFFFF); by codepoint, U+FFFF sorts before U+10000. A bare `.sort()`
-  // would therefore pick the wrong representative.
-  it("picks the equivalence-class representative by codepoint, not UTF-16 code unit", () => {
-    const bmpName = "a￿";
-    const supplementaryName = "a\u{10000}";
-    expect(bmpName < supplementaryName).toBe(false); // code-unit order disagrees with codepoint order
+  // issue #136: every alphabetical-fallback sort in this module must compare by
+  // Unicode codepoint, never by UTF-16 code unit -- omnist-spec Sec3.3
+  // principle 3. Since omnist-spec v0.28.0-beta (S-8) a record name is ASCII
+  // `[A-Za-z_][A-Za-z0-9_]*`, so the representative-name tie-break can no longer
+  // see a code-unit/codepoint disagreement; field labels still can. The BMP
+  // label U+FFFF and the supplementary-plane label U+10000 (surrogate pair
+  // D800 DC00) disagree under the two orderings; two records holding the same
+  // labels declared in opposite orders must still be one equivalence class.
+  it("canonicalizes field-label order by codepoint, not UTF-16 code unit", () => {
+    const bmp = "a\uffff";
+    const supp = "a\u{10000}";
+    expect(bmp < supp).toBe(false); // code-unit order disagrees with codepoint order
     const s = new Schema(
       ref("Root"),
       new Map([
-        ["Root", record(field("x", ref(bmpName)), field("y", ref(supplementaryName)))],
-        [bmpName, record(field("v", t.integer))],
-        [supplementaryName, record(field("v", t.integer))],
+        ["Root", record(field("x", ref("P")), field("y", ref("Q")))],
+        ["P", record(field(bmp, t.integer), field(supp, t.integer))],
+        ["Q", record(field(supp, t.integer), field(bmp, t.integer))],
       ]),
     );
     const n = normalize(s);
-    expect([...n.env.keys()].sort()).toEqual(["Root", bmpName].sort());
-    expect(n.env.has(bmpName)).toBe(true);
-    expect(n.env.has(supplementaryName)).toBe(false);
+    expect(n.env.size).toBe(2);
+    expect(equivalent(n, s)).toBe(true);
   });
 });
 
