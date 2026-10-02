@@ -6,6 +6,36 @@ the first documented release of the TypeScript port; the public API
 mirrors the upstream Python package's `__all__` (camelCase names of the
 same functions).
 
+## [v0.6.2-alpha] -- adopt omnist-spec v0.28.0-beta (programmatic schema diagnostics)
+
+`vendor/omnist-spec` bumped to **v0.28.0-beta** (commit `1a7d0de`; the spec tag
+was not yet pushed, so the commit is the pin). Vector count stays 338 (no
+vector reaches these rules, DIV-5), so conformance is unchanged: vector track
+**304 pass / 0 fail / 34 skip**, fixture track 19 / 0 / 0. The new behaviour is
+pinned by `test/schema-v028.test.ts` alone.
+
+- **New code `schema.invalid-label`** (S-22). A field label with a UTF-16 lone
+  surrogate (the one way a JS string fails to encode to UTF-8) is rejected by
+  `field()` and `record()` (no path: no record is known yet), by `new Schema()`
+  at the record path `R`, and by `toOsd` at `R`. The label is never put in the
+  path.
+- **`schema.invalid-name`** (S-8 addendum) is now enforced on the programmatic
+  route: `new Schema()` / `schema()` reject a record name, root name or `Ref`
+  target not matching `[A-Za-z_][A-Za-z0-9_]*`, at path `$` with the name in the
+  message only. This is checked before reserved-name and dangling-reference
+  errors. `infer()` with a malformed `rootName` therefore throws it. OSD text is
+  unaffected (its tokenizer cannot produce a bad name).
+- **`toOsd` fails on `max = 0`** (OSD-16 / S-24) with `WriteError`
+  `write.unsupported-value` at the record path `R`. `field()` still rejects
+  `[0,0]` (`schema.invalid-cardinality`, #125), so this is reachable only through
+  a hand-built `Field` literal.
+- **S-23 (`schema.unknown-record`) does not apply**: TypeScript has no
+  caller-supplied record ordering (`Schema` takes an unordered env; `toOsd` uses
+  insertion order), so there is nothing to check.
+- `prune()` already drops `max = 0` fields from every record it rebuilds (an
+  unsatisfiable root is kept intact, so prune before writing). `normalize()`
+  never emits `max = 0` for schemas built through the public API.
+
 ## [v0.6.1-alpha] -- adopt omnist-spec v0.27.0-beta (empty merge sequence)
 
 `vendor/omnist-spec` bumped to **v0.27.0-beta** (commit `a6a6090`, 338

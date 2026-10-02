@@ -60,6 +60,17 @@ root User
 - **Records are closed** -- an unexpected label is a validation error, not
   silently ignored.
 
+A `Schema` is checked however it was built. Programmatically, `new Schema()`
+rejects a record or reference name outside `[A-Za-z_][A-Za-z0-9_]*`
+(`schema.invalid-name`, path `$`, the name in the message only) and a field
+label that cannot encode to UTF-8, i.e. one holding a lone surrogate
+(`schema.invalid-label`, at the record path; `field()` and `record()` raise it
+without a path). A `[0,0]` field is representable but has no OSD spelling, so
+`toOsd` fails on one with `write.unsupported-value` at the record path; call
+`prune()` first. This port has no caller-supplied record ordering, so
+`schema.unknown-record` (S-23) cannot arise. None of these has a conformance
+vector (spec DIV-5); `test/schema-v028.test.ts` is the only pin.
+
 All of this is defined formally, with proofs, in
 [the spec's Schema Model chapter](https://spec.omnist.dev/03-schema-model).
 

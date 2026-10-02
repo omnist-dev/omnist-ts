@@ -35,6 +35,7 @@ import {
   field,
   nullable,
   record,
+  requireWellFormedLabel,
   ref,
   t,
 } from "./schema.js";
@@ -472,6 +473,19 @@ function renderField(
   if (C0_CONTROL.test(f.label)) {
     throw new WriteError(
       `field label ${JSON.stringify(f.label)} contains a control character, which OSD cannot represent`,
+      undefined,
+      "write.unsupported-value",
+      recordName,
+    );
+  }
+  // S-22 (the writer's own backstop for a schema mutated after construction).
+  requireWellFormedLabel(f.label, recordName);
+  // OSD-16 / S-24: `max = 0` is representable but has no OSD spelling (the
+  // reader rejects `[0,0]`, Sec5.5), so the write fails unconditionally, at
+  // the record path `R` like OSD-14. `prune()` removes such fields first.
+  if (f.max === 0) {
+    throw new WriteError(
+      `field ${JSON.stringify(f.label)} has max = 0, which OSD cannot represent; prune() the schema first`,
       undefined,
       "write.unsupported-value",
       recordName,
