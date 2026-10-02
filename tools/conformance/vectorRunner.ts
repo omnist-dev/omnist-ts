@@ -125,7 +125,12 @@ const LIMIT_KEYS = [
   "declared_max_nodes",
   "declared_max_int_digits",
   "declared_max_alias_expansion", // Sec2.4.1 D-18; enforced via ReadYamlOptions.maxAliasExpansion
+  "declared_max_expanded_slots", // Sec2.4.1 D-22; enforced via ReadYamlOptions.maxExpandedSlots
 ] as const;
+
+// The keys this port can configure at runtime; a vector carrying any OTHER
+// limit key is skipped (the constants are compile-time).
+const CONFIGURABLE_LIMIT_KEYS: readonly string[] = ["declared_max_alias_expansion", "declared_max_expanded_slots"];
 
 interface Diagnostic {
   readonly path: string;
@@ -497,7 +502,7 @@ function runParse(v: Vector): Result {
   if (inp.bytes_hex !== undefined) {
     return runParseBytesHex(v);
   }
-  if (LIMIT_KEYS.some((k) => k !== "declared_max_alias_expansion" && inp[k] !== undefined)) {
+  if (LIMIT_KEYS.some((k) => !CONFIGURABLE_LIMIT_KEYS.includes(k) && inp[k] !== undefined)) {
     return skip("not yet implemented -- omnist-ts's safety limits are compile-time constants, no runtime configuration surface");
   }
   const expect = v.expect;
@@ -515,9 +520,13 @@ function runParse(v: Vector): Result {
     // D-18: `declared_max_alias_expansion` is a vector-local maximum. It is
     // handed to the reader through the `maxAliasExpansion` option, and ONLY
     // for a vector that carries it -- every other vector runs at the default.
-    const readOpts: { report: WriteReport; maxAliasExpansion?: number } = { report };
+    // D-22: declared_max_expanded_slots likewise, through maxExpandedSlots.
+    const readOpts: { report: WriteReport; maxAliasExpansion?: number; maxExpandedSlots?: number } = { report };
     if (inp.declared_max_alias_expansion !== undefined) {
       readOpts.maxAliasExpansion = Number(inp.declared_max_alias_expansion);
+    }
+    if (inp.declared_max_expanded_slots !== undefined) {
+      readOpts.maxExpandedSlots = Number(inp.declared_max_expanded_slots);
     }
     node = getFormat(fmt).read(text, readOpts) as Node;
   } catch (e) {

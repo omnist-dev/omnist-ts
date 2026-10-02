@@ -133,7 +133,12 @@ export {
   type ReadYamlOptions,
   type WriteYamlOptions,
 } from "./formats/yaml.js";
-export { DEFAULT_MAX_ALIAS_EXPANSION, MAX_RECOMMENDED_ALIAS_EXPANSION } from "./formats/yaml-alias.js";
+export {
+  DEFAULT_MAX_ALIAS_EXPANSION,
+  DEFAULT_MAX_EXPANDED_SLOTS,
+  MAX_RECOMMENDED_ALIAS_EXPANSION,
+  MAX_RECOMMENDED_EXPANDED_SLOTS,
+} from "./formats/yaml-alias.js";
 
 // ---------------------------------------------------------------------------
 // Built-in format registration -- mirrors omnist/registry.py's
@@ -187,4 +192,4 @@ _registerFormat({
 });
 
 /** The package version of `@omnist-dev/omnist`, matching `package.json`. */
-export const VERSION = "0.5.0-alpha";
+export const VERSION = "0.6.0-alpha";

@@ -209,9 +209,17 @@ describeIfVendored("main() against the real vendor/omnist-spec/test-suite", () =
     // formats-yaml/alias-expansion vectors run for real: 278 pass, 0 fail,
     // 34 skip (6 limits, 28 OSD-OML). No alias vector is skipped or
     // known-failing.
+    //
+    // v0.6.0-alpha: omnist-spec v0.26.0-beta (331 vectors, +19). D-18a (merge
+    // carriers, malformed merge shapes) and D-22 (the expanded-size limit,
+    // ReadYamlOptions.maxExpandedSlots) implemented. The runner passes each
+    // vector's declared_max_expanded_slots through that option, for those
+    // vectors only. Before the change 7 of the new vectors failed (290 pass);
+    // now all 35 formats-yaml/alias-expansion vectors run for real:
+    // 297 pass, 0 fail, 34 skip (6 limits, 28 OSD-OML). No known-failing list.
     expect(exitCode).toBe(0);
     expect(logs.at(-1)).toBe(
-      "\n278 passed, 0 failed, 34 skipped (of 312 vectors) -- " +
+      "\n297 passed, 0 failed, 34 skipped (of 331 vectors) -- " +
         "diagnostic paths always compared, codes compared where the error carries one (Sec8.5.2)",
     );
   }, 120000);
@@ -235,8 +243,8 @@ describeIfVendored("main() against the real vendor/omnist-spec/test-suite", () =
     }
   }, 120000);
 
-  it("iterVectors discovers all 312 real vectors", () => {
-    expect(iterVectors(REAL_SUITE_DIR).length).toBe(312);
+  it("iterVectors discovers all 331 real vectors", () => {
+    expect(iterVectors(REAL_SUITE_DIR).length).toBe(331);
   });
 });
 
@@ -335,6 +343,20 @@ describe("parse", () => {
       vec("parse", { format: "yaml", text }, { ok: false, diagnostics: [{ path: "$", code: "document.limit.alias-expansion" }] }),
     );
     expect(r).toEqual({ status: "fail", message: "expected failure, parse succeeded" });
+  });
+
+  it("runs a vector declaring declared_max_expanded_slots with that cap, and only that vector", () => {
+    const text = "base: &base {k1: 1, k2: 2, k3: 3}" + String.fromCharCode(10) + "t: {a: *base, b: *base}" + String.fromCharCode(10);
+    // W(root) = 1 + 4 + (1 + 8) = 14.
+    const reject = { ok: false, diagnostics: [{ path: "$", code: "document.limit.expanded-size" }] };
+    expect(runVector(vec("parse", { format: "yaml", declared_max_expanded_slots: 13, text }, reject))).toEqual({
+      status: "pass",
+      message: "ok",
+    });
+    // At the cap the same text is accepted, so the declared value is the one in force.
+    expect(runVector(vec("parse", { format: "yaml", declared_max_expanded_slots: 14, text }, reject)).status).toBe("fail");
+    // Without the key the default (1 000 000) applies.
+    expect(runVector(vec("parse", { format: "yaml", text }, reject)).status).toBe("fail");
   });
 
   it("still skips a vector declaring one of the other (unconfigurable) limits", () => {

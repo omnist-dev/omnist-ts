@@ -71,7 +71,7 @@ import type { Schema } from "../schema.js";
 import { rejectSecondLeadingBom, stripLeadingBom } from "../bom.js";
 import { codecSyntaxError, type CodecBlame } from "./codec-error.js";
 import { checkInputSize } from "./input-size.js";
-import { checkAliasExpansion, resolveMaxAliasExpansion } from "./yaml-alias.js";
+import { checkAliasExpansion, resolveMaxAliasExpansion, resolveMaxExpandedSlots } from "./yaml-alias.js";
 
 // Matches src/document.ts's own MAX_DEPTH (locally redefined here, same as
 // src/formats/json.ts's own copy of the same guard constant -- see that
@@ -239,19 +239,29 @@ export interface ReadYamlOptions {
    * (never "no limit"); a larger or non-integer value throws a `RangeError`.
    */
   maxAliasExpansion?: number;
+  /**
+   * The maximum expanded size (spec D-22, §2.4.1): the value slots one input
+   * materializes. An input that contains at least one alias or merge key is
+   * rejected with `document.limit.expanded-size` when it materializes more,
+   * after the expansion-factor check and before any alias is expanded; an
+   * input with neither is exempt however large. Default 1 000 000; an integer
+   * from 1 to 10 000 000. Zero or negative selects the default (never "no
+   * limit"); a larger or non-integer value throws a `RangeError`.
+   */
+  maxExpandedSlots?: number;
 }
 
 /** Turn a failure from the `yaml` package into the `parse.codec-syntax` error. */
 function yamlSyntaxError(exc: unknown, text: string): ParseError {
   // The library always throws an Error instance (a YAMLParseError, or a
-  // ReferenceError for an unresolved alias / a merge of a non-map), never a
-  // bare value, so the non-Error branch below is a defensive fallback that's
-  // never actually reached.
+  // ReferenceError), never a bare value, so the non-Error branch below is a
+  // defensive fallback that's never actually reached. (A malformed merge
+  // value and an unresolved alias are caught earlier, with a position, by the
+  // shape pass in yaml-alias.ts.)
   /* v8 ignore next */
   const message = exc instanceof Error ? exc.message : String(exc);
   // A YAMLParseError carries `pos: [start, end]` (UTF-16 offsets into the
-  // text). Anything else the library throws (an unresolved alias, a
-  // merge of a non-map) names no position: 1:1.
+  // text). Anything else the library throws names no position: 1:1.
   const pos = (exc as { pos?: unknown }).pos;
   const at: CodecBlame = Array.isArray(pos) && typeof pos[0] === "number" ? { offset: pos[0] } : undefined;
   return codecSyntaxError("YAML", message.split(String.fromCharCode(10))[0] as string, text, at);
@@ -260,12 +270,13 @@ function yamlSyntaxError(exc: unknown, text: string): ParseError {
 /** Parse YAML text into a Document node. */
 export function readYaml(text: string, opts: ReadYamlOptions = {}): Node {
   const maxAliasExpansion = resolveMaxAliasExpansion(opts.maxAliasExpansion);
+  const maxExpandedSlots = resolveMaxExpandedSlots(opts.maxExpandedSlots);
   text = stripLeadingBom(text); // D-15: one leading U+FEFF
   rejectSecondLeadingBom(text, "YAML"); // D-21: a second one is an error
   checkInputSize(text, "YAML");
   checkYamlIntegerDigits(text);
   // Parse to the library's Document AST, which keeps Alias nodes, so the
-  // D-18 check can run on the reference graph BEFORE anything is expanded.
+  // D-18/D-22 checks can run on the reference graph BEFORE anything is expanded.
   let doc: YAML.Document.Parsed;
   try {
     doc = YAML.parseDocument(text, { schema: "yaml-1.1", customTags: customBoolTags, intAsBigInt: true });
@@ -274,7 +285,7 @@ export function readYaml(text: string, opts: ReadYamlOptions = {}): Node {
   } catch (exc) {
     throw yamlSyntaxError(exc, text);
   }
-  checkAliasExpansion(doc.contents, maxAliasExpansion, text);
+  checkAliasExpansion(doc.contents, maxAliasExpansion, text, maxExpandedSlots);
   let parsed: unknown;
   try {
     // mapAsMap preserves each mapping key's own resolved type (so a key
@@ -286,8 +297,8 @@ export function readYaml(text: string, opts: ReadYamlOptions = {}): Node {
     // rejects a Map with a non-string key with a DocumentError.
     // maxAliasCount: -1 switches off the library's own alias guard (a
     // count against a fixed 100 that would pre-empt the D-18 check above
-    // with a bare codec-syntax error); the D-18 check has already bounded
-    // the expansion, so the library's guard has nothing left to do.
+    // with a bare codec-syntax error); the D-18/D-22 checks have already
+    // bounded the expansion, so the library's guard has nothing left to do.
     parsed = doc.toJS({ mapAsMap: true, maxAliasCount: -1 });
   } catch (exc) {
     throw yamlSyntaxError(exc, text);

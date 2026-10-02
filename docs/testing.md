@@ -86,7 +86,7 @@ implementation. Two independent tracks, from the same submodule pin:
 - **The JSON-vector suite** (`tools/conformance/vectorRunner.ts`) runs
   `test-suite/`'s JSON-envelope vectors (`name`/`operation`/`input`/
   `expect`) against the same functions. Currently
-  **278 passed, 0 failed, 34 skipped** (of 312, spec v0.25.0-beta).
+  **297 passed, 0 failed, 34 skipped** (of 331, spec v0.26.0-beta).
 
 Every skip cites an explicit, checkable reason, per
 [`docs/08-conformance-and-errors.md` Sec8.5.5](https://github.com/omnist-dev/omnist-spec/blob/master/docs/08-conformance-and-errors.md)
@@ -103,9 +103,11 @@ in `omnist-spec` -- never an unreasoned skip:
   a runtime-configurable safety limit, and this port's `MAX_DEPTH`/
   `MAX_NODES`/`MAX_INT_DIGITS` are compile-time constants with no
   configuration surface. (The alias expansion limit, by contrast, IS
-  configurable -- `ReadYamlOptions.maxAliasExpansion` -- so the 16
-  `formats-yaml/alias-expansion` vectors, which declare a vector-local
-  maximum through `declared_max_alias_expansion`, run for real.)
+  configurable -- `ReadYamlOptions.maxAliasExpansion`, and the expanded
+  size by `ReadYamlOptions.maxExpandedSlots` -- so the 35
+  `formats-yaml/alias-expansion` vectors, which declare vector-local
+  maximums through `declared_max_alias_expansion` and
+  `declared_max_expanded_slots`, run for real.)
 - **A structured-diagnostics gap** ("not yet implemented") -- a vector
   skips this way **only** when the error this port throws genuinely lacks a
   `path` and/or `code`. Errors that carry both are compared for real:
@@ -132,7 +134,7 @@ pin-bump procedure.
 
 ## Safety limits
 
-This port hardcodes four compile-time safety limits, plus one configurable limit for YAML's aliases, that bound the work
+This port hardcodes four compile-time safety limits, plus two configurable limits for YAML's aliases, that bound the work
 done against untrusted input, each documented alongside the code that
 enforces it:
 
@@ -142,6 +144,7 @@ enforces it:
 | `MAX_NODES` | 1,000,000 | `src/document.ts` (`buildNode`), `src/formats/xml.ts` (`xmlToNode`) | Total nodes materialized while building one Document |
 | `MAX_INT_DIGITS` | 4,300 | `src/document.ts`, and a raw-text pre-parse scan in each of `src/formats/{json,yaml,toml,xml}.ts` | Decimal digits in an `integer` literal |
 | Alias expansion factor | 50 (configurable: `ReadYamlOptions.maxAliasExpansion`, 1 to 10,000) | `src/formats/yaml-alias.ts` (`checkAliasExpansion`), called by `readYaml` before anything is materialized | The ratio of value slots materialized to value slots written, per anchored node, mapping, sequence, and the document root (D-18) |
+| Expanded size | 1,000,000 slots (configurable: `ReadYamlOptions.maxExpandedSlots`, 1 to 10,000,000) | `src/formats/yaml-alias.ts` (`checkAliasExpansion`), called by `readYaml` before anything is materialized | The value slots one YAML input materializes (`W` of the root), for an input that contains an alias or a merge key (D-22); an alias-free input is exempt |
 | `MAX_INPUT_BYTES` | 256 MiB (268,435,456 UTF-16 code units) | `src/formats/input-size.ts` (`checkInputSize`), called first thing in each of `readJson`/`readYaml`/`readToml`/`readXml` | Raw input text size, before any external parsing library runs |
 
 `MAX_DEPTH`/`MAX_NODES`/`MAX_INT_DIGITS` match the reference defaults in
@@ -149,9 +152,11 @@ enforces it:
 None of the three is spec-required to have a runtime-configurable
 surface (see the Conformance testing section above), and this port
 doesn't expose one. The alias expansion factor matches the reference
-default of 50 (`02-document-model.md` Sec2.4.1, D-18/D-19/D-20) and is
-the one limit this port does expose, as `ReadYamlOptions.maxAliasExpansion`
-(D-10, D-11: finite, documented; see [YAML](formats/yaml.md)).
+default of 50 and the expanded size the reference default of 1,000,000
+(`02-document-model.md` Sec2.4.1, D-18 to D-22); these are the two limits this
+port does expose, as `ReadYamlOptions.maxAliasExpansion` and
+`ReadYamlOptions.maxExpandedSlots` (D-10, D-11: finite, documented; see
+[YAML](formats/yaml.md)).
 
 `MAX_INPUT_BYTES` is not a spec-defined limit -- it's specific to this
 port's four external-library-backed format codecs (issue #110). Those
