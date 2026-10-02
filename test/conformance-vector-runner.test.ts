@@ -217,9 +217,13 @@ describeIfVendored("main() against the real vendor/omnist-spec/test-suite", () =
     // vectors only. Before the change 7 of the new vectors failed (290 pass);
     // now all 35 formats-yaml/alias-expansion vectors run for real:
     // 297 pass, 0 fail, 34 skip (6 limits, 28 OSD-OML). No known-failing list.
+    //
+    // v0.6.1-alpha: omnist-spec v0.27.0-beta (338 vectors, +7). D-18a: an empty
+    // merge sequence `<<: []` is a carrier that merges nothing. No code change:
+    // all 7 new vectors pass: 304 pass, 0 fail, 34 skip (6 limits, 28 OSD-OML).
     expect(exitCode).toBe(0);
     expect(logs.at(-1)).toBe(
-      "\n297 passed, 0 failed, 34 skipped (of 331 vectors) -- " +
+      "\n304 passed, 0 failed, 34 skipped (of 338 vectors) -- " +
         "diagnostic paths always compared, codes compared where the error carries one (Sec8.5.2)",
     );
   }, 120000);
@@ -243,8 +247,8 @@ describeIfVendored("main() against the real vendor/omnist-spec/test-suite", () =
     }
   }, 120000);
 
-  it("iterVectors discovers all 331 real vectors", () => {
-    expect(iterVectors(REAL_SUITE_DIR).length).toBe(331);
+  it("iterVectors discovers all 338 real vectors", () => {
+    expect(iterVectors(REAL_SUITE_DIR).length).toBe(338);
   });
 });
 
