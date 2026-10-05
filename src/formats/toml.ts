@@ -31,6 +31,7 @@
 import { parse as parseToml, stringify as stringifyToml, TomlDate, type TomlError } from "smol-toml";
 import { buildNode, grouped, hasInterleaving, type Edge, type Node } from "../document.js";
 import { edgePaths } from "../paths.js";
+import { checkEncodable } from "../encodable.js";
 import { TimeValue } from "../temporal.js";
 import { ParseError, WriteError } from "../errors.js";
 import { finishWrite, WriteReport } from "../report.js";
@@ -399,6 +400,7 @@ export interface WriteTomlOptions {
 /** Write a Document node as TOML text. */
 export function writeToml(node: Node, opts: WriteTomlOptions = {}): string {
   const { strict = false, report } = opts;
+  checkEncodable(node); // C-9, unconditional: a string with no UTF-8 encoding
   const rep = new WriteReport();
   // Sec8.3.8/D-3 (issue #123): same grouping rule as JSON's/YAML's
   // (grouped(), document.ts) -- TOML's array-of-tables collapsing loses
@@ -430,6 +432,7 @@ export function writeToml(node: Node, opts: WriteTomlOptions = {}): string {
 
 /** Report what writing TOML would adjust, without producing output. */
 export function checkToml(node: Node): WriteReport {
+  checkEncodable(node); // C-9, unconditional: a string with no UTF-8 encoding
   const rep = new WriteReport();
   if (hasInterleaving(node)) {
     rep.add("$", "format.interleaving-lost", "cross-label interleaving lost: TOML's grouping rule collapses same-label edges together regardless of position", "warning");

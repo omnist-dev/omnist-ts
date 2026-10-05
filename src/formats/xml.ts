@@ -50,6 +50,7 @@
 import { XMLParser, XMLValidator } from "fast-xml-parser";
 import type { Edge, Node, Scalar } from "../document.js";
 import { edgePaths } from "../paths.js";
+import { checkEncodable } from "../encodable.js";
 import { TimeValue } from "../temporal.js";
 import { DocumentError, ParseError, WriteError } from "../errors.js";
 import { finishWrite, WriteReport } from "../report.js";
@@ -91,8 +92,15 @@ const XML_NAME = /^[A-Za-z_][A-Za-z0-9_.-]*$/;
 // from an ASCII-only string (\x/\u escapes) rather than a literal with raw
 // control/surrogate characters pasted into this file, matching the Python
 // port's codepoint-range convention for _XML_ILLEGAL_RANGES.
-// eslint-disable-next-line no-control-regex
-const XML_ILLEGAL_CHAR = new RegExp("[\\x00-\\x08\\x0B\\x0C\\x0E-\\x1F\\uD800-\\uDFFF\\uFFFE\\uFFFF]");
+// A surrogate is illegal only when LONE: a valid pair is an astral character
+// (U+10000-U+10FFFF), which XML permits; the earlier blanket
+// \uD800-\uDFFF range refused every astral character (found by C-9's
+// "a valid pair still writes" test).
+const XML_ILLEGAL_CHAR = new RegExp(
+  "[\\x00-\\x08\\x0B\\x0C\\x0E-\\x1F\\uFFFE\\uFFFF]" +
+    "|[\\uD800-\\uDBFF](?![\\uDC00-\\uDFFF])" +
+    "|(?<![\\uD800-\\uDBFF])[\\uDC00-\\uDFFF]",
+);
 // g-flagged twin of XML_ILLEGAL_CHAR, derived from .source so the two can
 // never drift. .replace() needs the g flag to substitute every match, not
 // just the first; kept separate from XML_ILLEGAL_CHAR (used with .test() in
@@ -492,6 +500,7 @@ export interface WriteXmlOptions {
 /** Serializes a Document node into XML text (spec §4). */
 export function writeXml(node: Node, opts: WriteXmlOptions = {}): string {
   const { strict = false, report } = opts;
+  checkEncodable(node); // C-9, unconditional, and before any structural refusal
   if (!Array.isArray(node) || node.length !== 1) {
     throw new WriteError(
       "XML needs exactly one document element; the root node must have a single top-level edge (a single-rooted Document)",
@@ -510,6 +519,7 @@ export function writeXml(node: Node, opts: WriteXmlOptions = {}): string {
 
 /** Simulates writing a node to XML without emitting text, returning any lossy adjustments (spec §4). */
 export function checkXml(node: Node): WriteReport {
+  checkEncodable(node); // C-9, unconditional: a string with no UTF-8 encoding
   return scanXml(node);
 }
 

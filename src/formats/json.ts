@@ -15,6 +15,7 @@
 
 import { buildNode, grouped, hasInterleaving, type Edge, type Node, type Scalar } from "../document.js";
 import { edgePaths } from "../paths.js";
+import { checkEncodable } from "../encodable.js";
 import { TimeValue } from "../temporal.js";
 import { ParseError, WriteError } from "../errors.js";
 import { finishWrite, WriteReport } from "../report.js";
@@ -295,6 +296,7 @@ export function checkJson(node: Node): WriteReport {
 }
 
 function scanJson(node: Node): WriteReport {
+  checkEncodable(node); // C-9, unconditional: a string with no UTF-8 encoding
   const rep = new WriteReport();
   for (const [path, v] of leaves(node)) {
     if (v instanceof Date) {

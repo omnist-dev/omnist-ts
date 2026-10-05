@@ -77,6 +77,7 @@ import type { Edge, Node, Scalar } from "./document.js";
 import { ParseError, WriteError } from "./errors.js";
 import { stripLeadingBom } from "./bom.js";
 import { checkInputSize } from "./formats/input-size.js";
+import { checkEncodable } from "./encodable.js";
 import { lineCol } from "./position.js";
 import { WriteReport } from "./report.js";
 import type { Schema } from "./schema.js";
@@ -1013,6 +1014,7 @@ function checkWriteDepth(depth: number): void {
  * always succeeds exactly.
  */
 export function writeOml(node: Node, opts: WriteOmlOptions = {}): string {
+  checkEncodable(node); // C-9: the one failure OML has
   const indent = opts.indent === undefined ? 2 : opts.indent;
   const arrays = opts.arrays ?? false;
   if (!Array.isArray(node)) return writeScalar(node);
@@ -1020,9 +1022,11 @@ export function writeOml(node: Node, opts: WriteOmlOptions = {}): string {
   return writeEdges(node, 0, indent, arrays, 0);
 }
 
-/** OML can hold every Document losslessly; always returns an empty {@link WriteReport}. */
+/** OML can hold every Document losslessly, so the report is always empty -- but
+ * a string with no UTF-8 encoding has no OML spelling at all, so, like
+ * {@link writeOml}, this throws `WriteError` (`write.unsupported-value`) for one (C-9). */
 export function checkOml(node: Node): WriteReport {
-  void node; // OML is lossless: nothing to inspect, always an empty report.
+  checkEncodable(node);
   return new WriteReport();
 }
 

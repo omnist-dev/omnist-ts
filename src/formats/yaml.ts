@@ -65,6 +65,7 @@
 import YAML from "yaml";
 import { buildNode, grouped, hasInterleaving, unwrapTimeValues, type Edge, type Node, type Scalar } from "../document.js";
 import { edgePaths } from "../paths.js";
+import { checkEncodable } from "../encodable.js";
 import { ParseError, WriteError } from "../errors.js";
 import { finishWrite, WriteReport } from "../report.js";
 import { materialize } from "../deserialize.js";
@@ -366,6 +367,7 @@ export function checkYaml(node: Node): WriteReport {
 }
 
 function scanYaml(node: Node): WriteReport {
+  checkEncodable(node); // C-9, unconditional: a string with no UTF-8 encoding
   const rep = new WriteReport();
   for (const [path, label, value] of labeledEdges(node)) {
     if (label.includes("\x85")) {
