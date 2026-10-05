@@ -4,6 +4,7 @@ import { DocumentError, ParseError, WriteError } from "../../src/errors.js";
 import { WriteReport } from "../../src/report.js";
 import { readXml, writeXml, checkXml } from "../../src/formats/xml.js";
 import { TimeValue } from "../../src/temporal.js";
+import type { Node } from "../../src/index.js";
 
 describe("readXml", () => {
   it("parses a document with a standard XML declaration prologue", () => {
@@ -585,17 +586,15 @@ describe("writeXml", () => {
     expect(() => writeXml([{ label: "1tag", target: "x" }])).toThrow(WriteError);
   });
 
-  it("round-trips bool/null/date leaves as text", () => {
+  it("writes bool/date leaves as text", () => {
     const d = [
       { label: "r", target: [
         { label: "flag", target: true },
-        { label: "nothing", target: null },
         { label: "d", target: new Date(Date.UTC(2024, 0, 1)) },
       ] },
     ];
     const out = writeXml(d);
     expect(out).toContain("<flag>true</flag>");
-    expect(/<nothing \/>|<nothing\/>|<nothing><\/nothing>/.test(out)).toBe(true);
     expect(out).toContain("<d>2024-01-01</d>");
   });
 
@@ -633,10 +632,25 @@ describe("writeXml", () => {
 });
 
 describe("checkXml", () => {
-  it("reports null.omitted for a null leaf", () => {
+  it("a null leaf fails unconditionally with write.unsupported-value at its path (C-10)", () => {
     const node = doc({ a: null }).toData();
-    const rep = checkXml(node);
-    expect(rep.adjustments.map((a) => a.code)).toEqual(["null.omitted"]);
+    for (const run of [() => checkXml(node), () => writeXml(node), () => writeXml(node, { strict: true })]) {
+      try {
+        run();
+        expect.unreachable("should have thrown");
+      } catch (e) {
+        expect(e).toBeInstanceOf(WriteError);
+        expect((e as WriteError).code).toBe("write.unsupported-value");
+        expect((e as WriteError).path).toBe("$.a");
+      }
+    }
+  });
+
+  it("a null leaf in a repeated label is named by its indexed path (E-10)", () => {
+    const node = [{ label: "root", target: [
+      { label: "item", target: "a" }, { label: "item", target: null }, { label: "item", target: "c" },
+    ] }] as Node;
+    expect(() => writeXml(node)).toThrow(expect.objectContaining({ code: "write.unsupported-value", path: "$.root.item[1]" }));
   });
 
   it("an invalid label fails unconditionally even alongside an otherwise-adjustable sibling", () => {
@@ -757,10 +771,10 @@ describe("carriage return escaping (issue #129)", () => {
 
 describe("strict/report integration", () => {
   it("strict throws WriteError carrying the report; report= collects adjustments", () => {
-    const node = doc({ r: { a: 1, b: null } }).toData();
+    const node = doc({ r: { a: 1, b: new Date(Date.UTC(2024, 0, 1)) } }).toData();
     const rep = new WriteReport();
     expect(() => writeXml(node, { strict: true, report: rep })).toThrow(WriteError);
-    expect(rep.adjustments.map((a) => a.code)).toEqual(["value.stringified", "null.omitted"]);
+    expect(rep.adjustments.map((a) => a.code)).toEqual(["value.stringified", "temporal.stringified"]);
   });
 });
 

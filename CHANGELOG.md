@@ -6,14 +6,16 @@ the first documented release of the TypeScript port; the public API
 mirrors the upstream Python package's `__all__` (camelCase names of the
 same functions).
 
-## [v0.8.0-alpha] -- adopt omnist-spec v0.32.0-beta (path indexes, OML-29, input size, C-9)
+## [v0.8.0-alpha] -- adopt omnist-spec v0.33.0-beta (path indexes, OML-29, input size, C-9, C-10)
 
-`vendor/omnist-spec` bumped to **v0.32.0-beta** (commit `634ff12`, the
-v0.32.0-beta tag), 362 vectors. Conformance before the work: vector track 311
-pass / 17 fail / 34 skip (5 path vectors, 7 OML-29, 5 over-cap input-size; the 5
-at-cap input-size vectors passed falsely because the runner ignored
-`declared_max_input_bytes`). After: **328 pass / 0 fail / 34 skip**, fixture
-track 19 / 0 / 0. A minor bump: new behaviour, a new default limit, new
+`vendor/omnist-spec` bumped to **v0.33.0-beta** (commit `64cbb68`, the
+v0.33.0-beta tag), 367 vectors. Conformance before the work (v0.32.0-beta pin):
+vector track 311 pass / 17 fail / 34 skip (5 path vectors, 7 OML-29, 5 over-cap
+input-size; the 5 at-cap input-size vectors passed falsely because the runner
+ignored `declared_max_input_bytes`). On the v0.33.0-beta pin before the C-10
+fix: 329 pass / 3 fail / 35 skip (the 5 new `formats-xml/nulls` vectors: 3 fail,
+1 skipped as WriteError carried no code/path, 1 passes). After: **333 pass / 0
+fail / 34 skip** (6 limits, 28 OSD-OML), fixture track 19 / 0 / 0. A minor bump: new behaviour, a new default limit, new
 rejections.
 
 - **E-10 (v0.30.0-beta, DIV-15): the index is on every edge of a repeated
@@ -39,6 +41,14 @@ rejections.
   block mapping (#157): see `docs/limitations.md` for the measurements.
   The vector runner honours `declared_max_input_bytes` and, per E-20a, skips
   any other `declared_*` key, and any on an operation that does not honour it.
+- **C-10 (v0.33.0-beta, DIV-22): an XML `null` leaf fails to write.** XML has no
+  null token and `<a/>` reads back as the empty string, a different Document, so
+  `writeXml` and `checkXml` throw `WriteError` (`write.unsupported-value`) at the
+  null leaf's E-10 path (`$.root.item[1]` under a repeated label), whatever
+  `strict` is, the same treatment as a TOML null. **Behaviour change:** the
+  `null.omitted` adjustment (a warning, the null written as an empty element) no
+  longer exists for XML; a document with a null leaf that used to write now
+  throws.
 - **C-9 (v0.32.0-beta, DIV-5): every writer fails on a string with no UTF-8
   encoding.** A lone surrogate in a string value or edge label makes
   `writeJson`/`writeYaml`/`writeToml`/`writeXml`/`writeOml` and their `check*`

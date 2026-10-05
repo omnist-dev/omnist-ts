@@ -127,8 +127,14 @@ describe("writer diagnostics use E-10 paths", () => {
   });
 
   it("XML: a null leaf under a repeated label", () => {
-    const rep = checkXml([e("r", [e("n", null), e("n", null), e("m", null)])]);
-    expect(rep.adjustments.map((a) => a.path)).toEqual(["$.r.n[0]", "$.r.n[1]", "$.r.m"]);
+    try {
+      checkXml([e("r", [e("n", null), e("n", null), e("m", null)])]);
+      expect.unreachable();
+    } catch (exc) {
+      expect(exc).toBeInstanceOf(WriteError);
+      expect((exc as WriteError).code).toBe("write.unsupported-value");
+      expect((exc as WriteError).path).toBe("$.r.n[0]");
+    }
   });
 
   it("TOML: the null-leaf error names the indexed first occurrence", () => {

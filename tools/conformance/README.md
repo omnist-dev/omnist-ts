@@ -36,7 +36,7 @@ built (steps 1-3 of the harness's 7-step build-out, issue #85).
 `vendor/omnist-spec` is a git submodule pinned to a specific `omnist-spec`
 tag -- **not** tracking `omnist-spec@master`, so fixture updates are
 explicit, reviewable version bumps rather than silent drift. Currently
-pinned to `v0.32.0-beta` (commit `634ff12`).
+pinned to `v0.33.0-beta` (commit `64cbb68`).
 
 Cloning this repo doesn't check the submodule out by default; either
 clone with `--recurse-submodules`, or after a normal clone:
