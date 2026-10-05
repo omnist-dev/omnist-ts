@@ -86,7 +86,7 @@ implementation. Two independent tracks, from the same submodule pin:
 - **The JSON-vector suite** (`tools/conformance/vectorRunner.ts`) runs
   `test-suite/`'s JSON-envelope vectors (`name`/`operation`/`input`/
   `expect`) against the same functions. Currently
-  **304 passed, 0 failed, 34 skipped** (of 338, spec v0.28.0-beta).
+  **328 passed, 0 failed, 34 skipped** (of 362, spec v0.32.0-beta).
 
 Every skip cites an explicit, checkable reason, per
 [`docs/08-conformance-and-errors.md` Sec8.5.5](https://github.com/omnist-dev/omnist-spec/blob/master/docs/08-conformance-and-errors.md)
@@ -145,7 +145,7 @@ enforces it:
 | `MAX_INT_DIGITS` | 4,300 | `src/document.ts`, and a raw-text pre-parse scan in each of `src/formats/{json,yaml,toml,xml}.ts` | Decimal digits in an `integer` literal |
 | Alias expansion factor | 50 (configurable: `ReadYamlOptions.maxAliasExpansion`, 1 to 10,000) | `src/formats/yaml-alias.ts` (`checkAliasExpansion`), called by `readYaml` before anything is materialized | The ratio of value slots materialized to value slots written, per anchored node, mapping, sequence, and the document root (D-18) |
 | Expanded size | 1,000,000 slots (configurable: `ReadYamlOptions.maxExpandedSlots`, 1 to 10,000,000) | `src/formats/yaml-alias.ts` (`checkAliasExpansion`), called by `readYaml` before anything is materialized | The value slots one YAML input materializes (`W` of the root), for an input that contains an alias or a merge key (D-22); an alias-free input is exempt |
-| `MAX_INPUT_BYTES` | 256 MiB (268,435,456 UTF-16 code units) | `src/formats/input-size.ts` (`checkInputSize`), called first thing in each of `readJson`/`readYaml`/`readToml`/`readXml` | Raw input text size, before any external parsing library runs |
+| Input size | 64 MiB (67,108,864 bytes; configurable: `maxInputBytes` on every reader, `--max-input-bytes` on the CLI, any integer of at least 1) | `src/formats/input-size.ts` (`checkInputSize`), called first thing in each of `readJson`/`readYaml`/`readToml`/`readXml`/`readOml` | Raw input size in UTF-8 bytes, a leading BOM counted, before anything is decoded or parsed (D-23); see [Limitations](limitations.md) |
 
 `MAX_DEPTH`/`MAX_NODES`/`MAX_INT_DIGITS` match the reference defaults in
 `omnist-spec`'s [`02-document-model.md` Sec2.4](https://github.com/omnist-dev/omnist-spec/blob/master/docs/02-document-model.md#24-safety-limits).
@@ -158,18 +158,16 @@ port does expose, as `ReadYamlOptions.maxAliasExpansion` and
 `ReadYamlOptions.maxExpandedSlots` (D-10, D-11: finite, documented; see
 [YAML](formats/yaml.md)).
 
-`MAX_INPUT_BYTES` is not a spec-defined limit -- it's specific to this
-port's four external-library-backed format codecs (issue #110). Those
-codecs each hand raw input text to an external parsing library (native
-`JSON.parse`, the `yaml` package, `smol-toml`, `fast-xml-parser`)
-*before* `buildNode`'s `MAX_DEPTH`/`MAX_NODES` checks ever run --
-those checks bound the materialized Document, not the work the external
-library does while producing the intermediate parsed value in the first
-place. `checkInputSize` closes the coarse but cheap case (an
-attacker-controlled, arbitrarily large raw input) ahead of any library
-call. See `src/formats/input-size.ts`'s file-top comment for the full
-reasoning, including why 256 MiB was chosen (a large margin over what
-even a maximally-verbose, `MAX_NODES`-sized document actually needs).
+The input-size limit is `omnist-spec` D-23 to D-26 (`02-document-model.md`
+Sec2.4.2; it began as this port's own guard, issue #110). The codecs each hand
+raw input text to an external parsing library (native `JSON.parse`, the `yaml`
+package, `smol-toml`, `fast-xml-parser`) *before* `buildNode`'s
+`MAX_DEPTH`/`MAX_NODES` checks ever run -- those checks bound the materialized
+Document, not the work the library does producing the intermediate value.
+`checkInputSize` refuses an oversized input first, with
+`document.limit.input-size` at `$`. The default is 64 MiB, a deliberate
+behaviour change from the 256 MiB UTF-16-unit guard of earlier versions; what
+it does and does not bound is in [Limitations](limitations.md).
 
 ## What CI runs
 

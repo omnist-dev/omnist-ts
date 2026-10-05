@@ -38,9 +38,12 @@ export {
 export {
   registerFormat,
   getFormat,
+  readFormat,
   formats,
   type Format,
 } from "./registry.js";
+
+export { DEFAULT_MAX_INPUT_BYTES, INPUT_SIZE_CODE } from "./formats/input-size.js";
 
 export {
   Schema,
@@ -192,4 +195,4 @@ _registerFormat({
 });
 
 /** The package version of `@omnist-dev/omnist`, matching `package.json`. */
-export const VERSION = "0.7.0-alpha";
+export const VERSION = "0.8.0-alpha";

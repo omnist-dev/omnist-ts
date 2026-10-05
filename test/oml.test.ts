@@ -170,7 +170,7 @@ it("nested braces at arbitrary depth", () => {
 });
 
 it("inline brace style with semicolons", () => {
-  expect(readOml("{ a: 1; b: 2 }")).toEqual([e("a", 1n), e("b", 2n)]);
+  expect(readOml("x: { a: 1; b: 2 }")).toEqual([e("x", [e("a", 1n), e("b", 2n)])]);
 });
 
 it("comments are ignored", () => {
@@ -354,21 +354,18 @@ describe("multiline strings", () => {
 // ---------------------------------------------------------------------------
 
 describe("top-level structural disambiguation", () => {
-  it("a brace must wrap the entire document", () => {
+  it("a top-level braced node is not a document shape (Sec4.6; #160)", () => {
     expect(() => readOml("{ a: 1 }\nb: 2")).toThrow(ParseError);
-  });
-
-  it("one set of braces around everything is fine", () => {
-    expect(readOml("{ a: 1; b: 2 }")).toEqual([e("a", 1n), e("b", 2n)]);
+    expect(() => readOml("{ a: 1; b: 2 }")).toThrow(ParseError);
   });
 
   it("two bare leaves is an error", () => {
     expect(() => readOml("42\n43")).toThrow(ParseError);
   });
 
-  it("empty braces is an empty node", () => {
-    expect(readOml("{ ;;; }")).toEqual([]);
-    expect(readOml("{ }")).toEqual([]);
+  it("empty braces is an empty node when it is an edge's value", () => {
+    expect(readOml("x: { ;;; }")).toEqual([e("x", [])]);
+    expect(readOml("x: { }")).toEqual([e("x", [])]);
   });
 
   it("two edges without a separator is an error", () => {
@@ -386,15 +383,15 @@ describe("top-level structural disambiguation", () => {
 
 describe("structural parse errors inside braces", () => {
   it("missing colon after label", () => {
-    expect(() => readOml("{a 1}")).toThrow(/expected ':'/);
+    expect(() => readOml("x: {a 1}")).toThrow(/expected ':'/);
   });
 
   it("non-label token where a label is expected", () => {
-    expect(() => readOml("{1: 2}")).toThrow(/expected a label/);
+    expect(() => readOml("x: {1: 2}")).toThrow(/expected a label/);
   });
 
   it("missing closing brace", () => {
-    expect(() => readOml("{a: 1")).toThrow(/expected '\}'/);
+    expect(() => readOml("x: {a: 1")).toThrow(/expected '\}'/);
   });
 
   it("missing value after colon", () => {
@@ -412,7 +409,7 @@ describe("reserved words and labels", () => {
   });
 
   it("a reserved word as a bare label inside braces is an error", () => {
-    expect(() => readOml("{a: 1\ntrue: 2}")).toThrow(/reserved word/);
+    expect(() => readOml("x: {a: 1\ntrue: 2}")).toThrow(/reserved word/);
   });
 
   it("a quoted reserved word label is fine", () => {
@@ -1421,9 +1418,9 @@ describe("OML parse error codes (spec Sec8.3.1, issue #108)", () => {
   });
 
   it("a reserved word used as a bare label gets parse.reserved-word-label", () => {
-    const err = errOf("{true: 1}");
+    const err = errOf("x: {true: 1}");
     expect(err.code).toBe("parse.reserved-word-label");
-    expect(err.path).toBe("1:2");
+    expect(err.path).toBe("1:5");
   });
 
   it("a bare identifier in value position gets parse.bare-word", () => {

@@ -76,6 +76,8 @@
 import type { Edge, Node, Scalar } from "./document.js";
 import { ParseError, WriteError } from "./errors.js";
 import { stripLeadingBom } from "./bom.js";
+import { checkInputSize } from "./formats/input-size.js";
+import { checkEncodable } from "./encodable.js";
 import { lineCol } from "./position.js";
 import { WriteReport } from "./report.js";
 import type { Schema } from "./schema.js";
@@ -631,8 +633,6 @@ class Parser {
     if (this.kind === "EOF") {
       this.countNode();
       node = [];
-    } else if (this.kind === "LBRACE") {
-      node = this.parseValue(0);
     } else if (this.looksLikeEdge()) {
       node = this.parseNodeEdges(0);
     } else {
@@ -688,6 +688,9 @@ class Parser {
           "parse.unexpected-token",
         );
       }
+      // OML-29: nothing ends at a colon, so a newline, `;` or comment right
+      // after it is the gap before the value, not an edge separator.
+      this.skipSep();
       if (this.kind === "LBRACKET") {
         for (const element of this.parseArray(depth)) {
           edges.push({ label, target: element });
@@ -950,10 +953,19 @@ export interface ReadOmlOptions {
    * (cardinality, closedness), guaranteeing the result conforms -- or
    * raising `ParseError` with the full structured issue list otherwise. */
   readonly schema?: Schema;
+  /**
+   * The largest input, in UTF-8 bytes, that is read at all (spec D-23,
+   * Sec2.4.2): a larger input is refused with `document.limit.input-size` at
+   * `$` before it is parsed; one of exactly this size is accepted. A leading
+   * byte-order mark counts. Default 64 MiB; an integer of at least 1, else a
+   * `RangeError`.
+   */
+  readonly maxInputBytes?: number;
 }
 
 /** Parse OML source into a canonical Document node (edge list or leaf). */
 export function readOml(text: string, opts: ReadOmlOptions = {}): Node {
+  checkInputSize(text, opts.maxInputBytes); // D-23: first, the BOM's bytes counted
   const scanner = new Scanner(text);
   const node = new Parser(scanner).parseDocument();
   if (opts.schema !== undefined) {
@@ -1000,6 +1012,7 @@ function checkWriteDepth(depth: number): void {
  * always succeeds exactly.
  */
 export function writeOml(node: Node, opts: WriteOmlOptions = {}): string {
+  checkEncodable(node); // C-9: the one failure OML has
   const indent = opts.indent === undefined ? 2 : opts.indent;
   const arrays = opts.arrays ?? false;
   if (!Array.isArray(node)) return writeScalar(node);
@@ -1007,9 +1020,11 @@ export function writeOml(node: Node, opts: WriteOmlOptions = {}): string {
   return writeEdges(node, 0, indent, arrays, 0);
 }
 
-/** OML can hold every Document losslessly; always returns an empty {@link WriteReport}. */
+/** OML can hold every Document losslessly, so the report is always empty -- but
+ * a string with no UTF-8 encoding has no OML spelling at all, so, like
+ * {@link writeOml}, this throws `WriteError` (`write.unsupported-value`) for one (C-9). */
 export function checkOml(node: Node): WriteReport {
-  void node; // OML is lossless: nothing to inspect, always an empty report.
+  checkEncodable(node);
   return new WriteReport();
 }
 

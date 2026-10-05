@@ -43,7 +43,7 @@ describe("depth boundary (report: Confirmed identical -- Document model)", () =>
   const nestOml = (n: number): string => {
     let s = "1";
     for (let i = 0; i < n; i++) s = "{ a: " + s + " }";
-    return s;
+    return "a: " + s; // a top-level braced node is not a document (Sec4.6)
   };
   const nestXml = (n: number): string => {
     let s = "1";

@@ -19,11 +19,18 @@ import { readOml, writeOml, checkOml } from "@omnist-dev/omnist";
 
 const node = readOml('name: "Ann"\ntag: "x"\ntag: "y"\n');
 writeOml(node);         // 'name: "Ann"\ntag: "x"\ntag: "y"'
-checkOml(node);          // WriteReport {} -- always empty
+checkOml(node);          // WriteReport {} -- empty for any Document that encodes
 ```
 <!-- doc-illustrative -->
 
 ## Shape
+
+An OML document is exactly one of three shapes (spec Sec4.6): a single scalar,
+zero or more top-level edges, or the empty document. A top-level braced node
+(`{a: 1}`) is none of them and is rejected (`parse.unexpected-token` at the
+brace); braces are for an edge's value (`x: {a: 1}`). After an edge's colon, a
+run of spaces, comments, newlines and `;` is skipped, so the value may start on a
+later line (OML-29); a separator is still required between edges.
 
 A document is zero or more `label: value` edges, one per line (or
 `;`-separated on one line, for inline style). A repeated label is how an

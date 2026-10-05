@@ -218,13 +218,19 @@ describeIfVendored("main() against the real vendor/omnist-spec/test-suite", () =
     // now all 35 formats-yaml/alias-expansion vectors run for real:
     // 297 pass, 0 fail, 34 skip (6 limits, 28 OSD-OML). No known-failing list.
     //
+    // v0.8.0-alpha: omnist-spec v0.32.0-beta (362 vectors, +24). E-10 paths
+    // (5 vectors), OML-29 (7) and D-23 (10: the runner hands each vector's
+    // declared_max_input_bytes to the reader) all run for real; C-9 adds no
+    // vector (DIV-5). Before the work: 311 pass, 17 fail (5 paths, 7 OML-29,
+    // 5 over-cap input-size), 34 skip, the 5 at-cap vectors passing falsely
+    // because the old runner ignored the key. Now 328 pass, 0 fail, 34 skip.
     // v0.7.0-alpha: omnist-spec v0.28.0-beta adds no vectors (338, DIV-5).
     // v0.6.1-alpha: omnist-spec v0.27.0-beta (338 vectors, +7). D-18a: an empty
     // merge sequence `<<: []` is a carrier that merges nothing. No code change:
     // all 7 new vectors pass: 304 pass, 0 fail, 34 skip (6 limits, 28 OSD-OML).
     expect(exitCode).toBe(0);
     expect(logs.at(-1)).toBe(
-      "\n304 passed, 0 failed, 34 skipped (of 338 vectors) -- " +
+      "\n328 passed, 0 failed, 34 skipped (of 362 vectors) -- " +
         "diagnostic paths always compared, codes compared where the error carries one (Sec8.5.2)",
     );
   }, 120000);
@@ -248,8 +254,8 @@ describeIfVendored("main() against the real vendor/omnist-spec/test-suite", () =
     }
   }, 120000);
 
-  it("iterVectors discovers all 338 real vectors", () => {
-    expect(iterVectors(REAL_SUITE_DIR).length).toBe(338);
+  it("iterVectors discovers all 362 real vectors", () => {
+    expect(iterVectors(REAL_SUITE_DIR).length).toBe(362);
   });
 });
 
@@ -367,6 +373,51 @@ describe("parse", () => {
   it("still skips a vector declaring one of the other (unconfigurable) limits", () => {
     const r = runVector(vec("parse", { format: "yaml", declared_max_depth: 3, text: "a: 1" + String.fromCharCode(10) }, { ok: true }));
     expect(r.status).toBe("skip");
+  });
+
+  it("runs a vector declaring declared_max_input_bytes with that maximum, not the default (D-23)", () => {
+    const reject = { ok: false, diagnostics: [{ path: "$", code: "document.limit.input-size" }] };
+    const accept = { ok: true, document: { edges: [["a", { scalar: { kind: "integer", value: 1 } }]] } };
+    const text = "a: 1" + String.fromCharCode(10); // 5 bytes
+    expect(runVector(vec("parse", { format: "oml", declared_max_input_bytes: 4, text }, reject))).toEqual({
+      status: "pass",
+      message: "ok",
+    });
+    // At the maximum the same text is accepted, so the declared value is the one in force.
+    expect(runVector(vec("parse", { format: "oml", declared_max_input_bytes: 5, text }, accept))).toEqual({
+      status: "pass",
+      message: "ok",
+    });
+    expect(runVector(vec("parse", { format: "oml", declared_max_input_bytes: 4, text }, accept)).status).toBe("fail");
+    // Without the key the default (64 MiB) applies, so a refusal is not expected.
+    expect(runVector(vec("parse", { format: "oml", text }, reject)).status).toBe("fail");
+  });
+
+  it("E-20a: a declared_* key the runner does not understand is skipped, never run against the default", () => {
+    const r = runVector(vec("parse", { format: "oml", declared_max_widgets: 1, text: "a: 1" + String.fromCharCode(10) }, { ok: true }));
+    expect(r).toEqual({
+      status: "skip",
+      message: 'not yet implemented -- omnist-ts does not honour declared_max_widgets on operation "parse" (E-20a)',
+    });
+  });
+
+  it("E-20a: a declared_* key on an operation that does not honour it is skipped", () => {
+    const r = runVector(vec("validate", { declared_max_input_bytes: 5, schema: 'record R {\n  "a": string,\n}\nroot R\n', document: { edges: [] } }, { ok: true }));
+    expect(r).toEqual({
+      status: "skip",
+      message: 'not yet implemented -- omnist-ts does not honour declared_max_input_bytes on operation "validate" (E-20a)',
+    });
+  });
+
+  it("E-20a: a declared_* key on the bytes_hex path (through the CLI, which takes no such option) is skipped", () => {
+    const r = runVector(vec("parse", { format: "json", declared_max_input_bytes: 5, bytes_hex: "7b7d" }, { ok: true }));
+    expect(r.status).toBe("skip");
+    expect(r.message).toContain("declared_max_input_bytes");
+  });
+
+  it("an ordinary vector with no declared_* key is not skipped by the E-20a check", () => {
+    const r = runVector(vec("is_empty", { schema: 'record R {\n    "a": string,\n}\nroot R\n' }, { empty: false }));
+    expect(r.status).toBe("pass");
   });
 
   it("passes when the parsed document matches expected", () => {

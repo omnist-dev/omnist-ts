@@ -64,6 +64,8 @@
 
 import YAML from "yaml";
 import { buildNode, grouped, hasInterleaving, unwrapTimeValues, type Node, type Scalar } from "../document.js";
+import { EdgePaths } from "../paths.js";
+import { checkEncodable } from "../encodable.js";
 import { ParseError, WriteError } from "../errors.js";
 import { finishWrite, WriteReport } from "../report.js";
 import { materialize } from "../deserialize.js";
@@ -214,11 +216,9 @@ function* labeledEdges(
 ): Generator<[string, string, Scalar | undefined]> {
   if (Array.isArray(node)) {
     checkWriteDepth(depth);
-    const counts = new Map<string, number>();
+    const paths = new EdgePaths(path, node);
     for (const { label, target } of node) {
-      const i = counts.get(label) ?? 0;
-      counts.set(label, i + 1);
-      const p = i === 0 ? path + "." + label : path + "." + label + "[" + String(i) + "]";
+      const p = paths.next(label);
       yield [p, label, Array.isArray(target) ? undefined : target];
       yield* labeledEdges(target, p, depth + 1);
     }
@@ -249,6 +249,14 @@ export interface ReadYamlOptions {
    * limit"); a larger or non-integer value throws a `RangeError`.
    */
   maxExpandedSlots?: number;
+  /**
+   * The largest input, in UTF-8 bytes, that is read at all (spec D-23,
+   * Sec2.4.2): a larger input is refused with `document.limit.input-size` at
+   * `$` before it is decoded or parsed; one of exactly this size is accepted.
+   * A leading byte-order mark counts. Default 64 MiB; an integer of at least
+   * 1, else a `RangeError`.
+   */
+  maxInputBytes?: number;
 }
 
 /** Turn a failure from the `yaml` package into the `parse.codec-syntax` error. */
@@ -271,9 +279,9 @@ function yamlSyntaxError(exc: unknown, text: string): ParseError {
 export function readYaml(text: string, opts: ReadYamlOptions = {}): Node {
   const maxAliasExpansion = resolveMaxAliasExpansion(opts.maxAliasExpansion);
   const maxExpandedSlots = resolveMaxExpandedSlots(opts.maxExpandedSlots);
+  checkInputSize(text, opts.maxInputBytes); // D-23: first, the BOM's bytes counted
   text = stripLeadingBom(text); // D-15: one leading U+FEFF
   rejectSecondLeadingBom(text, "YAML"); // D-21: a second one is an error
-  checkInputSize(text, "YAML");
   checkYamlIntegerDigits(text);
   // Parse to the library's Document AST, which keeps Alias nodes, so the
   // D-18/D-22 checks can run on the reference graph BEFORE anything is expanded.
@@ -358,6 +366,7 @@ export function checkYaml(node: Node): WriteReport {
 }
 
 function scanYaml(node: Node): WriteReport {
+  checkEncodable(node); // C-9, unconditional: a string with no UTF-8 encoding
   const rep = new WriteReport();
   for (const [path, label, value] of labeledEdges(node)) {
     if (label.includes("\x85")) {

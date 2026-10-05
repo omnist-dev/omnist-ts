@@ -51,6 +51,7 @@
 
 import { DocumentError } from "./errors.js";
 import { TimeValue } from "./temporal.js";
+import { EdgePaths } from "./paths.js";
 
 const MAX_DEPTH = 200;
 // Matches CPython's default sys.get_int_max_str_digits(); JS numbers can't
@@ -291,12 +292,9 @@ export class Doc {
       throw new DocumentError(`${this.path}: a leaf has no edges`);
     }
     const out: Array<[string, Doc]> = [];
-    const counts = new Map<string, number>();
+    const paths = new EdgePaths(this.path, this._node);
     for (const { label, target } of this._node) {
-      const i = counts.get(label) ?? 0;
-      counts.set(label, i + 1);
-      const cp = i === 0 ? `${this.path}.${label}` : `${this.path}.${label}[${i}]`;
-      out.push([label, new Doc(target, cp, this.depth + 1)]);
+      out.push([label, new Doc(target, paths.next(label), this.depth + 1)]);
     }
     return out;
   }

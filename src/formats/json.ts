@@ -14,6 +14,8 @@
  */
 
 import { buildNode, grouped, hasInterleaving, type Node, type Scalar } from "../document.js";
+import { EdgePaths } from "../paths.js";
+import { checkEncodable } from "../encodable.js";
 import { TimeValue } from "../temporal.js";
 import { ParseError, WriteError } from "../errors.js";
 import { finishWrite, WriteReport } from "../report.js";
@@ -196,12 +198,9 @@ function checkWriteDepth(depth: number): void {
 function* leaves(node: Node, path = "$", depth = 0): Generator<[string, Scalar]> {
   if (Array.isArray(node)) {
     checkWriteDepth(depth);
-    const counts = new Map<string, number>();
+    const paths = new EdgePaths(path, node);
     for (const { label, target } of node) {
-      const i = counts.get(label) ?? 0;
-      counts.set(label, i + 1);
-      const p = i === 0 ? path + "." + label : path + "." + label + "[" + String(i) + "]";
-      yield* leaves(target, p, depth + 1);
+      yield* leaves(target, paths.next(label), depth + 1);
     }
   } else {
     yield [path, node];
@@ -213,6 +212,14 @@ function* leaves(node: Node, path = "$", depth = 0): Generator<[string, Scalar]>
 export interface ReadJsonOptions {
   /** Optional {@link Schema} for schema-directed materialization (spec §4). */
   schema?: Schema;
+  /**
+   * The largest input, in UTF-8 bytes, that is read at all (spec D-23,
+   * Sec2.4.2): a larger input is refused with `document.limit.input-size` at
+   * `$` before it is decoded or parsed; one of exactly this size is accepted.
+   * A leading byte-order mark counts. Default 64 MiB; an integer of at least
+   * 1, else a `RangeError`.
+   */
+  maxInputBytes?: number;
 }
 
 /**
@@ -239,9 +246,9 @@ function jsonBlame(text: string, taggedMessage: string): CodecBlame {
 
 /** Parse JSON text into a Document node. */
 export function readJson(text: string, opts: ReadJsonOptions = {}): Node {
+  checkInputSize(text, opts.maxInputBytes); // D-23: first, the BOM's bytes counted
   text = stripLeadingBom(text); // D-15: one leading U+FEFF
   rejectSecondLeadingBom(text, "JSON"); // D-21: a second one is an error
-  checkInputSize(text, "JSON");
   checkJsonIntegerDigits(text);
   let parsed: unknown;
   try {
@@ -289,6 +296,7 @@ export function checkJson(node: Node): WriteReport {
 }
 
 function scanJson(node: Node): WriteReport {
+  checkEncodable(node); // C-9, unconditional: a string with no UTF-8 encoding
   const rep = new WriteReport();
   for (const [path, v] of leaves(node)) {
     if (v instanceof Date) {

@@ -30,6 +30,8 @@
 
 import { parse as parseToml, stringify as stringifyToml, TomlDate, type TomlError } from "smol-toml";
 import { buildNode, grouped, hasInterleaving, type Node } from "../document.js";
+import { EdgePaths } from "../paths.js";
+import { checkEncodable } from "../encodable.js";
 import { TimeValue } from "../temporal.js";
 import { ParseError, WriteError } from "../errors.js";
 import { finishWrite, WriteReport } from "../report.js";
@@ -179,6 +181,14 @@ function convertTomlDates(value: unknown): unknown {
 export interface ReadTomlOptions {
   /** Optional {@link Schema} for schema-directed materialization (spec §4). */
   schema?: Schema;
+  /**
+   * The largest input, in UTF-8 bytes, that is read at all (spec D-23,
+   * Sec2.4.2): a larger input is refused with `document.limit.input-size` at
+   * `$` before it is decoded or parsed; one of exactly this size is accepted.
+   * A leading byte-order mark counts. Default 64 MiB; an integer of at least
+   * 1, else a `RangeError`.
+   */
+  maxInputBytes?: number;
 }
 
 /**
@@ -255,9 +265,9 @@ function checkTomlIntegerDigits(text: string): void {
 
 /** Parses TOML text into a Document node (spec §4). */
 export function readToml(text: string, opts: ReadTomlOptions = {}): Node {
+  checkInputSize(text, opts.maxInputBytes); // D-23: first, the BOM's bytes counted
   text = stripLeadingBom(text); // D-15: one leading U+FEFF
   rejectSecondLeadingBom(text, "TOML"); // D-21: a second one is an error
-  checkInputSize(text, "TOML");
   checkTomlIntegerDigits(text);
   let parsed: unknown;
   try {
@@ -298,11 +308,9 @@ function stripNulls(node: Node, path: string, rep: WriteReport, depth = 0): Node
   if (!Array.isArray(node)) return node;
   checkWriteDepth(depth);
   const out: { label: string; target: Node }[] = [];
-  const counts = new Map<string, number>();
+  const paths = new EdgePaths(path, node);
   for (const { label, target } of node) {
-    const i = counts.get(label) ?? 0;
-    counts.set(label, i + 1);
-    const p = i === 0 ? path + "." + label : path + "." + label + "[" + String(i) + "]";
+    const p = paths.next(label);
     if (target === null) {
       throw new WriteError(
         "path " + p + ": a null-valued leaf has no TOML representation and no safe substitute " +
@@ -391,6 +399,7 @@ export interface WriteTomlOptions {
 /** Write a Document node as TOML text. */
 export function writeToml(node: Node, opts: WriteTomlOptions = {}): string {
   const { strict = false, report } = opts;
+  checkEncodable(node); // C-9, unconditional: a string with no UTF-8 encoding
   const rep = new WriteReport();
   // Sec8.3.8/D-3 (issue #123): same grouping rule as JSON's/YAML's
   // (grouped(), document.ts) -- TOML's array-of-tables collapsing loses
@@ -422,6 +431,7 @@ export function writeToml(node: Node, opts: WriteTomlOptions = {}): string {
 
 /** Report what writing TOML would adjust, without producing output. */
 export function checkToml(node: Node): WriteReport {
+  checkEncodable(node); // C-9, unconditional: a string with no UTF-8 encoding
   const rep = new WriteReport();
   if (hasInterleaving(node)) {
     rep.add("$", "format.interleaving-lost", "cross-label interleaving lost: TOML's grouping rule collapses same-label edges together regardless of position", "warning");

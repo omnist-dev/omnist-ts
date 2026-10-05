@@ -49,6 +49,8 @@
 
 import { XMLParser, XMLValidator } from "fast-xml-parser";
 import type { Edge, Node, Scalar } from "../document.js";
+import { EdgePaths } from "../paths.js";
+import { checkEncodable } from "../encodable.js";
 import { TimeValue } from "../temporal.js";
 import { DocumentError, ParseError, WriteError } from "../errors.js";
 import { finishWrite, WriteReport } from "../report.js";
@@ -90,8 +92,15 @@ const XML_NAME = /^[A-Za-z_][A-Za-z0-9_.-]*$/;
 // from an ASCII-only string (\x/\u escapes) rather than a literal with raw
 // control/surrogate characters pasted into this file, matching the Python
 // port's codepoint-range convention for _XML_ILLEGAL_RANGES.
-// eslint-disable-next-line no-control-regex
-const XML_ILLEGAL_CHAR = new RegExp("[\\x00-\\x08\\x0B\\x0C\\x0E-\\x1F\\uD800-\\uDFFF\\uFFFE\\uFFFF]");
+// A surrogate is illegal only when LONE: a valid pair is an astral character
+// (U+10000-U+10FFFF), which XML permits; the earlier blanket
+// \uD800-\uDFFF range refused every astral character (found by C-9's
+// "a valid pair still writes" test).
+const XML_ILLEGAL_CHAR = new RegExp(
+  "[\\x00-\\x08\\x0B\\x0C\\x0E-\\x1F\\uFFFE\\uFFFF]" +
+    "|[\\uD800-\\uDBFF](?![\\uDC00-\\uDFFF])" +
+    "|(?<![\\uD800-\\uDBFF])[\\uDC00-\\uDFFF]",
+);
 // g-flagged twin of XML_ILLEGAL_CHAR, derived from .source so the two can
 // never drift. .replace() needs the g flag to substitute every match, not
 // just the first; kept separate from XML_ILLEGAL_CHAR (used with .test() in
@@ -181,6 +190,14 @@ export interface ReadXmlOptions {
    * same shape (path/code/message/severity), and this is the only reader
    * in the port that has anything to report yet. */
   report?: WriteReport;
+  /**
+   * The largest input, in UTF-8 bytes, that is read at all (spec D-23,
+   * Sec2.4.2): a larger input is refused with `document.limit.input-size` at
+   * `$` before it is decoded or parsed; one of exactly this size is accepted.
+   * A leading byte-order mark counts. Default 64 MiB; an integer of at least
+   * 1, else a `RangeError`.
+   */
+  maxInputBytes?: number;
 }
 
 // Data-XML profile (docs/formats/xml.md): a DOCTYPE declaration of any kind,
@@ -232,9 +249,9 @@ function mixedContentError(where: string): ParseError {
 
 /** Parses XML text into a Document node (spec §4). */
 export function readXml(text: string, opts: ReadXmlOptions = {}): Node {
+  checkInputSize(text, opts.maxInputBytes); // D-23: first, the BOM's bytes counted
   text = stripLeadingBom(text); // D-15: one leading U+FEFF
   rejectSecondLeadingBom(text, "XML"); // D-21: a second one is an error
-  checkInputSize(text, "XML");
   // Well-formedness FIRST: malformed input is a syntax error
   // (parse.codec-syntax) even when it also contains a DOCTYPE or an entity
   // reference; only well-formed XML can be a profile *refusal* (docs/formats/
@@ -483,6 +500,7 @@ export interface WriteXmlOptions {
 /** Serializes a Document node into XML text (spec §4). */
 export function writeXml(node: Node, opts: WriteXmlOptions = {}): string {
   const { strict = false, report } = opts;
+  checkEncodable(node); // C-9, unconditional, and before any structural refusal
   if (!Array.isArray(node) || node.length !== 1) {
     throw new WriteError(
       "XML needs exactly one document element; the root node must have a single top-level edge (a single-rooted Document)",
@@ -501,6 +519,7 @@ export function writeXml(node: Node, opts: WriteXmlOptions = {}): string {
 
 /** Simulates writing a node to XML without emitting text, returning any lossy adjustments (spec §4). */
 export function checkXml(node: Node): WriteReport {
+  checkEncodable(node); // C-9, unconditional: a string with no UTF-8 encoding
   return scanXml(node);
 }
 
@@ -528,11 +547,9 @@ function scanXmlNode(node: Node, path: string, rep: WriteReport, depth: number):
         path,
       );
     }
-    const counts = new Map<string, number>();
+    const paths = new EdgePaths(path, node);
     for (const { label, target } of node) {
-      const i = counts.get(label) ?? 0;
-      counts.set(label, i + 1);
-      const p = i === 0 ? path + "." + label : path + "." + label + "[" + String(i) + "]";
+      const p = paths.next(label);
       if (!XML_NAME.test(label)) {
         // issue #126: no single well-defined substitute exists for a label
         // XML's own name syntax can't represent -- sanitizing invents
