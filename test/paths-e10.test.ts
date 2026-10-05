@@ -141,3 +141,53 @@ describe("writer diagnostics use E-10 paths", () => {
     }
   });
 });
+
+// EdgePaths has three strategies (no repeat in a small node, a repeat in a
+// small node, any node over 8 edges); every one must agree with the plain
+// definition of E-10, checked here on exhaustive and pseudo-random label runs.
+describe("EdgePaths agrees with the E-10 definition", () => {
+  function reference(path: string, labels: string[]): string[] {
+    return labels.map((label, i) => {
+      const total = labels.filter((l) => l === label).length;
+      if (total === 1) return `${path}.${label}`;
+      const k = labels.slice(0, i).filter((l) => l === label).length;
+      return `${path}.${label}[${k}]`;
+    });
+  }
+
+  it("every label sequence over {a,b,c} of length 0 to 6", () => {
+    const alphabet = ["a", "b", "c"];
+    const seqs: string[][] = [[]];
+    for (let len = 1; len <= 6; len++) {
+      for (const s of seqs.filter((x) => x.length === len - 1)) {
+        for (const l of alphabet) seqs.push([...s, l]);
+      }
+    }
+    expect(seqs.length).toBe(1 + 3 + 9 + 27 + 81 + 243 + 729);
+    for (const labels of seqs) {
+      expect(edgePaths("$.n", labels.map((label) => ({ label })))).toEqual(reference("$.n", labels));
+    }
+  });
+
+  it("nodes over 8 edges (the Set strategy): none repeated, some repeated, all one label", () => {
+    const distinct = Array.from({ length: 12 }, (_, i) => `k${i}`);
+    expect(edgePaths("$", distinct.map((label) => ({ label })))).toEqual(reference("$", distinct));
+    const mixed = ["a", "b", "c", "d", "e", "f", "g", "h", "i", "a", "z", "i"];
+    expect(edgePaths("$", mixed.map((label) => ({ label })))).toEqual(reference("$", mixed));
+    const same = Array.from({ length: 10 }, () => "x");
+    expect(edgePaths("$", same.map((label) => ({ label })))).toEqual(reference("$", same));
+  });
+
+  it("pseudo-random runs of 0 to 40 labels over 1 to 12 letters (seeded)", () => {
+    let seed = 12345;
+    const rnd = (n: number): number => {
+      seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+      return seed % n;
+    };
+    for (let round = 0; round < 500; round++) {
+      const letters = 1 + rnd(12);
+      const labels = Array.from({ length: rnd(41) }, () => "l" + String(rnd(letters)));
+      expect(edgePaths("$.r", labels.map((label) => ({ label })))).toEqual(reference("$.r", labels));
+    }
+  });
+});

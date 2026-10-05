@@ -13,8 +13,8 @@
  * strict: true to throw on any adjustment. See src/report.ts.
  */
 
-import { buildNode, grouped, hasInterleaving, type Edge, type Node, type Scalar } from "../document.js";
-import { edgePaths } from "../paths.js";
+import { buildNode, grouped, hasInterleaving, type Node, type Scalar } from "../document.js";
+import { EdgePaths } from "../paths.js";
 import { checkEncodable } from "../encodable.js";
 import { TimeValue } from "../temporal.js";
 import { ParseError, WriteError } from "../errors.js";
@@ -198,9 +198,9 @@ function checkWriteDepth(depth: number): void {
 function* leaves(node: Node, path = "$", depth = 0): Generator<[string, Scalar]> {
   if (Array.isArray(node)) {
     checkWriteDepth(depth);
-    const paths = edgePaths(path, node);
-    for (let i = 0; i < node.length; i++) {
-      yield* leaves((node[i] as Edge).target, paths[i] as string, depth + 1);
+    const paths = new EdgePaths(path, node);
+    for (const { label, target } of node) {
+      yield* leaves(target, paths.next(label), depth + 1);
     }
   } else {
     yield [path, node];

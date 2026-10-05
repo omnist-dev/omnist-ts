@@ -725,6 +725,12 @@ positional arguments:
 options:
   -h, --help            show this help message and exit
   --version             show program's version number and exit
+
+document-reading commands (format, convert, check, validate, infer):
+  --max-input-bytes N   refuse a document of more than N bytes with
+                        document.limit.input-size (default 67108864, 64 MiB;
+                        bytes, a leading BOM counted); schema files are not
+                        bounded
 `;
 
 const SCHEMA_SUBCOMMANDS = new Set([
