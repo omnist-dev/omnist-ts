@@ -184,6 +184,7 @@ error: input exceeds the maximum input size (1000 bytes); use --max-input-bytes 
 ```
 omnist format <input> [--compact] [--arrays] [--max-input-bytes N] [-o OUTPUT]
 ```
+<!-- doc-illustrative -->
 
 Canonicalizes an OML document -- `readOml` then `writeOml`. `<input>` is a
 file path or `-` for stdin; `-o`/`--output` is a file path, or omit it for
@@ -220,6 +221,7 @@ stderr as `error: ...`, exit code `2` -- nothing written.
 ```
 omnist convert <input> --from FMT --to FMT [--schema FILE] [--strict] [--report] [--result-format text|json|oml] [--compact] [--arrays] [--max-input-bytes N] [-o OUTPUT]
 ```
+<!-- doc-illustrative -->
 
 `read<From>(text, { schema })` -> `write<To>(node, { strict, report })`.
 Reformats data across formats, optionally upgrading/validating it against
@@ -304,6 +306,7 @@ error: path $.age: a null-valued leaf has no TOML representation and no safe sub
 ```
 omnist check <input> --from FMT --to FMT [--strict] [--result-format text|json|oml] [--max-input-bytes N]
 ```
+<!-- doc-illustrative -->
 
 Reports what `write<To>` would adjust (`checkJson`/`checkYaml`/
 `checkToml`/`checkXml`/`checkOml`) **without ever writing anything** --
@@ -331,6 +334,7 @@ error: path $.age: a null-valued leaf has no TOML representation and no safe sub
 ```
 omnist infer <input>... --from FMT [--compact] [--allow-any] [--max-input-bytes N] [-o OUTPUT]
 ```
+<!-- doc-illustrative -->
 
 All inputs must be the same format. Each is read into a `Doc`,
 `infer(docs)` drafts a schema from them, written out as OSD. `--compact`
@@ -379,6 +383,7 @@ root Root
 ```
 omnist validate <input> --from FMT --schema FILE [--result-format text|json|oml] [--max-input-bytes N] [--json]
 ```
+<!-- doc-illustrative -->
 
 Reads `<input>` as `FMT` (`json`/`yaml`/`toml`/`xml`/`oml`) **without**
 schema-directed upgrading -- the same lenient parse a plain `read<From>`
