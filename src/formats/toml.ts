@@ -180,6 +180,14 @@ function convertTomlDates(value: unknown): unknown {
 export interface ReadTomlOptions {
   /** Optional {@link Schema} for schema-directed materialization (spec §4). */
   schema?: Schema;
+  /**
+   * The largest input, in UTF-8 bytes, that is read at all (spec D-23,
+   * Sec2.4.2): a larger input is refused with `document.limit.input-size` at
+   * `$` before it is decoded or parsed; one of exactly this size is accepted.
+   * A leading byte-order mark counts. Default 64 MiB; an integer of at least
+   * 1, else a `RangeError`.
+   */
+  maxInputBytes?: number;
 }
 
 /**
@@ -256,9 +264,9 @@ function checkTomlIntegerDigits(text: string): void {
 
 /** Parses TOML text into a Document node (spec §4). */
 export function readToml(text: string, opts: ReadTomlOptions = {}): Node {
+  checkInputSize(text, opts.maxInputBytes); // D-23: first, the BOM's bytes counted
   text = stripLeadingBom(text); // D-15: one leading U+FEFF
   rejectSecondLeadingBom(text, "TOML"); // D-21: a second one is an error
-  checkInputSize(text, "TOML");
   checkTomlIntegerDigits(text);
   let parsed: unknown;
   try {

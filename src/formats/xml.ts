@@ -182,6 +182,14 @@ export interface ReadXmlOptions {
    * same shape (path/code/message/severity), and this is the only reader
    * in the port that has anything to report yet. */
   report?: WriteReport;
+  /**
+   * The largest input, in UTF-8 bytes, that is read at all (spec D-23,
+   * Sec2.4.2): a larger input is refused with `document.limit.input-size` at
+   * `$` before it is decoded or parsed; one of exactly this size is accepted.
+   * A leading byte-order mark counts. Default 64 MiB; an integer of at least
+   * 1, else a `RangeError`.
+   */
+  maxInputBytes?: number;
 }
 
 // Data-XML profile (docs/formats/xml.md): a DOCTYPE declaration of any kind,
@@ -233,9 +241,9 @@ function mixedContentError(where: string): ParseError {
 
 /** Parses XML text into a Document node (spec §4). */
 export function readXml(text: string, opts: ReadXmlOptions = {}): Node {
+  checkInputSize(text, opts.maxInputBytes); // D-23: first, the BOM's bytes counted
   text = stripLeadingBom(text); // D-15: one leading U+FEFF
   rejectSecondLeadingBom(text, "XML"); // D-21: a second one is an error
-  checkInputSize(text, "XML");
   // Well-formedness FIRST: malformed input is a syntax error
   // (parse.codec-syntax) even when it also contains a DOCTYPE or an entity
   // reference; only well-formed XML can be a profile *refusal* (docs/formats/

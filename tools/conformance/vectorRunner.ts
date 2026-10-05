@@ -126,11 +126,32 @@ const LIMIT_KEYS = [
   "declared_max_int_digits",
   "declared_max_alias_expansion", // Sec2.4.1 D-18; enforced via ReadYamlOptions.maxAliasExpansion
   "declared_max_expanded_slots", // Sec2.4.1 D-22; enforced via ReadYamlOptions.maxExpandedSlots
+  "declared_max_input_bytes", // Sec2.4.2 D-23; enforced via every reader's maxInputBytes
 ] as const;
 
 // The keys this port can configure at runtime; a vector carrying any OTHER
 // limit key is skipped (the constants are compile-time).
-const CONFIGURABLE_LIMIT_KEYS: readonly string[] = ["declared_max_alias_expansion", "declared_max_expanded_slots"];
+const CONFIGURABLE_LIMIT_KEYS: readonly string[] = [
+  "declared_max_alias_expansion",
+  "declared_max_expanded_slots",
+  "declared_max_input_bytes",
+];
+
+/**
+ * E-20a: a runner MUST NOT run a vector carrying a `declared_*` key it does not
+ * understand against the implementation's own default -- that can pass a
+ * boundary vector without testing the boundary. A key is honoured only by the
+ * `parse` driver's text path (it hands the value to the reader as an option);
+ * the `bytes_hex` path goes through the CLI, which takes no such option, and
+ * every other operation takes none. Anything else is reported as an E-20 "not
+ * yet implemented" skip, whatever the key is called, so a key a future spec
+ * adds is skipped, never silently ignored.
+ */
+function unhonouredDeclaredKeys(v: Vector): string[] {
+  const honoured: readonly string[] =
+    v.operation === "parse" && v.input.bytes_hex === undefined ? CONFIGURABLE_LIMIT_KEYS : [];
+  return Object.keys(v.input).filter((k) => k.startsWith("declared_") && !honoured.includes(k));
+}
 
 interface Diagnostic {
   readonly path: string;
@@ -502,9 +523,6 @@ function runParse(v: Vector): Result {
   if (inp.bytes_hex !== undefined) {
     return runParseBytesHex(v);
   }
-  if (LIMIT_KEYS.some((k) => !CONFIGURABLE_LIMIT_KEYS.includes(k) && inp[k] !== undefined)) {
-    return skip("not yet implemented -- omnist-ts's safety limits are compile-time constants, no runtime configuration surface");
-  }
   const expect = v.expect;
   const fmt = inp.format as string;
   const text = inp.text as string;
@@ -521,12 +539,22 @@ function runParse(v: Vector): Result {
     // handed to the reader through the `maxAliasExpansion` option, and ONLY
     // for a vector that carries it -- every other vector runs at the default.
     // D-22: declared_max_expanded_slots likewise, through maxExpandedSlots.
-    const readOpts: { report: WriteReport; maxAliasExpansion?: number; maxExpandedSlots?: number } = { report };
+    const readOpts: {
+      report: WriteReport;
+      maxAliasExpansion?: number;
+      maxExpandedSlots?: number;
+      maxInputBytes?: number;
+    } = { report };
     if (inp.declared_max_alias_expansion !== undefined) {
       readOpts.maxAliasExpansion = Number(inp.declared_max_alias_expansion);
     }
     if (inp.declared_max_expanded_slots !== undefined) {
       readOpts.maxExpandedSlots = Number(inp.declared_max_expanded_slots);
+    }
+    // D-23: `declared_max_input_bytes` is a vector-local maximum, handed to the
+    // reader through `maxInputBytes`, for that vector only.
+    if (inp.declared_max_input_bytes !== undefined) {
+      readOpts.maxInputBytes = Number(inp.declared_max_input_bytes);
     }
     node = getFormat(fmt).read(text, readOpts) as Node;
   } catch (e) {
@@ -1015,6 +1043,14 @@ export function runVector(v: Vector): Result {
   const fn = RUNNERS[v.operation];
   if (fn === undefined) {
     return skip(`no driver wired up yet for operation ${JSON.stringify(v.operation)}`);
+  }
+  const unhonoured = unhonouredDeclaredKeys(v)[0];
+  if (unhonoured !== undefined) {
+    return skip(
+      (LIMIT_KEYS as readonly string[]).includes(unhonoured) && v.operation === "parse" && v.input.bytes_hex === undefined
+        ? "not yet implemented -- omnist-ts's safety limits are compile-time constants, no runtime configuration surface"
+        : `not yet implemented -- omnist-ts does not honour ${unhonoured} on operation ${JSON.stringify(v.operation)} (E-20a)`,
+    );
   }
   try {
     return fn(v);

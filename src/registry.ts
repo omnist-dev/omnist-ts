@@ -12,13 +12,16 @@
 
 import { OmnistError } from "./errors.js";
 import type { WriteReport } from "./report.js";
+import { checkInputSize } from "./formats/input-size.js";
 
 /** A registered format plugin: a name plus read/write/check callables. */
 export interface Format {
   /** Registered format name identifier (e.g. `"json"`, `"yaml"`, `"oml"`). */
   readonly name: string;
   /** text -> node. `opts` is format-specific (e.g. XML's `{ report }` for
-   * read-time codec diagnostics, issue #123/D-3); most formats ignore it. */
+   * read-time codec diagnostics, issue #123/D-3); most formats ignore it. Every
+   * built-in reader honours `opts.maxInputBytes` (D-23); a plugin's may not,
+   * which is why {@link readFormat} checks the size itself. */
   readonly read: (text: string, opts?: unknown) => unknown;
   /** (node, opts?) -> text */
   readonly write: (node: unknown, opts?: unknown) => string;
@@ -48,6 +51,19 @@ export function getFormat(name: string): Format {
     throw new OmnistError("unknown format " + JSON.stringify(name) + "; registered: " + known);
   }
   return fmt;
+}
+
+/**
+ * Read `text` with the registered format `name`, under the maximum input size
+ * of D-23 (`opts.maxInputBytes`, default 64 MiB): an input over it is refused
+ * with `document.limit.input-size` at `$` BEFORE the format's reader runs, so
+ * a plugin reader that ignores the option is bounded too. `opts` is passed to
+ * the reader unchanged.
+ */
+export function readFormat(name: string, text: string, opts: { maxInputBytes?: number } = {}): unknown {
+  const fmt = getFormat(name);
+  checkInputSize(text, opts.maxInputBytes);
+  return fmt.read(text, opts);
 }
 
 /** The names of all registered formats, sorted. */

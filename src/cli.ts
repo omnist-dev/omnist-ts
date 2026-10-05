@@ -36,6 +36,7 @@ import {
   type OmnistIssue,
 } from "./index.js";
 import { readOml, writeOml, checkOml } from "./oml.js";
+import { DEFAULT_MAX_INPUT_BYTES, checkInputSize, inputSizeError, resolveMaxInputBytes } from "./formats/input-size.js";
 import { infer, inferWithReport } from "./infer.js";
 import { parseSchema, toOsd } from "./osd.js";
 import { lint } from "./ops/lint.js";
@@ -46,7 +47,7 @@ type Fmt = (typeof FMT_CHOICES)[number];
 const RESULT_FORMAT_CHOICES = ["text", "json", "oml"] as const;
 type ResultFormat = (typeof RESULT_FORMAT_CHOICES)[number];
 
-const READERS: Record<Fmt, (text: string, opts?: { schema?: Schema }) => Node> = {
+const READERS: Record<Fmt, (text: string, opts?: { schema?: Schema; maxInputBytes?: number }) => Node> = {
   json: readJson,
   yaml: readYaml,
   toml: readToml,
@@ -138,11 +139,69 @@ function decodeStrictUtf8(bytes: Uint8Array): string {
  * (`test/cli.test.ts`'s byte-level cases; see also the vector runner's
  * `bytes_hex` handling, `tools/conformance/vectorRunner.ts`), not by
  * `opts.stdin` injection. */
-function readInput(ctx: Ctx, path: string): string {
+function readInput(ctx: Ctx, path: string, limit?: number): string {
   if (path === "-") {
-    return ctx.readStdin();
+    const text = ctx.readStdin(limit);
+    // The real stdin is already bounded by readStdin; an injected string (the
+    // in-process test seam) is checked here, as bytes.
+    if (limit !== undefined) checkInputSize(text, limit, CLI_SIZE_HINT);
+    return text;
   }
-  return decodeStrictUtf8(fs.readFileSync(path));
+  if (limit === undefined) return decodeStrictUtf8(fs.readFileSync(path));
+  const fd = fs.openSync(path, "r");
+  try {
+    return decodeStrictUtf8(readFdBounded(fd, limit));
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+const CLI_SIZE_HINT = "use --max-input-bytes to raise it";
+const READ_CHUNK = 1024 * 1024;
+
+/** Reads at most `limit + 1` bytes from `fd` and refuses (D-23) as soon as
+ * more than `limit` have arrived, so an oversized file or stream is never read
+ * to its end, held in memory, or decoded. Bytes are counted before any BOM is
+ * stripped and before decoding. */
+function readFdBounded(fd: number, limit: number): Uint8Array {
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  while (total <= limit) {
+    const want = Math.min(READ_CHUNK, limit + 1 - total);
+    const buf = new Uint8Array(want);
+    const got = fs.readSync(fd, buf, 0, want, null);
+    if (got === 0) break;
+    chunks.push(got === want ? buf : buf.subarray(0, got));
+    total += got;
+  }
+  if (total > limit) throw inputSizeError(limit, CLI_SIZE_HINT);
+  const out = new Uint8Array(total);
+  let at = 0;
+  for (const c of chunks) {
+    out.set(c, at);
+    at += c.length;
+  }
+  return out;
+}
+
+/** The maximum input size for this command: `--max-input-bytes`, validated
+ * like the library option (an integer of at least 1), else the default. */
+function maxInputBytesOf(p: ParsedArgs): number {
+  const raw = getStr(p, "max-input-bytes");
+  if (raw === undefined) return DEFAULT_MAX_INPUT_BYTES;
+  try {
+    return resolveMaxInputBytes(/^[0-9]+$/.test(raw) ? Number(raw) : NaN);
+  } catch {
+    throw new UsageError(`argument --max-input-bytes: must be an integer of at least 1, not '${raw}'`);
+  }
+}
+
+/** Read a Document (not a schema) from `path` under the D-23 maximum `max`. */
+function readDocument(ctx: Ctx, from: Fmt, path: string, max: number, schema?: Schema): Node {
+  const text = readInput(ctx, path, max);
+  return schema === undefined
+    ? READERS[from](text, { maxInputBytes: max })
+    : READERS[from](text, { schema, maxInputBytes: max });
 }
 
 function writeOutput(stdout: Writer, path: string | undefined, text: string): void {
@@ -256,7 +315,7 @@ interface Ctx {
   json: boolean;
   stdout: Writer;
   stderr: Writer;
-  readStdin: () => string;
+  readStdin: (limit?: number) => string;
 }
 
 /** Uniform in-handler error emission. Under --json, print a machine-readable
@@ -394,7 +453,8 @@ function cmdFormat(p: ParsedArgs, ctx: Ctx): number {
   const compact = getBool(p, "compact");
   const arrays = getBool(p, "arrays");
   const output = getStr(p, "output");
-  const node = readOml(readInput(ctx, input));
+  const max = maxInputBytesOf(p);
+  const node = readOml(readInput(ctx, input, max), { maxInputBytes: max });
   writeOutput(ctx.stdout, output, writeOml(node, { indent: compact ? null : 2, arrays }));
   return 0;
 }
@@ -414,8 +474,9 @@ function cmdConvert(p: ParsedArgs, ctx: Ctx): number {
   const output = getStr(p, "output");
   const resultFormat = resultFormatOf(p);
 
+  const max = maxInputBytesOf(p);
   const schema = schemaPath !== undefined ? parseSchema(readInput(ctx, schemaPath)) : undefined;
-  const node = schema !== undefined ? READERS[from](readInput(ctx, input), { schema }) : READERS[from](readInput(ctx, input));
+  const node = readDocument(ctx, from, input, max, schema);
   const report = wantReport ? new WriteReport() : undefined;
   let text: string;
   try {
@@ -441,7 +502,7 @@ function cmdCheck(p: ParsedArgs, ctx: Ctx): number {
   const from = requireStr(p, "from", "from") as Fmt;
   const to = requireStr(p, "to", "to") as Fmt;
   const strict = getBool(p, "strict");
-  const node = READERS[from](readInput(ctx, input));
+  const node = readDocument(ctx, from, input, maxInputBytesOf(p));
   const rep = CHECKERS[to](node);
   const fmt: ResultFormat = ctx.json ? "json" : resultFormatOf(p);
   ctx.stdout.write(encodeWriteReport(rep, fmt) + "\n");
@@ -453,12 +514,13 @@ function cmdValidate(p: ParsedArgs, ctx: Ctx): number {
   const input = requirePositional(p, 0, "input");
   const from = requireStr(p, "from", "from") as Fmt;
   const schemaPath = requireStr(p, "schema", "schema");
+  const max = maxInputBytesOf(p);
   if (ctx.json) {
     let node: Node;
     let d: Doc;
     let s: Schema;
     try {
-      node = READERS[from](readInput(ctx, input));
+      node = readDocument(ctx, from, input, max);
       d = new Doc(node);
       s = parseSchema(readInput(ctx, schemaPath));
     } catch (exc) {
@@ -487,7 +549,7 @@ function cmdValidate(p: ParsedArgs, ctx: Ctx): number {
     ctx.stdout.write(jsonValidateErrors(encodeValidationResult(result, "text"), result.errors) + "\n");
     return 1;
   }
-  const node = READERS[from](readInput(ctx, input));
+  const node = readDocument(ctx, from, input, max);
   const d = new Doc(node);
   const s = parseSchema(readInput(ctx, schemaPath));
   const result = s.validate(d);
@@ -510,8 +572,8 @@ function cmdInfer(p: ParsedArgs, ctx: Ctx): number {
   const compact = getBool(p, "compact");
   const allowAny = getBool(p, "allow-any");
   const output = getStr(p, "output");
-  const reader = READERS[from];
-  const docs = p.positionals.map((path) => new Doc(reader(readInput(ctx, path))));
+  const max = maxInputBytesOf(p);
+  const docs = p.positionals.map((path) => new Doc(readDocument(ctx, from, path, max)));
   let s: Schema;
   if (allowAny) {
     const { schema, report } = inferWithReport(docs, { allowAny: true });
@@ -676,14 +738,18 @@ const SCHEMA_SUBCOMMANDS = new Set([
   "equivalent",
 ]);
 
+const MAX_INPUT_BYTES_FLAG: FlagSpec = { type: "string" };
+
 const FORMAT_SPEC: Record<string, FlagSpec> = {
   json: JSON_FLAG,
+  "max-input-bytes": MAX_INPUT_BYTES_FLAG,
   compact: COMPACT_FLAG,
   arrays: ARRAYS_FLAG,
   output: OUTPUT_FLAG,
 };
 const CONVERT_SPEC: Record<string, FlagSpec> = {
   json: JSON_FLAG,
+  "max-input-bytes": MAX_INPUT_BYTES_FLAG,
   from: FROM_FLAG,
   to: TO_FLAG,
   schema: { type: "string" },
@@ -696,6 +762,7 @@ const CONVERT_SPEC: Record<string, FlagSpec> = {
 };
 const CHECK_SPEC: Record<string, FlagSpec> = {
   json: JSON_FLAG,
+  "max-input-bytes": MAX_INPUT_BYTES_FLAG,
   from: FROM_FLAG,
   to: TO_FLAG,
   strict: { type: "boolean" },
@@ -703,12 +770,14 @@ const CHECK_SPEC: Record<string, FlagSpec> = {
 };
 const VALIDATE_SPEC: Record<string, FlagSpec> = {
   json: JSON_FLAG,
+  "max-input-bytes": MAX_INPUT_BYTES_FLAG,
   from: FROM_FLAG,
   schema: { type: "string" },
   "result-format": RESULT_FORMAT_FLAG,
 };
 const INFER_SPEC: Record<string, FlagSpec> = {
   json: JSON_FLAG,
+  "max-input-bytes": MAX_INPUT_BYTES_FLAG,
   from: FROM_FLAG,
   compact: COMPACT_FLAG,
   arrays: ARRAYS_FLAG,
@@ -853,7 +922,10 @@ export function main(
   // throws "Cannot redefine property" here), so `opts.stdin` injection is
   // the tested seam instead -- see readInput's doc comment.
   /* v8 ignore next */
-  const readStdin = (): string => (opts?.stdin !== undefined ? opts.stdin : decodeStrictUtf8(fs.readFileSync(0)));
+  const readStdin = (limit?: number): string =>
+    opts?.stdin !== undefined
+      ? opts.stdin
+      : decodeStrictUtf8(limit === undefined ? fs.readFileSync(0) : readFdBounded(0, limit));
   const args = [...argv];
 
   if (args.includes("--version")) {

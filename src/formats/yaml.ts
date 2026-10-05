@@ -249,6 +249,14 @@ export interface ReadYamlOptions {
    * limit"); a larger or non-integer value throws a `RangeError`.
    */
   maxExpandedSlots?: number;
+  /**
+   * The largest input, in UTF-8 bytes, that is read at all (spec D-23,
+   * Sec2.4.2): a larger input is refused with `document.limit.input-size` at
+   * `$` before it is decoded or parsed; one of exactly this size is accepted.
+   * A leading byte-order mark counts. Default 64 MiB; an integer of at least
+   * 1, else a `RangeError`.
+   */
+  maxInputBytes?: number;
 }
 
 /** Turn a failure from the `yaml` package into the `parse.codec-syntax` error. */
@@ -271,9 +279,9 @@ function yamlSyntaxError(exc: unknown, text: string): ParseError {
 export function readYaml(text: string, opts: ReadYamlOptions = {}): Node {
   const maxAliasExpansion = resolveMaxAliasExpansion(opts.maxAliasExpansion);
   const maxExpandedSlots = resolveMaxExpandedSlots(opts.maxExpandedSlots);
+  checkInputSize(text, opts.maxInputBytes); // D-23: first, the BOM's bytes counted
   text = stripLeadingBom(text); // D-15: one leading U+FEFF
   rejectSecondLeadingBom(text, "YAML"); // D-21: a second one is an error
-  checkInputSize(text, "YAML");
   checkYamlIntegerDigits(text);
   // Parse to the library's Document AST, which keeps Alias nodes, so the
   // D-18/D-22 checks can run on the reference graph BEFORE anything is expanded.

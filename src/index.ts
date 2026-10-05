@@ -38,9 +38,12 @@ export {
 export {
   registerFormat,
   getFormat,
+  readFormat,
   formats,
   type Format,
 } from "./registry.js";
+
+export { DEFAULT_MAX_INPUT_BYTES, INPUT_SIZE_CODE } from "./formats/input-size.js";
 
 export {
   Schema,

@@ -76,6 +76,7 @@
 import type { Edge, Node, Scalar } from "./document.js";
 import { ParseError, WriteError } from "./errors.js";
 import { stripLeadingBom } from "./bom.js";
+import { checkInputSize } from "./formats/input-size.js";
 import { lineCol } from "./position.js";
 import { WriteReport } from "./report.js";
 import type { Schema } from "./schema.js";
@@ -953,10 +954,19 @@ export interface ReadOmlOptions {
    * (cardinality, closedness), guaranteeing the result conforms -- or
    * raising `ParseError` with the full structured issue list otherwise. */
   readonly schema?: Schema;
+  /**
+   * The largest input, in UTF-8 bytes, that is read at all (spec D-23,
+   * Sec2.4.2): a larger input is refused with `document.limit.input-size` at
+   * `$` before it is parsed; one of exactly this size is accepted. A leading
+   * byte-order mark counts. Default 64 MiB; an integer of at least 1, else a
+   * `RangeError`.
+   */
+  readonly maxInputBytes?: number;
 }
 
 /** Parse OML source into a canonical Document node (edge list or leaf). */
 export function readOml(text: string, opts: ReadOmlOptions = {}): Node {
+  checkInputSize(text, opts.maxInputBytes); // D-23: first, the BOM's bytes counted
   const scanner = new Scanner(text);
   const node = new Parser(scanner).parseDocument();
   if (opts.schema !== undefined) {
