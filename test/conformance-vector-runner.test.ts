@@ -218,6 +218,12 @@ describeIfVendored("main() against the real vendor/omnist-spec/test-suite", () =
     // now all 35 formats-yaml/alias-expansion vectors run for real:
     // 297 pass, 0 fail, 34 skip (6 limits, 28 OSD-OML). No known-failing list.
     //
+    // v0.8.0-alpha: omnist-spec v0.33.0-beta (367 vectors, +5: the formats-xml/
+    // nulls set). C-10: an XML null leaf is an unconditional write failure
+    // (write.unsupported-value at the E-10 path). Before the fix: 329 pass,
+    // 3 fail ("expected failure, write succeeded"), 35 skip (the strict
+    // companion skipped: WriteError carried no code/path). Now 333 pass,
+    // 0 fail, 34 skip.
     // v0.8.0-alpha: omnist-spec v0.32.0-beta (362 vectors, +24). E-10 paths
     // (5 vectors), OML-29 (7) and D-23 (10: the runner hands each vector's
     // declared_max_input_bytes to the reader) all run for real; C-9 adds no
@@ -230,7 +236,7 @@ describeIfVendored("main() against the real vendor/omnist-spec/test-suite", () =
     // all 7 new vectors pass: 304 pass, 0 fail, 34 skip (6 limits, 28 OSD-OML).
     expect(exitCode).toBe(0);
     expect(logs.at(-1)).toBe(
-      "\n328 passed, 0 failed, 34 skipped (of 362 vectors) -- " +
+      "\n333 passed, 0 failed, 34 skipped (of 367 vectors) -- " +
         "diagnostic paths always compared, codes compared where the error carries one (Sec8.5.2)",
     );
   }, 120000);
@@ -254,8 +260,8 @@ describeIfVendored("main() against the real vendor/omnist-spec/test-suite", () =
     }
   }, 120000);
 
-  it("iterVectors discovers all 362 real vectors", () => {
-    expect(iterVectors(REAL_SUITE_DIR).length).toBe(362);
+  it("iterVectors discovers all 367 real vectors", () => {
+    expect(iterVectors(REAL_SUITE_DIR).length).toBe(367);
   });
 });
 

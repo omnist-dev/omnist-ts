@@ -268,7 +268,6 @@ const ALLOWED_CODES: Record<string, ReadonlySet<string>> = {
   yaml: new Set(["temporal.stringified", "format.interleaving-lost"]),
   toml: new Set(["format.interleaving-lost"]),
   xml: new Set([
-    "null.omitted",
     "temporal.stringified",
     "value.stringified",
   ]),
@@ -397,6 +396,7 @@ describe("TOML round-trip fuzzing (modulo documented adjustments)", () => {
 // ambiguity) -- excluded here so this test exercises the *documented*
 // adjustments only, same reasoning as upstream.
 function xmlSafeNode(node: Node): boolean {
+  if (node === null) return false; // C-10: a null leaf fails to write
   if (Array.isArray(node)) {
     if (node.length === 0) return false;
     return node.every(({ target }) => xmlSafeNode(target));

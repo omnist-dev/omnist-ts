@@ -123,7 +123,6 @@ XML 1.0's text range is safely representable). This is the full set
 
 | code | severity | trigger |
 |---|---|---|
-| `null.omitted` | warning | a `null` leaf -- written as an empty element (`<tag />`), same spelling as an empty string |
 | `temporal.stringified` | warning | a `Date` leaf -- written as text, reads back as a plain string, not a `Date` |
 | `shape.empty_ambiguous` | warning | an empty internal node (edge list with no edges) -- written as `<tag />`, reads back as the empty-string leaf `""`, not `[]` |
 | `key.sanitized` | warning | a label that isn't a legal XML element name -- written sanitized |
@@ -131,31 +130,41 @@ XML 1.0's text range is safely representable). This is the full set
 | `string.illegal_xml_char` | error | a string containing a character XML 1.0 cannot represent (a C0 control other than tab/LF/CR) -- replaced with U+FFFD |
 | `string.cr_normalized` | warning | a string containing `\r` -- XML mandates line-ending normalization on parse, so it reads back as `\n` |
 
-(That's seven rows for six *distinct* situations -- `null.omitted` and
-`temporal.stringified` are shared with JSON/TOML's own versions of the
-same codes; `shape.empty_ambiguous`, `key.sanitized`, `value.stringified`,
-`string.illegal_xml_char`, and `string.cr_normalized` are XML-only.
-`value.stringified` replaced the pre-#88 `string.ambiguous` code -- see
-below.)
+(`temporal.stringified` is shared with JSON/YAML's own version of the
+code; `value.stringified` replaced the pre-#88 `string.ambiguous` code --
+see below.)
 
-### `null.omitted` and `temporal.stringified`
+### A `null` leaf fails to write (spec C-10)
 
 ```ts
 import { buildNode } from "@omnist-dev/omnist";
-import { checkXml, writeXml } from "@omnist-dev/omnist";
+import { writeXml } from "@omnist-dev/omnist";
 
-const node = buildNode({ root: { note: null, when: new Date(Date.UTC(2024, 0, 1)) } });
-checkXml(node).adjustments;
-// [{ path: "$.root.note", code: "null.omitted",
-//    message: "null written as an empty element", severity: "warning" },
-//  { path: "$.root.when", code: "temporal.stringified",
-//    message: "temporal value written as text (reads back as a string)", severity: "warning" }]
+const node = buildNode({ root: { note: null } });
+writeXml(node);
+// throws WriteError, code "write.unsupported-value", path "$.root.note"
 ```
 <!-- doc-illustrative -->
 
-Unlike TOML's `null.omitted` (the edge disappears), XML's `null.omitted`
-still writes an element -- `<note />` -- so the edge survives the
-round-trip, just as an empty string rather than `null`.
+XML has no null token, and `<note />` reads back as the empty string, a
+different valid Document. So a `null` leaf is an unconditional write
+failure -- `strict` or not, and in `checkXml` too -- the same treatment as
+a TOML `null`. The error's `path` names the null leaf, with an `[n]` index
+(from 0) on a label that repeats among its siblings. The old
+`null.omitted` adjustment no longer exists for XML.
+
+### `temporal.stringified`
+
+```ts
+import { buildNode } from "@omnist-dev/omnist";
+import { checkXml } from "@omnist-dev/omnist";
+
+const node = buildNode({ root: { when: new Date(Date.UTC(2024, 0, 1)) } });
+checkXml(node).adjustments;
+// [{ path: "$.root.when", code: "temporal.stringified",
+//    message: "temporal value written as text (reads back as a string)", severity: "warning" }]
+```
+<!-- doc-illustrative -->
 
 ### `shape.empty_ambiguous`
 

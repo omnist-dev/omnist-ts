@@ -570,7 +570,16 @@ function scanXmlNode(node: Node, path: string, rep: WriteReport, depth: number):
   }
   const v = node;
   if (v === null) {
-    rep.add(path, "null.omitted", "null written as an empty element", "warning");
+    // spec C-10: XML has no null token, and `<a/>` reads back as the empty
+    // string, a different valid Document. Unconditional failure (same
+    // treatment as a TOML null), at the null leaf's indexed path (E-10).
+    throw new WriteError(
+      "path " + path + ": a null leaf has no XML spelling -- it would write as the same " +
+        "<tag /> as an empty-string leaf and read back as the empty string",
+      undefined,
+      "write.unsupported-value",
+      path,
+    );
   } else if (v instanceof Date || v instanceof TimeValue) {
     rep.add(path, "temporal.stringified", "temporal value written as text (reads back as a string)", "warning");
   } else if (typeof v === "boolean" || typeof v === "number" || typeof v === "bigint") {
@@ -679,7 +688,6 @@ function isoOf(d: Date): string {
 
 function xmlText(v: Scalar): string {
   if (typeof v === "boolean") return v ? "true" : "false";
-  if (v === null) return "";
   if (v instanceof Date) return isoOf(v);
   // No native XML time-literal syntax (issue #96): a genuinely time-kinded
   // value still writes as its plain text, same as a plain string would.

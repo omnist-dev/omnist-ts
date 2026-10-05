@@ -222,12 +222,12 @@ describe("convert", () => {
 
 describe("convert report/strict", () => {
   it("report writes and prints adjustment to stderr", () => {
-    const p = writeTmp("in.json", '{"a": null}');
+    const p = writeTmp("in.json", '{"a": 1}');
     const dst = p + ".xml";
     const { code, out, err } = run(["convert", p, "--from", "json", "--to", "xml", "--report", "-o", dst]);
     expect(code).toBe(0);
     expect(out).toBe("");
-    expect(err).toContain("null");
+    expect(err).toContain("non-string scalar");
     expect(fs.existsSync(dst)).toBe(true);
   });
 
@@ -239,7 +239,7 @@ describe("convert report/strict", () => {
   });
 
   it("report result-format json", () => {
-    const p = writeTmp("in.json", '{"a": null}');
+    const p = writeTmp("in.json", '{"a": 1}');
     const { code, err } = run(["convert", p, "--from", "json", "--to", "xml", "--report", "--result-format", "json"]);
     expect(code).toBe(0);
     expect(err.startsWith("[{")).toBe(true);
@@ -247,14 +247,14 @@ describe("convert report/strict", () => {
   });
 
   it("result-format without report has no effect", () => {
-    const p = writeTmp("in.json", '{"a": null}');
+    const p = writeTmp("in.json", '{"a": 1}');
     const { code, err } = run(["convert", p, "--from", "json", "--to", "xml", "--result-format", "json"]);
     expect(code).toBe(0);
     expect(err).toBe("");
   });
 
   it("strict refuses lossy write, exit 1", () => {
-    const p = writeTmp("in.json", '{"a": null}');
+    const p = writeTmp("in.json", '{"a": 1}');
     const dst = p + ".xml";
     const { code, out, err } = run(["convert", p, "--from", "json", "--to", "xml", "--strict", "-o", dst]);
     expect(code).toBe(1);
@@ -286,19 +286,19 @@ describe("convert report/strict", () => {
 
 describe("check", () => {
   it("reports without writing, exit always 0 by default", () => {
-    const p = writeTmp("in.json", '{"a": null}');
+    const p = writeTmp("in.json", '{"a": 1}');
     const { code, out, err } = run(["check", p, "--from", "json", "--to", "xml"]);
     expect(code).toBe(0);
-    expect(out).toContain("null");
+    expect(out).toContain("non-string scalar");
     expect(err).toBe("");
   });
 
   it("report result-format oml", () => {
-    const p = writeTmp("in.json", '{"a": null}');
+    const p = writeTmp("in.json", '{"a": 1}');
     const { code, out } = run(["check", p, "--from", "json", "--to", "xml", "--result-format", "oml"]);
     expect(code).toBe(0);
     expect(out).toContain("adjustments");
-    expect(out).toContain("null");
+    expect(out).toContain("non-string scalar");
   });
 
   it("no adjustments prints no adjustments", () => {
@@ -316,7 +316,7 @@ describe("check", () => {
   });
 
   it("strict exits 1 when something would adjust", () => {
-    const p = writeTmp("in.json", '{"a": null}');
+    const p = writeTmp("in.json", '{"a": 1}');
     const { code } = run(["check", p, "--from", "json", "--to", "xml", "--strict"]);
     expect(code).toBe(1);
   });
@@ -331,13 +331,13 @@ describe("check", () => {
   });
 
   it("without strict always exits 0 even with adjustments", () => {
-    const p = writeTmp("in.json", '{"a": null}');
+    const p = writeTmp("in.json", '{"a": 1}');
     const { code } = run(["check", p, "--from", "json", "--to", "xml"]);
     expect(code).toBe(0);
   });
 
   it("result-format json", () => {
-    const p = writeTmp("in.json", '{"a": null}');
+    const p = writeTmp("in.json", '{"a": 1}');
     const { code, out } = run(["check", p, "--from", "json", "--to", "xml", "--result-format", "json"]);
     expect(code).toBe(0);
     expect(out.startsWith("[{")).toBe(true);
@@ -1061,7 +1061,7 @@ describe("global --json machine mode", () => {
   });
 
   it("convert WriteError under strict json exit 1", () => {
-    const p = writeTmp("in.json", '{"a": null}');
+    const p = writeTmp("in.json", '{"a": 1}');
     const dst = p + ".xml";
     const { code, out, err } = run(["convert", p, "--from", "json", "--to", "xml", "--strict", "-o", dst, "--json"]);
     assertJsonError(out, err, code, 1);
@@ -1113,7 +1113,7 @@ describe("global --json machine mode", () => {
   });
 
   it("check success json matches result-format", () => {
-    const p = writeTmp("in.json", '{"a": null}');
+    const p = writeTmp("in.json", '{"a": 1}');
     const ref = run(["check", p, "--from", "json", "--to", "xml", "--result-format", "json"]);
     const { code, out, err } = run(["check", p, "--from", "json", "--to", "xml", "--json"]);
     expect(code).toBe(0);
