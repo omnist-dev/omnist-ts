@@ -46,22 +46,31 @@ it does not make any parse fast. Measured on this port (WSL2, Node 20, `yaml`
 | XML, repeated elements | 10 MiB / 64 MiB | 0.9 s / 5.4 s |
 | YAML, block sequence of records | 2 MiB | 0.7 s |
 | TOML, array of tables | 1 / 2 / 4 / 10 MiB | 0.3 / 1.0 / 5.0 / 46.7 s |
-| YAML, one block mapping | 135 / 271 / 564 KiB (5,000 / 10,000 / 20,000 keys) | 1.4 / 6.0 / 17 s (the last: 17 to 30 s depending on the machine) |
+| YAML, one block mapping | 91 / 183 / 388 / 1,004 KiB (5,000 / 10,000 / 20,000 / 50,000 keys) | 0.3 / 0.3 / 0.5 / 1.2 s (v0.8.1-alpha; before it 0.8 / 2.4 / 10.7 / 195 s) |
+| YAML, block sequence of records | 139 / 281 / 584 / 1,189 KiB | 0.7 / 0.8 / 1.1 / 2.3 s (the `yaml` parse; first row includes warm-up) |
 
-So 64 MiB is a sound bound for JSON, OML and XML, and **not** for two parsers:
+So 64 MiB is a sound bound for JSON, OML, XML and YAML mappings, and **not** for
+one parser:
 
 - **YAML ([omnist-ts#157](https://github.com/omnist-dev/omnist-ts/issues/157)):**
-  the `yaml` library's parse of one large block mapping is quadratic in its keys.
-  A 1 MB single block mapping of 50,000 keys took about 195 s. That is far below
-  64 MiB, so **the default cap does not bound it**; nor would any cap that still
-  admits ordinary documents. The aliases inside `!!pairs` and `!!omap` are a
-  separate, still-open part of that issue. Neither is fixed here.
-- **TOML:** the `smol-toml` parse of a long array of tables is also superlinear
-  (about 47 s at 10 MiB). The 64 MiB default does not bound it either.
+  the `yaml` library's duplicate-key check compares each key with every key before
+  it, so its parse of one large block (or flow) mapping was quadratic in the keys:
+  a 1 MB mapping of 50,000 keys took about 195 s, far below 64 MiB. **Fixed in
+  v0.8.1-alpha:** `readYaml` turns the library's check off and makes the same test
+  in one linear pass, so that mapping now reads in about 1.2 s. A duplicate key is
+  still refused with the same error and position, with one exception: in a mapping
+  of more than 4,096 keys the error names the duplicate key's own position, which
+  can differ from the library's by the whitespace before it (re-running the
+  library's quadratic check there would reopen the denial of service). The aliases
+  inside `!!pairs` and `!!omap` are a separate, still-open part of that issue.
+- **TOML:** the `smol-toml` parse of a long array of tables is superlinear
+  (about 47 s at 10 MiB; 0.2 / 0.8 / 3.5 s for 0.35 / 0.7 / 1.5 MiB). `readToml`
+  adds about 10 percent to the library's time, so the cost is the library's, and
+  the 64 MiB default does not bound it.
 
-If you read untrusted YAML or TOML, pass a `maxInputBytes` that matches what you
-expect to receive (for example `1024 * 1024`), and run the parse in a process you
-can time out.
+If you read untrusted TOML, pass a `maxInputBytes` that matches what you expect to
+receive (for example `1024 * 1024`), and run the parse in a process you can time
+out. The same advice holds for YAML until the `!!pairs` part of #157 is closed.
 
 ### Why 64 MiB
 

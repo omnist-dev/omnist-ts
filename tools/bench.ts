@@ -260,6 +260,18 @@ function main(): void {
   }
   printSection(`Codec I/O (${largest.edges.toLocaleString()}-edge document)`, codecRows);
 
+  // -- One large flat mapping (issue #157) ---------------------------------
+  // The yaml library's duplicate-key check is quadratic in the keys of one
+  // block mapping; readYaml does it in one linear pass, so these read times
+  // should grow about 4x for 4x the keys, not 16x.
+  const flatRows: Row[] = [];
+  for (const keys of [5000, 20000]) {
+    const text = Array.from({ length: keys }, (_, i) => `key${i}: value${i}\n`).join("");
+    const ms = timeMs(() => readYaml(text), { warmup: 1, samples: 3 });
+    flatRows.push({ label: `yaml read, ${keys.toLocaleString()}-key block mapping`, ms, note: `${(text.length / 1024).toFixed(0)}KiB` });
+  }
+  printSection("YAML, one large block mapping (issue #157)", flatRows);
+
   console.log("\nDone. See docs/performance.md for a written-up snapshot of a past run.");
 }
 

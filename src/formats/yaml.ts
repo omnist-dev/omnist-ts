@@ -275,6 +275,84 @@ function yamlSyntaxError(exc: unknown, text: string): ParseError {
   return codecSyntaxError("YAML", message.split(String.fromCharCode(10))[0] as string, text, at);
 }
 
+/**
+ * The library's own duplicate-key check (`DUPLICATE_KEY`, "Map keys must be
+ * unique") compares each key with every key before it, so it is quadratic in
+ * the keys of one mapping: 10,000 keys cost seconds and 50,000 minutes, a
+ * denial of service the input-size cap does not bound (issue #157). A parse
+ * therefore runs with the check off, and {@link findDuplicateKey} does the
+ * same test in one linear pass.
+ */
+function parseYamlDocument(text: string, uniqueKeys: boolean, lineCounter?: YAML.LineCounter): YAML.Document.Parsed {
+  return YAML.parseDocument(text, {
+    schema: "yaml-1.1",
+    customTags: customBoolTags,
+    intAsBigInt: true,
+    uniqueKeys,
+    ...(lineCounter === undefined ? {} : { lineCounter }),
+  });
+}
+
+/** A mapping of at most this many keys with a duplicate is re-parsed with the
+ * library's own check, so the error is exactly the library's (quadratic, but
+ * under about half a second at this size); a larger one is reported from the
+ * linear scan. */
+const EXACT_DUPLICATE_ERROR_MAX_KEYS = 4096;
+
+interface DuplicateKey {
+  /** The offsets of the earliest-in-the-text duplicate key. */
+  start: number;
+  end: number;
+  /** The most keys any one mapping in the document has. */
+  largestMap: number;
+}
+
+/**
+ * Finds a duplicate mapping key in one linear pass over every mapping, with
+ * the library's own equality: two scalar keys are the same when their
+ * resolved values are `===` (so `1` and `"1"` differ, as do two `NaN`s); a
+ * non-scalar key is never equal to another. Returns the earliest duplicate in
+ * the text, or undefined when there is none.
+ */
+function findDuplicateKey(doc: YAML.Document.Parsed): DuplicateKey | undefined {
+  let found: { start: number; end: number } | undefined;
+  let largestMap = 0;
+  YAML.visit(doc, {
+    Map(_key, map) {
+      largestMap = Math.max(largestMap, map.items.length);
+      const seen = new Set<unknown>();
+      for (const pair of map.items) {
+        const k = pair.key;
+        if (!YAML.isScalar(k)) continue;
+        const v = k.value;
+        // Set uses SameValueZero, which differs from `===` only for NaN.
+        if (Number.isNaN(v)) continue;
+        if (seen.has(v)) {
+          const [start, end] = k.range as [number, number, number];
+          if (found === undefined || start < found.start) found = { start, end };
+          return;
+        }
+        seen.add(v);
+      }
+    },
+  });
+  return found === undefined ? undefined : { ...found, largestMap };
+}
+
+/** The error for a duplicate key found by {@link findDuplicateKey}, or the
+ * library's first error when that comes earlier in the text. */
+function duplicateKeyError(
+  lineCounter: YAML.LineCounter,
+  start: number,
+  end: number,
+  first: YAML.YAMLError | undefined,
+): Error {
+  if (first !== undefined && first.pos[0] < start) return first;
+  const { line, col } = lineCounter.linePos(start);
+  const message = "Map keys must be unique at line " + String(line) + ", column " + String(col) + ":";
+  return new YAML.YAMLParseError([start, end], "DUPLICATE_KEY", message);
+}
+
 /** Parse YAML text into a Document node. */
 export function readYaml(text: string, opts: ReadYamlOptions = {}): Node {
   const maxAliasExpansion = resolveMaxAliasExpansion(opts.maxAliasExpansion);
@@ -287,7 +365,20 @@ export function readYaml(text: string, opts: ReadYamlOptions = {}): Node {
   // D-18/D-22 checks can run on the reference graph BEFORE anything is expanded.
   let doc: YAML.Document.Parsed;
   try {
-    doc = YAML.parseDocument(text, { schema: "yaml-1.1", customTags: customBoolTags, intAsBigInt: true });
+    const lineCounter = new YAML.LineCounter();
+    doc = parseYamlDocument(text, false, lineCounter);
+    const dup = findDuplicateKey(doc);
+    if (dup !== undefined) {
+      if (dup.largestMap <= EXACT_DUPLICATE_ERROR_MAX_KEYS) {
+        // The library's own check, with its own error ordering and position:
+        // quadratic in the keys of one mapping, so only for a small one.
+        doc = parseYamlDocument(text, true);
+      } else {
+        // A huge mapping with a duplicate: report the duplicate from the
+        // linear scan, at the duplicate key's own position.
+        throw duplicateKeyError(lineCounter, dup.start, dup.end, doc.errors[0]);
+      }
+    }
     // What YAML.parse itself does with a failed parse: throw the first error.
     if (doc.errors.length > 0) throw doc.errors[0];
   } catch (exc) {
