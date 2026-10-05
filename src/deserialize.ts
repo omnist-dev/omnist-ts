@@ -70,6 +70,7 @@
  */
 
 import type { Edge, Node, Scalar } from "./document.js";
+import { edgePaths } from "./paths.js";
 import { ParseError, type OmnistIssue } from "./errors.js";
 import {
   cardinalityStr,
@@ -125,10 +126,11 @@ function materializeRecord(
   }
   const out: Edge[] = [];
   const counts = new Map<string, number>();
-  for (const { label, target } of node) {
-    const i = counts.get(label) ?? 0;
-    counts.set(label, i + 1);
-    const p = i === 0 ? `${path}.${label}` : `${path}.${label}[${i}]`;
+  const paths = edgePaths(path, node);
+  for (let i = 0; i < node.length; i++) {
+    const { label, target } = node[i] as Edge;
+    counts.set(label, (counts.get(label) ?? 0) + 1);
+    const p = paths[i] as string;
     const f = recordField(rec, label);
     if (f === undefined) {
       errors.push({ path: p, message: "unexpected field", code: "validate.unexpected-field" });

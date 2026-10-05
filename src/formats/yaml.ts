@@ -63,7 +63,8 @@
  */
 
 import YAML from "yaml";
-import { buildNode, grouped, hasInterleaving, unwrapTimeValues, type Node, type Scalar } from "../document.js";
+import { buildNode, grouped, hasInterleaving, unwrapTimeValues, type Edge, type Node, type Scalar } from "../document.js";
+import { edgePaths } from "../paths.js";
 import { ParseError, WriteError } from "../errors.js";
 import { finishWrite, WriteReport } from "../report.js";
 import { materialize } from "../deserialize.js";
@@ -214,11 +215,10 @@ function* labeledEdges(
 ): Generator<[string, string, Scalar | undefined]> {
   if (Array.isArray(node)) {
     checkWriteDepth(depth);
-    const counts = new Map<string, number>();
-    for (const { label, target } of node) {
-      const i = counts.get(label) ?? 0;
-      counts.set(label, i + 1);
-      const p = i === 0 ? path + "." + label : path + "." + label + "[" + String(i) + "]";
+    const paths = edgePaths(path, node);
+    for (let i = 0; i < node.length; i++) {
+      const { label, target } = node[i] as Edge;
+      const p = paths[i] as string;
       yield [p, label, Array.isArray(target) ? undefined : target];
       yield* labeledEdges(target, p, depth + 1);
     }

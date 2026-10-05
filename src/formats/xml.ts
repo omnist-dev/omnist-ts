@@ -49,6 +49,7 @@
 
 import { XMLParser, XMLValidator } from "fast-xml-parser";
 import type { Edge, Node, Scalar } from "../document.js";
+import { edgePaths } from "../paths.js";
 import { TimeValue } from "../temporal.js";
 import { DocumentError, ParseError, WriteError } from "../errors.js";
 import { finishWrite, WriteReport } from "../report.js";
@@ -528,11 +529,10 @@ function scanXmlNode(node: Node, path: string, rep: WriteReport, depth: number):
         path,
       );
     }
-    const counts = new Map<string, number>();
-    for (const { label, target } of node) {
-      const i = counts.get(label) ?? 0;
-      counts.set(label, i + 1);
-      const p = i === 0 ? path + "." + label : path + "." + label + "[" + String(i) + "]";
+    const paths = edgePaths(path, node);
+    for (let i = 0; i < node.length; i++) {
+      const { label, target } = node[i] as Edge;
+      const p = paths[i] as string;
       if (!XML_NAME.test(label)) {
         // issue #126: no single well-defined substitute exists for a label
         // XML's own name syntax can't represent -- sanitizing invents

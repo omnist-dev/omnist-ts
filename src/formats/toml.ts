@@ -29,7 +29,8 @@
  */
 
 import { parse as parseToml, stringify as stringifyToml, TomlDate, type TomlError } from "smol-toml";
-import { buildNode, grouped, hasInterleaving, type Node } from "../document.js";
+import { buildNode, grouped, hasInterleaving, type Edge, type Node } from "../document.js";
+import { edgePaths } from "../paths.js";
 import { TimeValue } from "../temporal.js";
 import { ParseError, WriteError } from "../errors.js";
 import { finishWrite, WriteReport } from "../report.js";
@@ -298,11 +299,10 @@ function stripNulls(node: Node, path: string, rep: WriteReport, depth = 0): Node
   if (!Array.isArray(node)) return node;
   checkWriteDepth(depth);
   const out: { label: string; target: Node }[] = [];
-  const counts = new Map<string, number>();
-  for (const { label, target } of node) {
-    const i = counts.get(label) ?? 0;
-    counts.set(label, i + 1);
-    const p = i === 0 ? path + "." + label : path + "." + label + "[" + String(i) + "]";
+  const paths = edgePaths(path, node);
+  for (let i = 0; i < node.length; i++) {
+    const { label, target } = node[i] as Edge;
+    const p = paths[i] as string;
     if (target === null) {
       throw new WriteError(
         "path " + p + ": a null-valued leaf has no TOML representation and no safe substitute " +
