@@ -374,6 +374,14 @@ function xmlToNode(
   let lastElementLabel: string | null = null;
   let tailText = "";
   const out: { label: string; target: Node }[] = [];
+  // E-10: a label that repeats among this node's element children carries
+  // its occurrence index on every edge (first included), so the paths below
+  // -- the nested ones and the dropped-attribute/namespace reports -- agree
+  // with the writers' and every other port's.
+  const edgePaths = new EdgePaths(
+    path,
+    elementEntries.map((e) => ({ label: local(tagKeyOf(e)) })),
+  );
   for (const entry of entries) {
     if ("#text" in entry) {
       /* v8 ignore next */
@@ -393,7 +401,7 @@ function xmlToNode(
     const childTag = tagKeyOf(entry);
     const childLabel = local(childTag);
     lastElementLabel = childLabel;
-    const childPath = path + "." + childLabel;
+    const childPath = edgePaths.next(childLabel);
     reportDroppedAttributesAndNamespace(entry, childTag, childPath, report);
     out.push({
       label: childLabel,

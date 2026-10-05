@@ -101,6 +101,44 @@ describe("readXml", () => {
     expect(report.adjustments).toEqual([]);
   });
 
+  // E-10 / E-9 (issue #163): drop-report paths carry the occurrence index on
+  // every edge of a repeated label, first included; a single element stays bare.
+  const dropPaths = (xml: string): string[][] => {
+    const report = new WriteReport();
+    readXml(xml, { report });
+    return report.adjustments.map((a) => [a.path, a.code]);
+  };
+
+  it("indexes the drop-report paths of repeated elements (issue #163)", () => {
+    expect(dropPaths('<r><a x="1"/><a x="2"/></r>')).toEqual([
+      ["$.r.a[0]", "format.attribute-dropped"],
+      ["$.r.a[1]", "format.attribute-dropped"],
+    ]);
+  });
+
+  it("indexes the namespace-dropped paths of repeated elements, counting by local name (issue #163)", () => {
+    expect(dropPaths("<r><ns:a>1</ns:a><a>2</a><ns:a>3</ns:a></r>")).toEqual([
+      ["$.r.a[0]", "format.namespace-dropped"],
+      ["$.r.a[2]", "format.namespace-dropped"],
+    ]);
+  });
+
+  it("indexes nested paths under a repeated parent, and indexes only the repeated label (issue #163)", () => {
+    expect(dropPaths('<r><a><b y="1"/></a><a><b y="2"/><b y="3"/></a><c z="1"/></r>')).toEqual([
+      ["$.r.a[0].b", "format.attribute-dropped"],
+      ["$.r.a[1].b[0]", "format.attribute-dropped"],
+      ["$.r.a[1].b[1]", "format.attribute-dropped"],
+      ["$.r.c", "format.attribute-dropped"],
+    ]);
+  });
+
+  it("keeps a single element's drop-report path bare (issue #163)", () => {
+    expect(dropPaths('<r><a x="1"/><b y="2"/></r>')).toEqual([
+      ["$.r.a", "format.attribute-dropped"],
+      ["$.r.b", "format.attribute-dropped"],
+    ]);
+  });
+
   it("issue #88: never coerces element text by shape on a schema-less read -- everything stays a string", () => {
     // #288-equivalent fix. XML has no native typed literals (unlike
     // YAML/TOML, which have real typed scalar syntax), so a schema-less
