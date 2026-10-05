@@ -78,6 +78,7 @@ document-reading commands (format, convert, check, validate, infer):
                         bytes, a leading BOM counted); schema files are not
                         bounded
 ```
+<!-- doc-illustrative -->
 
 ## Machine mode: `--json`
 
