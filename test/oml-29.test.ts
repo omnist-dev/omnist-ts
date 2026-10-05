@@ -45,3 +45,49 @@ describe("OML-29: a gap after the colon is skipped", () => {
     expect((err as ParseError).path).toBe(path);
   });
 });
+
+// OML-29 is about what follows the colon only. Nothing before the colon is
+// skipped: a newline, `;` or comment between a label and its colon ends the
+// label's edge, so the colon has no label and the document is rejected. Only
+// horizontal space may precede the colon (`a : 1`, OML-26's note in Sec4.2.1).
+describe("OML-29: a separator BEFORE the colon is not skipped", () => {
+  const gaps: Array<[string, string]> = [
+    ["a newline", "\n"],
+    ["a semicolon", ";"],
+    ["a comment then a newline", " # c\n"],
+    ["a CRLF", "\r\n"],
+  ];
+  const shapes: Array<[string, (gap: string) => string]> = [
+    ["the first edge", (g) => `a${g}: 1`],
+    ["a later edge", (g) => `x: 1\nb${g}: 2`],
+    ["inside braces", (g) => `x: {a${g}: 1}`],
+    ["inside an array of nodes", (g) => `x: [{a${g}: 1}]`],
+  ];
+  for (const [gapName, gap] of gaps) {
+    for (const [shapeName, build] of shapes) {
+      it(`rejects ${gapName} before the colon: ${shapeName}`, () => {
+        expect(() => readOml(build(gap))).toThrow(ParseError);
+      });
+    }
+  }
+
+  it("horizontal space before the colon is still fine", () => {
+    expect(compact("a : 1")).toBe("a: 1");
+    expect(compact("a  \t: 1")).toBe("a: 1");
+    expect(compact("x: {a : 1}")).toBe("x: { a: 1 }");
+  });
+
+  it("reports the stray token at its position", () => {
+    const at = (text: string): string | undefined => {
+      try {
+        readOml(text);
+      } catch (e) {
+        return (e as ParseError).path;
+      }
+      return undefined;
+    };
+    expect(at("a\n: 1")).toBe("1:1");
+    expect(at("x: {a\n: 1}")).toBe("1:6");
+    expect(at("x: 1\nb;: 2")).toBe("2:2");
+  });
+});
