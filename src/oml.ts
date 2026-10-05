@@ -688,6 +688,9 @@ class Parser {
           "parse.unexpected-token",
         );
       }
+      // OML-29: nothing ends at a colon, so a newline, `;` or comment right
+      // after it is the gap before the value, not an edge separator.
+      this.skipSep();
       if (this.kind === "LBRACKET") {
         for (const element of this.parseArray(depth)) {
           edges.push({ label, target: element });
