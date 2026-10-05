@@ -633,8 +633,6 @@ class Parser {
     if (this.kind === "EOF") {
       this.countNode();
       node = [];
-    } else if (this.kind === "LBRACE") {
-      node = this.parseValue(0);
     } else if (this.looksLikeEdge()) {
       node = this.parseNodeEdges(0);
     } else {
