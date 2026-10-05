@@ -114,25 +114,37 @@ writeXml(node);
 
 ## Adjustment codes
 
-`writeXml`/`checkXml` can report six adjustment codes -- more than any
-other codec here, since XML's data-XML profile is the tightest fit of the
-four (no `null`, no distinguishable empty container, element names have a
-narrower legal-character set than a Document label, and only a subset of
-XML 1.0's text range is safely representable). This is the full set
-(`test/fuzz.test.ts` asserts this against `ALLOWED_CODES.xml`):
+`writeXml`/`checkXml` can report two adjustment codes. Everything else XML
+cannot represent is an unconditional write failure, not an adjustment (see
+"Unrepresentable values fail to write" below). `test/fuzz.test.ts` asserts
+the set against `ALLOWED_CODES.xml`:
 
 | code | severity | trigger |
 |---|---|---|
 | `temporal.stringified` | warning | a `Date` leaf -- written as text, reads back as a plain string, not a `Date` |
-| `shape.empty_ambiguous` | warning | an empty internal node (edge list with no edges) -- written as `<tag />`, reads back as the empty-string leaf `""`, not `[]` |
-| `key.sanitized` | warning | a label that isn't a legal XML element name -- written sanitized |
 | `value.stringified` | warning | a non-string scalar leaf (`number`/`boolean`) -- written as text, reads back as a plain string on a schema-less read, not its original type |
-| `string.illegal_xml_char` | error | a string containing a character XML 1.0 cannot represent (a C0 control other than tab/LF/CR) -- replaced with U+FFFD |
-| `string.cr_normalized` | warning | a string containing `\r` -- XML mandates line-ending normalization on parse, so it reads back as `\n` |
 
 (`temporal.stringified` is shared with JSON/YAML's own version of the
 code; `value.stringified` replaced the pre-#88 `string.ambiguous` code --
 see below.)
+
+`readXml` can also report two codes into an optional `report`:
+`format.attribute-dropped` and `format.namespace-dropped`, one per element
+an attribute or a namespace prefix was discarded from. The path is the
+element's Document path, with the `[i]` occurrence index (E-10) on every
+element of a label that repeats among its siblings, the first included:
+
+```ts
+import { readXml, WriteReport } from "@omnist-dev/omnist";
+
+const report = new WriteReport();
+readXml('<r><a x="1"/><a x="2"/><b y="3"/></r>', { report });
+report.adjustments.map((a) => [a.path, a.code]);
+// [["$.r.a[0]", "format.attribute-dropped"],
+//  ["$.r.a[1]", "format.attribute-dropped"],
+//  ["$.r.b", "format.attribute-dropped"]]
+```
+<!-- verified-by: test/formats/xml.test.ts::indexes the drop-report paths of repeated elements (issue #163); test/formats/xml.test.ts::keeps a single element's drop-report path bare (issue #163) -->
 
 ### A `null` leaf fails to write (spec C-10)
 
@@ -166,49 +178,37 @@ checkXml(node).adjustments;
 ```
 <!-- doc-illustrative -->
 
-### `shape.empty_ambiguous`
+### Unrepresentable values fail to write
+
+An empty internal node, a label that is not a legal XML name, and a string
+holding a character XML 1.0 cannot represent have no safe XML spelling:
+writing an empty node as `<tag />` reads back as the empty-string leaf,
+sanitizing a label invents a different one (and two labels can collide),
+and replacing a character invents a different string. Per fail-don't-invent
+each is an unconditional `WriteError` with code `write.unsupported-value`,
+`strict` or not, and in `checkXml` too. The `path` names the offending node
+or leaf, indexed per E-10.
 
 ```ts
 import { checkXml, writeXml } from "@omnist-dev/omnist";
 import type { Node } from "@omnist-dev/omnist";
 
-const node: Node = [{ label: "root", target: [{ label: "items", target: [] }] }];
-checkXml(node).adjustments;
-// [{ path: "$.root.items", code: "shape.empty_ambiguous",
-//    message: "empty internal node (no edges) written as <tag /> and reads back as the empty-string leaf '', not []",
-//    severity: "warning" }]
-writeXml(node);
-// "<root>\n  <items />\n</root>"
+const empty: Node = [{ label: "root", target: [{ label: "items", target: [] }] }];
+writeXml(empty);
+// throws WriteError, code "write.unsupported-value", path "$.root.items"
+
+const badLabel: Node = [{ label: "root", target: [{ label: "not valid!", target: "x" }] }];
+checkXml(badLabel);
+// throws WriteError, code "write.unsupported-value", path "$.root.not valid!"
+
+const badChar: Node = [{ label: "root", target: [{ label: "text", target: "a\u0001b" }] }];
+writeXml(badChar);
+// throws WriteError, code "write.unsupported-value", path "$.root.text"
 ```
 <!-- doc-illustrative -->
 
-An empty internal node (`items: []`, a container with zero children) and
-an empty-string leaf (`items: ""`) both write as `<items />`, and
-`readXml` can't tell them apart on the way back in -- it always resolves
-`<items />` to the empty-string leaf. This is the XML analogue of
-JSON/YAML/TOML's own shared count-1 array/scalar ambiguity (see
-`docs/formats/overview.md`), specific to the empty case.
-
-### `key.sanitized`
-
-```ts
-import { checkXml, writeXml } from "@omnist-dev/omnist";
-import type { Node } from "@omnist-dev/omnist";
-
-const node: Node = [{ label: "root", target: [{ label: "not valid!", target: "x" }] }];
-checkXml(node).adjustments;
-// [{ path: "$.root.not valid!", code: "key.sanitized",
-//    message: 'label "not valid!" isn\'t a valid XML name; written sanitized', severity: "warning" }]
-writeXml(node);
-// "<root>\n  <not_valid_>x</not_valid_>\n</root>"
-```
-<!-- doc-illustrative -->
-
-A Document label can be any string; an XML element name can't (no spaces,
-a restricted start-character set, no bare `!`). `writeXml` sanitizes an
-illegal label into a legal element name rather than refusing to write --
-the `path` in the `Adjustment` still carries the *original*, unsanitized
-label, so the report stays keyed to the input, not the sanitized output.
+The pre-fail-don't-invent codes `shape.empty_ambiguous`, `key.sanitized` and
+`string.illegal_xml_char` no longer exist.
 
 ### `value.stringified`
 
@@ -234,34 +234,21 @@ because the old shape-based coercion would have turned it back into a
 number on read. Since coercion is gone, that code no longer applies: a
 string leaf now always round-trips as a string, unconditionally.)
 
-### `string.illegal_xml_char` and `string.cr_normalized`
+### Carriage returns are not an adjustment
+
+A string containing `\r` is written with the character escaped as the
+numeric character reference `&#13;`, which is exempt from XML's mandatory
+line-ending normalization on parse, so it reads back intact. There is
+nothing to report, and the old `string.cr_normalized` code no longer
+exists.
 
 ```ts
 import { buildNode } from "@omnist-dev/omnist";
 import { checkXml, writeXml } from "@omnist-dev/omnist";
 
-const illegal = buildNode({ root: { text: "a" + String.fromCharCode(1) + "b" } });
-checkXml(illegal).adjustments;
-// [{ path: "$.root.text", code: "string.illegal_xml_char",
-//    message: "string contains a character XML 1.0 cannot represent (e.g. a C0 control other than tab/LF/CR); it is replaced with U+FFFD on write so the output stays well-formed",
-//    severity: "error" }]
-writeXml(illegal);
-// U+0001 (a C0 control character, not tab/LF/CR) is substituted with U+FFFD in the output
-
 const cr = buildNode({ root: { text: "a\rb" } });
-checkXml(cr).adjustments;
-// [{ path: "$.root.text", code: "string.cr_normalized",
-//    message: "string contains a carriage return ('\r'); XML mandates line-ending normalization on parse, so '\r' (and '\r\n') read back as '\n'",
-//    severity: "warning" }]
+checkXml(cr).adjustments; // []
+writeXml(cr);
+// "<root>\n  <text>a&#13;b</text>\n</root>\n"
 ```
-<!-- doc-illustrative -->
-
-`string.illegal_xml_char` is the one XML-specific `error`-severity code
-(alongside JSON's `float.special`): a C0 control character outside
-tab/LF/CR has no legal XML 1.0 representation at all, so `writeXml`
-substitutes U+FFFD (the Unicode replacement character) rather than
-producing malformed output. `string.cr_normalized` is a warning because
-the substitution is lossless in the sense the XML spec defines --
-`\r`/`\r\n` are *specified* to normalize to `\n` on parse, so the
-adjustment documents expected, standard behavior rather than a
-worked-around gap.
+<!-- verified-by: test/formats/xml.test.ts::escapes a literal carriage return as the numeric character reference &#13; -->

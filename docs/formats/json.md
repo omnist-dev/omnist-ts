@@ -32,7 +32,7 @@ JSON's codec can ever emit (`test/fuzz.test.ts` asserts this against
 | code | severity | trigger |
 |---|---|---|
 | `temporal.stringified` | warning | a `Date` leaf -- JSON has no date/time type, so it's written as an ISO-8601 string |
-| `float.special` | error | a `NaN`/`Infinity`/`-Infinity` leaf -- not valid JSON, so it's substituted with `null` |
+| `format.interleaving-lost` | warning | labels interleaved across other labels (`m, x, m`) -- JSON's grouping rule collapses same-label edges, so the order is lost; reported once, at `$` |
 
 ```ts
 import { buildNode } from "@omnist-dev/omnist";
@@ -47,27 +47,22 @@ writeJson(node);
 ```
 <!-- doc-illustrative -->
 
+### `NaN` and `Infinity` fail to write
+
+JSON has no token for `NaN`/`Infinity`/`-Infinity`, and substituting `null`
+would be indistinguishable from a real `null`. Such a leaf is an
+unconditional write failure (`write.unsupported-value`, at the leaf's
+indexed path), `strict` or not, and in `checkJson` too. The old
+`float.special` adjustment no longer exists.
+
 ```ts
 import { buildNode } from "@omnist-dev/omnist";
-import { checkJson, writeJson } from "@omnist-dev/omnist";
+import { writeJson } from "@omnist-dev/omnist";
 
-const node = buildNode({ x: NaN });
-checkJson(node).adjustments;
-// [{ path: "$.x", code: "float.special",
-//    message: "NaN is not valid JSON; wrote null", severity: "error" }]
-writeJson(node); // '{"x": null}' -- lenient default: substitutes and moves on
-writeJson(node, { strict: true }); // throws WriteError("error: $.x: NaN is not valid JSON; wrote null")
+writeJson(buildNode({ x: NaN }));
+// throws WriteError, code "write.unsupported-value", path "$.x"
 ```
 <!-- doc-illustrative -->
-
-`strict: true` doesn't change *which* substitution happens for
-`float.special` -- `writeJson` still computes the same `null`-substituted
-value internally either way -- it changes whether that value is ever
-returned. In lenient mode the substituted text comes back normally; in
-strict mode `finishWrite` sees a non-empty report and throws
-`WriteError` before any text is returned, regardless of the adjustment's
-severity (`strict` ignores severity, unlike the default lenient/error
-split elsewhere -- see `docs/formats/overview.md` and `src/report.ts`).
 
 ## Arbitrary-precision integers (issue #98)
 
