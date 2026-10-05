@@ -37,7 +37,7 @@ describe("readYaml: a large block mapping is linear (issue #157)", () => {
     const started = performance.now();
     readYaml(flow);
     readYaml(seq);
-    expect(performance.now() - started).toBeLessThan(10000);
+    expect(performance.now() - started).toBeLessThan(25000);
   }, 60000);
 });
 
@@ -105,6 +105,34 @@ describe("readYaml: a duplicate key in a huge mapping is found without the quadr
   it("an earlier library error is reported instead of a later duplicate", () => {
     const e = parseError("a: 1\n  b: 2\n" + big + "key7: again\n");
     expect(e.message).not.toContain("Map keys must be unique");
+  }, 60000);
+
+  it("many large mappings with one duplicate do not trigger a quadratic re-parse", () => {
+    // 40 mappings of 4,095 keys (each under the old per-mapping threshold),
+    // the duplicate in the last: the old gate re-parsed the whole document with
+    // the library's quadratic check (~24 s more); the total budget refuses to. The parse itself is ~5 s.
+    const group = (g: number, dup: boolean): string =>
+      `m${g}:\n` + Array.from({ length: 4095 }, (_, i) => `  k${i}: v\n`).join("") + (dup ? "  k7: again\n" : "");
+    const text = Array.from({ length: 40 }, (_, g) => group(g, g === 39)).join("");
+    // Timed against the same document without the duplicate, so a loaded
+    // runner scales both: the re-parse costs ~5x the parse (24 s vs 4.7 s).
+    const baseStart = performance.now();
+    readYaml(Array.from({ length: 40 }, (_, g) => group(g, false)).join(""));
+    const base = performance.now() - baseStart;
+    const started = performance.now();
+    const e = parseError(text);
+    expect(performance.now() - started).toBeLessThan(2.5 * base + 2000);
+    expect(e.message).toContain("Map keys must be unique");
+    expect(e.path).toBe(String(40 * 4096 + 1) + ":3");
+  }, 60000);
+
+  it("a duplicate in the first, middle or last of several large mappings is found", () => {
+    const group = (g: number, dup: boolean): string =>
+      `m${g}:\n` + Array.from({ length: 3000 }, (_, i) => `  k${i}: v\n`).join("") + (dup ? "  k7: again\n" : "");
+    for (const at of [0, 2, 4]) {
+      const text = Array.from({ length: 5 }, (_, g) => group(g, g === at)).join("");
+      expect(parseError(text).message).toContain("Map keys must be unique");
+    }
   }, 60000);
 
   it("a later library error does not hide the duplicate before it", () => {

@@ -293,18 +293,20 @@ function parseYamlDocument(text: string, uniqueKeys: boolean, lineCounter?: YAML
   });
 }
 
-/** A mapping of at most this many keys with a duplicate is re-parsed with the
- * library's own check, so the error is exactly the library's (quadratic, but
- * under about half a second at this size); a larger one is reported from the
- * linear scan. */
-const EXACT_DUPLICATE_ERROR_MAX_KEYS = 4096;
+/** The budget for re-parsing a document that has a duplicate key with the
+ * library's own (quadratic) check, so the error is exactly the library's: the
+ * sum over the document's mappings of keys squared, within that of one
+ * mapping of 4,096 keys (about half a second). A document over the budget --
+ * one huge mapping, or many large ones -- is reported from the linear scan
+ * instead, so the total re-parse cost is bounded however the keys are spread. */
+const EXACT_DUPLICATE_ERROR_BUDGET = 4096 * 4096;
 
 interface DuplicateKey {
   /** The offsets of the earliest-in-the-text duplicate key. */
   start: number;
   end: number;
-  /** The most keys any one mapping in the document has. */
-  largestMap: number;
+  /** The sum over every mapping in the document of its keys squared. */
+  cost: number;
 }
 
 /**
@@ -316,10 +318,10 @@ interface DuplicateKey {
  */
 function findDuplicateKey(doc: YAML.Document.Parsed): DuplicateKey | undefined {
   let found: { start: number; end: number } | undefined;
-  let largestMap = 0;
+  let cost = 0;
   YAML.visit(doc, {
     Map(_key, map) {
-      largestMap = Math.max(largestMap, map.items.length);
+      cost += map.items.length * map.items.length;
       const seen = new Set<unknown>();
       for (const pair of map.items) {
         const k = pair.key;
@@ -336,7 +338,7 @@ function findDuplicateKey(doc: YAML.Document.Parsed): DuplicateKey | undefined {
       }
     },
   });
-  return found === undefined ? undefined : { ...found, largestMap };
+  return found === undefined ? undefined : { ...found, cost };
 }
 
 /** The error for a duplicate key found by {@link findDuplicateKey}, or the
@@ -369,12 +371,12 @@ export function readYaml(text: string, opts: ReadYamlOptions = {}): Node {
     doc = parseYamlDocument(text, false, lineCounter);
     const dup = findDuplicateKey(doc);
     if (dup !== undefined) {
-      if (dup.largestMap <= EXACT_DUPLICATE_ERROR_MAX_KEYS) {
+      if (dup.cost <= EXACT_DUPLICATE_ERROR_BUDGET) {
         // The library's own check, with its own error ordering and position:
-        // quadratic in the keys of one mapping, so only for a small one.
+        // quadratic in the keys of one mapping, so only within the budget.
         doc = parseYamlDocument(text, true);
       } else {
-        // A huge mapping with a duplicate: report the duplicate from the
+        // Too much quadratic work to repeat: report the duplicate from the
         // linear scan, at the duplicate key's own position.
         throw duplicateKeyError(lineCounter, dup.start, dup.end, doc.errors[0]);
       }

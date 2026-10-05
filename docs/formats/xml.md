@@ -149,10 +149,10 @@ report.adjustments.map((a) => [a.path, a.code]);
 ### A `null` leaf fails to write (spec C-10)
 
 ```ts
-import { buildNode } from "@omnist-dev/omnist";
+import { doc } from "@omnist-dev/omnist";
 import { writeXml } from "@omnist-dev/omnist";
 
-const node = buildNode({ root: { note: null } });
+const node = doc({ root: { note: null } }).toData();
 writeXml(node);
 // throws WriteError, code "write.unsupported-value", path "$.root.note"
 ```
@@ -168,10 +168,10 @@ a TOML `null`. The error's `path` names the null leaf, with an `[n]` index
 ### `temporal.stringified`
 
 ```ts
-import { buildNode } from "@omnist-dev/omnist";
+import { doc } from "@omnist-dev/omnist";
 import { checkXml } from "@omnist-dev/omnist";
 
-const node = buildNode({ root: { when: new Date(Date.UTC(2024, 0, 1)) } });
+const node = doc({ root: { when: new Date(Date.UTC(2024, 0, 1)) } }).toData();
 checkXml(node).adjustments;
 // [{ path: "$.root.when", code: "temporal.stringified",
 //    message: "temporal value written as text (reads back as a string)", severity: "warning" }]
@@ -213,10 +213,10 @@ The pre-fail-don't-invent codes `shape.empty_ambiguous`, `key.sanitized` and
 ### `value.stringified`
 
 ```ts
-import { buildNode } from "@omnist-dev/omnist";
+import { doc } from "@omnist-dev/omnist";
 import { checkXml } from "@omnist-dev/omnist";
 
-const node = buildNode({ root: { code: 30 } });
+const node = doc({ root: { code: 30 } }).toData();
 checkXml(node).adjustments;
 // [{ path: "$.root.code", code: "value.stringified",
 //    message: "non-string scalar written as text (reads back as a string)", severity: "warning" }]
@@ -243,10 +243,10 @@ nothing to report, and the old `string.cr_normalized` code no longer
 exists.
 
 ```ts
-import { buildNode } from "@omnist-dev/omnist";
+import { doc } from "@omnist-dev/omnist";
 import { checkXml, writeXml } from "@omnist-dev/omnist";
 
-const cr = buildNode({ root: { text: "a\rb" } });
+const cr = doc({ root: { text: "a\rb" } }).toData();
 checkXml(cr).adjustments; // []
 writeXml(cr);
 // "<root>\n  <text>a&#13;b</text>\n</root>\n"

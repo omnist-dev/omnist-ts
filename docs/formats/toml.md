@@ -32,8 +32,8 @@ token handling in `docs/formats/oml.md` for the corresponding OML-side
 treatment.
 
 Unlike JSON, TOML's own grammar accepts `nan`/`inf`/`-inf` float literals
-directly, so a `NaN`/`Infinity` leaf needs no adjustment at all when
-writing TOML -- there is no `float.special`-equivalent code here.
+directly, so a `NaN`/`Infinity` leaf is written as is: it needs no
+adjustment and does not fail (unlike JSON, where it is a write failure).
 
 ## Adjustment codes
 
@@ -52,10 +52,10 @@ leaf's path (indexed per E-10). The old `null.omitted` adjustment no longer
 exists for TOML.
 
 ```ts
-import { buildNode } from "@omnist-dev/omnist";
+import { doc } from "@omnist-dev/omnist";
 import { writeToml } from "@omnist-dev/omnist";
 
-const node = buildNode({ name: "Ann", nickname: null });
+const node = doc({ name: "Ann", nickname: null }).toData();
 writeToml(node);
 // throws WriteError, code "write.unsupported-value", path "$.nickname"
 ```

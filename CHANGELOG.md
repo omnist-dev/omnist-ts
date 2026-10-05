@@ -21,15 +21,18 @@ A patch: a path fix, a performance fix and documentation. No spec pin change
   already reported the indexed paths.
 - **omnist-ts#157 (part 1): reading one large YAML mapping is linear.** The
   `yaml` library's duplicate-key check scans every earlier key for each key, so
-  a block or flow mapping of 20,000 keys took about 11 s and 50,000 keys about
-  195 s, and the 64 MiB input cap does not bound that. `readYaml` now parses with
+  a block or flow mapping of 20,000 keys took about 11 s and 50,000 keys
+  minutes, and the 64 MiB input cap does not bound that. `readYaml` now parses with
   the library's check off and tests for a duplicate in one linear pass with the
   library's own equality (`===` on resolved scalars). 50,000 keys read in about
   1.2 s. The error for a duplicate is unchanged (same message, same position,
   the same first-error order), checked against the old reader on 6,000 mutated
-  inputs; the one exception is a mapping of more than 4,096 keys, where the
-  error names the duplicate key's own position rather than re-running the
-  quadratic check. The aliases inside `!!pairs` / `!!omap` (part 2 of #157) are
+  inputs; the one exception is a document whose total quadratic cost (the sum
+  over its mappings of keys squared) exceeds that of one 4,096-key mapping,
+  where the error names the duplicate key's own position rather than re-running
+  the quadratic check. The budget is on the whole document, so many large
+  mappings cannot multiply the re-parse (40 mappings of 4,095 keys with one
+  duplicate: 24 s under a per-mapping gate, 5.4 s now, of which the parse itself is most). The aliases inside `!!pairs` / `!!omap` (part 2 of #157) are
   still not counted, and #157 stays open. `docs/limitations.md` has the measured
   numbers, and `tools/bench.ts` a new row.
 - **Docs.** `docs/formats/xml.md`, `toml.md` and `json.md` still documented

@@ -35,10 +35,10 @@ JSON's codec can ever emit (`test/fuzz.test.ts` asserts this against
 | `format.interleaving-lost` | warning | labels interleaved across other labels (`m, x, m`) -- JSON's grouping rule collapses same-label edges, so the order is lost; reported once, at `$` |
 
 ```ts
-import { buildNode } from "@omnist-dev/omnist";
+import { doc } from "@omnist-dev/omnist";
 import { checkJson, writeJson } from "@omnist-dev/omnist";
 
-const node = buildNode({ when: new Date(Date.UTC(2024, 0, 1, 12, 0, 0)) });
+const node = doc({ when: new Date(Date.UTC(2024, 0, 1, 12, 0, 0)) }).toData();
 checkJson(node).adjustments;
 // [{ path: "$.when", code: "temporal.stringified",
 //    message: "temporal value written as an ISO-8601 string", severity: "warning" }]
@@ -56,10 +56,10 @@ indexed path), `strict` or not, and in `checkJson` too. The old
 `float.special` adjustment no longer exists.
 
 ```ts
-import { buildNode } from "@omnist-dev/omnist";
+import { doc } from "@omnist-dev/omnist";
 import { writeJson } from "@omnist-dev/omnist";
 
-writeJson(buildNode({ x: NaN }));
+writeJson(doc({ x: NaN }).toData());
 // throws WriteError, code "write.unsupported-value", path "$.x"
 ```
 <!-- doc-illustrative -->
