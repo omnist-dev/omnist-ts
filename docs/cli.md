@@ -71,6 +71,12 @@ positional arguments:
 options:
   -h, --help            show this help message and exit
   --version             show program's version number and exit
+
+document-reading commands (format, convert, check, validate, infer):
+  --max-input-bytes N   refuse a document of more than N bytes with
+                        document.limit.input-size (default 67108864, 64 MiB;
+                        bytes, a leading BOM counted); schema files are not
+                        bounded
 ```
 
 ## Machine mode: `--json`
@@ -175,7 +181,7 @@ error: input exceeds the maximum input size (1000 bytes); use --max-input-bytes 
 ## `omnist format`
 
 ```
-omnist format <input> [--compact] [--arrays] [-o OUTPUT]
+omnist format <input> [--compact] [--arrays] [--max-input-bytes N] [-o OUTPUT]
 ```
 
 Canonicalizes an OML document -- `readOml` then `writeOml`. `<input>` is a
@@ -211,7 +217,7 @@ stderr as `error: ...`, exit code `2` -- nothing written.
 ## `omnist convert`
 
 ```
-omnist convert <input> --from FMT --to FMT [--schema FILE] [--strict] [--report] [--result-format text|json|oml] [--compact] [--arrays] [-o OUTPUT]
+omnist convert <input> --from FMT --to FMT [--schema FILE] [--strict] [--report] [--result-format text|json|oml] [--compact] [--arrays] [--max-input-bytes N] [-o OUTPUT]
 ```
 
 `read<From>(text, { schema })` -> `write<To>(node, { strict, report })`.
@@ -295,7 +301,7 @@ error: path $.age: a null-valued leaf has no TOML representation and no safe sub
 ## `omnist check`
 
 ```
-omnist check <input> --from FMT --to FMT [--strict] [--result-format text|json|oml]
+omnist check <input> --from FMT --to FMT [--strict] [--result-format text|json|oml] [--max-input-bytes N]
 ```
 
 Reports what `write<To>` would adjust (`checkJson`/`checkYaml`/
@@ -322,7 +328,7 @@ error: path $.age: a null-valued leaf has no TOML representation and no safe sub
 ## `omnist infer`
 
 ```
-omnist infer <input>... --from FMT [--compact] [--allow-any] [-o OUTPUT]
+omnist infer <input>... --from FMT [--compact] [--allow-any] [--max-input-bytes N] [-o OUTPUT]
 ```
 
 All inputs must be the same format. Each is read into a `Doc`,
@@ -370,7 +376,7 @@ root Root
 ## `omnist validate`
 
 ```
-omnist validate <input> --from FMT --schema FILE [--result-format text|json|oml] [--json]
+omnist validate <input> --from FMT --schema FILE [--result-format text|json|oml] [--max-input-bytes N] [--json]
 ```
 
 Reads `<input>` as `FMT` (`json`/`yaml`/`toml`/`xml`/`oml`) **without**

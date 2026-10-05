@@ -239,3 +239,25 @@ describe("the file read stops at maximum + 1 bytes", () => {
     expect(r.stdout).toBe('a: "xxxxxxxxxxxx"\n');
   }, 70000);
 });
+
+describe("discoverability: --max-input-bytes is in the docs' synopses", () => {
+  const synopses = (): string[] =>
+    fs
+      .readFileSync(path.resolve(REPO_ROOT, "docs", "cli.md"), "utf-8")
+      .split(String.fromCharCode(10))
+      .filter((l) => l.startsWith("omnist "));
+
+  it("every document-reading command's synopsis in docs/cli.md lists it", () => {
+    for (const cmd of ["format", "convert", "check", "infer", "validate"]) {
+      const line = synopses().find((l) => l.startsWith("omnist " + cmd + " <input>"));
+      expect(line, cmd).toBeDefined();
+      expect(line, cmd).toContain("--max-input-bytes N");
+    }
+  });
+
+  it("no schema subcommand's synopsis lists it", () => {
+    const lines = synopses().filter((l) => l.startsWith("omnist schema "));
+    expect(lines.length).toBeGreaterThan(5);
+    for (const l of lines) expect(l).not.toContain("--max-input-bytes");
+  });
+});

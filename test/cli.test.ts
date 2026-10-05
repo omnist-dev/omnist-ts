@@ -964,6 +964,15 @@ describe("top level", () => {
     expect(out).toContain("canonical data model");
   });
 
+  it("--help documents --max-input-bytes for the document-reading commands (D-23)", () => {
+    const { code, out } = run(["--help"]);
+    expect(code).toBe(0);
+    expect(out).toContain("document-reading commands (format, convert, check, validate, infer):");
+    expect(out).toContain("--max-input-bytes N");
+    expect(out).toContain("document.limit.input-size");
+    expect(out).toContain("67108864");
+  });
+
   it("unknown schema subcommand is a usage error", () => {
     const { code, err } = run(["schema", "bogus"]);
     expect(code).toBe(2);
