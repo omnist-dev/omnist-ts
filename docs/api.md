@@ -132,6 +132,10 @@ Every format module exports the same three-function shape:
 - `readToml(text, opts?: ReadTomlOptions): Node` / `writeToml(node, opts?: WriteTomlOptions): string` / `checkToml(node): WriteReport`
 - `readYaml(text, opts?: ReadYamlOptions): Node` (`ReadYamlOptions.maxAliasExpansion`: the D-18 maximum expansion factor, default `DEFAULT_MAX_ALIAS_EXPANSION` = 50, at most `MAX_RECOMMENDED_ALIAS_EXPANSION` = 10000) / `writeYaml(node, opts?: WriteYamlOptions): string` / `checkYaml(node): WriteReport`
 
+Every `read*` function takes `maxInputBytes` in its options (spec D-23): the largest input, in UTF-8 bytes, it reads at all. The default is `DEFAULT_MAX_INPUT_BYTES` = 64 MiB; an integer of at least 1, otherwise a `RangeError`. A larger input is refused with a `ParseError` whose `code` is `document.limit.input-size` and `path` is `$`, before anything is decoded or parsed; an input of exactly the maximum is accepted, and a leading byte-order mark counts. `readFormat(name, text, opts?)` reads with any registered format under the same limit, checking the size before a plugin reader runs. See [Limitations](limitations.md).
+
+Every `write*` and `check*` function throws `WriteError` (`write.unsupported-value`, at the Document path of the node holding the string) for a string value or edge label with no UTF-8 encoding, a lone surrogate (spec C-9), whatever `strict` says; `checkOml` is no longer always empty for that reason.
+
 See [Formats](formats/overview.md) for the per-format mapping and caveats.
 
 ## Adjustment reports

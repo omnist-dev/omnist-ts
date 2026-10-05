@@ -6,6 +6,53 @@ the first documented release of the TypeScript port; the public API
 mirrors the upstream Python package's `__all__` (camelCase names of the
 same functions).
 
+## [v0.8.0-alpha] -- adopt omnist-spec v0.32.0-beta (path indexes, OML-29, input size, C-9)
+
+`vendor/omnist-spec` bumped to **v0.32.0-beta** (commit `634ff12`, the
+v0.32.0-beta tag), 362 vectors. Conformance before the work: vector track 311
+pass / 17 fail / 34 skip (5 path vectors, 7 OML-29, 5 over-cap input-size; the 5
+at-cap input-size vectors passed falsely because the runner ignored
+`declared_max_input_bytes`). After: **328 pass / 0 fail / 34 skip**, fixture
+track 19 / 0 / 0. A minor bump: new behaviour, a new default limit, new
+rejections.
+
+- **E-10 (v0.30.0-beta, DIV-15): the index is on every edge of a repeated
+  label, the first included.** `$.item[0]`, `$.item[1]`; a label that occurs
+  once has none. One function (`src/paths.ts`) now builds every Document path:
+  `Doc.edges()` (so `validate`), `materialize`, and the JSON, YAML, TOML and XML
+  writer reports and errors. **Behaviour change:** a diagnostic that said
+  `$.item` for the first of two now says `$.item[0]`.
+- **OML-29 (v0.31.0-beta, DIV-19): a gap after the colon of an edge is
+  skipped.** Spaces, comments, newlines and `;` between `:` and the value are
+  insignificant, so `a:` newline `1` reads. A separator is still required
+  between edges.
+- **D-23 (v0.30.0-beta, DIV-17): a byte limit on every read.** Every reader
+  takes `maxInputBytes` (default **64 MiB**, an integer of at least 1, else a
+  `RangeError`) and refuses a larger input with `document.limit.input-size` at
+  `$` before decoding or parsing; exactly the maximum is accepted; a BOM's three
+  bytes count. The CLI gains `--max-input-bytes N` on `format`, `convert`,
+  `check`, `validate` and `infer`, reading at most `N + 1` bytes. New:
+  `readFormat()`, `DEFAULT_MAX_INPUT_BYTES`, `INPUT_SIZE_CODE`.
+  **Behaviour change:** this replaces the 256 MiB UTF-16-unit guard of #110, so
+  an input between 64 and 256 MiB that used to parse is refused until the maximum
+  is raised. The default does **not** bound the quadratic `yaml` parse of one big
+  block mapping (#157): see `docs/limitations.md` for the measurements.
+  The vector runner honours `declared_max_input_bytes` and, per E-20a, skips
+  any other `declared_*` key, and any on an operation that does not honour it.
+- **C-9 (v0.32.0-beta, DIV-5): every writer fails on a string with no UTF-8
+  encoding.** A lone surrogate in a string value or edge label makes
+  `writeJson`/`writeYaml`/`writeToml`/`writeXml`/`writeOml` and their `check*`
+  functions throw `WriteError` (`write.unsupported-value`) at the Document path
+  of the node holding it (for a label, the node holding the edge), whatever
+  `strict` says. Before, JSON/YAML/TOML wrote an escape and OML wrote it raw.
+  `checkOml` is no longer always empty for this reason. A pathless scan makes
+  the cost small (2.5 ms on a 100,000-edge document). Also fixed: the XML writer
+  refused every astral character (valid surrogate pair); only a lone surrogate is
+  illegal now.
+- **#160: a top-level braced node is rejected.** `{a: 1}` as a whole OML
+  document is `parse.unexpected-token` at `1:1` (Sec4.6 allows three shapes); a
+  braced node is still a legal edge value.
+
 ## [v0.7.0-alpha] -- adopt omnist-spec v0.28.0-beta (programmatic schema diagnostics)
 
 `vendor/omnist-spec` bumped to **v0.28.0-beta** (commit `1a7d0de`, the

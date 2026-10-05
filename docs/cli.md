@@ -155,6 +155,23 @@ always well-formed UTF-16, and simply cannot receive invalid UTF-8 at all;
 per `omnist-spec` §2.5, a string-typed reader is free to treat its input as
 already decoded, and this package's readers do exactly that.
 
+### Input size: `--max-input-bytes`
+
+`format`, `convert`, `check`, `validate` and `infer` refuse a document of more
+than **64 MiB** (67,108,864 bytes) with `document.limit.input-size` at `$` (spec
+D-23): exit `2`, and the message says how to raise it. `--max-input-bytes N`
+chooses another maximum, an integer of at least 1 (anything else is a usage
+error, exit `2`). Bytes, not characters, are counted, a leading BOM included,
+before the input is decoded; an input of exactly `N` bytes is accepted. The read
+stops at `N + 1` bytes, so an endless stream is refused without being read to
+its end. Schema files are not documents and are not bounded.
+
+```sh
+$ omnist convert big.json --from json --to oml --max-input-bytes 1000
+error: input exceeds the maximum input size (1000 bytes); use --max-input-bytes to raise it
+```
+<!-- doc-illustrative -->
+
 ## `omnist format`
 
 ```

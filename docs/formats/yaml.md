@@ -141,8 +141,8 @@ aliases (measured with `yaml` 2.9.0: 20,000 keys took 22.8 s, and a 1.19 MB
 single block mapping of 50,000 keys took 191.7 s, identical before this limit
 existed), while a sequence of the same size parses in a fraction of a second.
 So a roughly 1 MB input that is one big mapping is about three minutes of CPU
-whatever D-18 and D-22 say, and `MAX_INPUT_BYTES` (256 MB) is far too high to
-stop it. The cost is the library's, not the check's. Two compose-style figures
+whatever D-18 and D-22 say, and the default input-size limit (64 MiB) is far
+too high to stop it (see [Limitations](../limitations.md)). The cost is the library's, not the check's. Two compose-style figures
 in this port's tests: a `services:` mapping of 100 services each merging a
 20-key block has `W(root)` 2,223 (1 + 21 for the root and block, 1 for the
 `services` mapping, 100 x 22); with the services at the top level, as in the

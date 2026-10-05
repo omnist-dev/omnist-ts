@@ -71,6 +71,7 @@ export default defineConfig({
         text: "Project",
         items: [
           { text: "Testing", link: "/testing" },
+          { text: "Limitations", link: "/limitations" },
           { text: "Performance", link: "/performance" },
           { text: "Python parity", link: "/python-parity" },
           { text: "Repo layout", link: "/layout" },
