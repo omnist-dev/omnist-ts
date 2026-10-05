@@ -33,8 +33,9 @@ readJson('{"a":"xxxxxxxxxxxxx"}', { maxInputBytes: 20 }); // 21 bytes: ParseErro
 
 ### What the limit does and does not bound
 
-The spec gives no reference default and says a cap SHOULD NOT exceed 10 MiB
-without measuring. A byte cap bounds the cost of a parsing library's worst case;
+The spec gives no reference default (D-24): an implementation may set any finite
+value, must document it, and should measure its slowest codec on a worst-case
+input of that size before raising it. A byte cap bounds the cost of a parsing library's worst case;
 it does not make any parse fast. Measured on this port (WSL2, Node 20, `yaml`
 2.9, `smol-toml`, `fast-xml-parser`):
 
@@ -45,7 +46,7 @@ it does not make any parse fast. Measured on this port (WSL2, Node 20, `yaml`
 | XML, repeated elements | 10 MiB / 64 MiB | 0.9 s / 5.4 s |
 | YAML, block sequence of records | 2 MiB | 0.7 s |
 | TOML, array of tables | 1 / 2 / 4 / 10 MiB | 0.3 / 1.0 / 5.0 / 46.7 s |
-| YAML, one block mapping | 135 / 271 / 564 KiB (5,000 / 10,000 / 20,000 keys) | 1.4 / 6.0 / 17.3 s |
+| YAML, one block mapping | 135 / 271 / 564 KiB (5,000 / 10,000 / 20,000 keys) | 1.4 / 6.0 / 17 s (the last: 17 to 30 s depending on the machine) |
 
 So 64 MiB is a sound bound for JSON, OML and XML, and **not** for two parsers:
 
