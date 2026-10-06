@@ -6,10 +6,10 @@
  * same-label edges collapse into an array-of-tables, a single occurrence
  * stays bare (see omnist-spec Sec7.3, writing).
  *
- * Writing is lenient by default: TOML has no `null`, so a null-valued edge
- * is dropped and recorded as a "null.omitted" Adjustment (a warning) in a
- * WriteReport. Pass report to inspect, or strict: true to throw on any
- * adjustment. See src/report.ts. Unlike JSON, TOML's own grammar accepts
+ * A null-valued leaf fails to write unconditionally (TOML has no `null`,
+ * and dropping the edge would leave no trace): `write.unsupported-value`.
+ * Pass report to inspect adjustments, or strict: true to throw on any. See
+ * src/report.ts. Unlike JSON, TOML's own grammar accepts
  * `nan`/`inf`/`-inf` float literals directly, so (also unlike JSON) writing
  * a NaN/Infinity leaf needs no adjustment at all.
  *

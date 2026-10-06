@@ -6,6 +6,44 @@ the first documented release of the TypeScript port; the public API
 mirrors the upstream Python package's `__all__` (camelCase names of the
 same functions).
 
+## [v0.8.1-alpha] -- XML drop-report paths carry the E-10 index; YAML mapping parse is linear; stale format docs
+
+A patch: a path fix, a performance fix and documentation. No spec pin change
+(still v0.33.0-beta, `64cbb68`).
+
+- **omnist-ts#163: `readXml`'s `format.attribute-dropped` and
+  `format.namespace-dropped` paths are indexed (E-10, E-9).** `<r><a x="1"/><a
+  x="2"/></r>` reported `$.r.a` twice; it now reports `$.r.a[0]` and `$.r.a[1]`,
+  and a single element stays bare. The child paths come from the same
+  `EdgePaths` rule the writers use, so nested paths (and the depth-limit error)
+  carry the index too, and a label is counted by its local name (`<ns:a/>` and
+  `<a/>` repeat). **Behaviour change** to report paths only. Go, Rust and Python
+  already reported the indexed paths.
+- **omnist-ts#157 (part 1): reading one large YAML mapping is linear.** The
+  `yaml` library's duplicate-key check scans every earlier key for each key, so
+  a block or flow mapping of 20,000 keys took about 11 s and 50,000 keys
+  minutes, and the 64 MiB input cap does not bound that. `readYaml` now parses with
+  the library's check off and tests for a duplicate in one linear pass with the
+  library's own equality (`===` on resolved scalars). 50,000 keys read in about
+  1.2 s. The error for a duplicate is unchanged (same message, same position,
+  the same first-error order), checked against the old reader on 6,000 mutated
+  inputs; the one exception is a document whose total quadratic cost (the sum
+  over its mappings of keys squared) exceeds that of one 4,096-key mapping,
+  where the error names the duplicate key's own position rather than re-running
+  the quadratic check. The budget is on the whole document, so many large
+  mappings cannot multiply the re-parse (40 mappings of 4,095 keys with one
+  duplicate: 24 s under a per-mapping gate, 5.4 s now, of which the parse itself is most). The aliases inside `!!pairs` / `!!omap` (part 2 of #157) are
+  still not counted, and #157 stays open. `docs/limitations.md` has the measured
+  numbers, and `tools/bench.ts` a new row.
+- **Docs.** `docs/formats/xml.md`, `toml.md` and `json.md` still documented
+  `shape.empty_ambiguous`, `key.sanitized`, `string.illegal_xml_char`,
+  `string.cr_normalized`, TOML `null.omitted` and JSON `float.special` as
+  reported adjustments. The source fails unconditionally on all but the CR case
+  (`write.unsupported-value`; a CR is escaped and round-trips). The pages now
+  describe the real behaviour and code sets (pinned by `test/fuzz.test.ts`);
+  `overview.md`, `python-parity.md` (G8) and the `toml.ts` header comment are
+  corrected too.
+
 ## [v0.8.0-alpha] -- adopt omnist-spec v0.33.0-beta (path indexes, OML-29, input size, C-9, C-10)
 
 `vendor/omnist-spec` bumped to **v0.33.0-beta** (commit `64cbb68`, the

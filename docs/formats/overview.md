@@ -8,7 +8,7 @@ adjustment) and reports adjustments through a `WriteReport`
 | Format | Page | Zero-adjustment? | Notes |
 |---|---|---|---|
 | [OML](oml.md) | Omnist's own format | Yes | The only format that round-trips every Document shape exactly. |
-| [JSON](json.md) | `formats/json.ts` | No | No native `date`/`time`/`datetime` or `NaN`/`Infinity` -- both get adjusted on write. |
+| [JSON](json.md) | `formats/json.ts` | No | No native `date`/`time`/`datetime` (adjusted on write); `NaN`/`Infinity` fail to write. |
 | [YAML](yaml.md) | `formats/yaml.ts` | Mostly | Closer to the Document model than JSON (native dates), but still has JSON-like array/scalar limits. |
 | [TOML](toml.md) | `formats/toml.ts` | Mostly | No top-level scalar root; a document must be table-shaped. |
 | [XML](xml.md) | `formats/xml.ts` | No | Always single-rooted (one document element); attributes vs. elements is a modeling choice on the way in. |

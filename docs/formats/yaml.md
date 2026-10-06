@@ -169,10 +169,10 @@ value) as an explicitly double-quoted scalar instead of a plain or
 block one.
 
 ```ts
-import { buildNode } from "@omnist-dev/omnist";
+import { doc } from "@omnist-dev/omnist";
 import { checkYaml, writeYaml } from "@omnist-dev/omnist";
 
-const node = buildNode({ note: "line1line2" });
+const node = doc({ note: "line1line2" }).toData();
 checkYaml(node).adjustments;
 // [{ path: "$.note", code: "string.line-break-char",
 //    message: "value contains U+0085 (NEL); written double-quoted to round-trip correctly",

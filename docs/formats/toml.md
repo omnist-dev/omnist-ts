@@ -32,39 +32,34 @@ token handling in `docs/formats/oml.md` for the corresponding OML-side
 treatment.
 
 Unlike JSON, TOML's own grammar accepts `nan`/`inf`/`-inf` float literals
-directly, so a `NaN`/`Infinity` leaf needs no adjustment at all when
-writing TOML -- there is no `float.special`-equivalent code here.
+directly, so a `NaN`/`Infinity` leaf is written as is: it needs no
+adjustment and does not fail (unlike JSON, where it is a write failure).
 
 ## Adjustment codes
 
-`writeToml`/`checkToml` can report one adjustment code -- the full set
-TOML's codec can ever emit (`test/fuzz.test.ts` asserts this against
-`ALLOWED_CODES.toml`):
+`writeToml`/`checkToml` can report one adjustment code, `format.interleaving-lost`
+(path `$`, warning): TOML's grouping rule collapses same-label edges into an
+array of tables, so a Document whose labels interleave across other labels
+(`m, x, m`) reads back in grouped order. `test/fuzz.test.ts` asserts the set
+against `ALLOWED_CODES.toml`.
 
-| code | severity | trigger |
-|---|---|---|
-| `null.omitted` | warning | a `null`-valued edge -- TOML has no `null`, so the edge is dropped entirely |
+## A `null` leaf fails to write
+
+TOML has no `null` token, and dropping the edge would leave no trace it ever
+existed. A `null` leaf is therefore an unconditional write failure -- `strict`
+or not, and in `checkToml` too -- with code `write.unsupported-value` and the
+leaf's path (indexed per E-10). The old `null.omitted` adjustment no longer
+exists for TOML.
 
 ```ts
-import { buildNode } from "@omnist-dev/omnist";
-import { checkToml, writeToml } from "@omnist-dev/omnist";
+import { doc } from "@omnist-dev/omnist";
+import { writeToml } from "@omnist-dev/omnist";
 
-const node = buildNode({ name: "Ann", nickname: null });
-checkToml(node).adjustments;
-// [{ path: "$.nickname", code: "null.omitted",
-//    message: "null value dropped (TOML has no null)", severity: "warning" }]
+const node = doc({ name: "Ann", nickname: null }).toData();
 writeToml(node);
-// 'name = "Ann"\n' -- the nickname edge is gone, not written as anything
-writeToml(node, { strict: true }); // throws WriteError("warning: $.nickname: null value dropped (TOML has no null)")
+// throws WriteError, code "write.unsupported-value", path "$.nickname"
 ```
 <!-- doc-illustrative -->
-
-Because the dropped edge disappears rather than being substituted, a
-`null.omitted` adjustment is the one case in this port where `strict`
-catches something no *value* in the written text hints at: reading the
-TOML back gives a document with the edge missing, not present-and-null,
-so `strict: true` is the only way to learn synchronously, at write time,
-that a `null` leaf was in the input at all.
 
 ## Arbitrary-precision integers (issue #98)
 

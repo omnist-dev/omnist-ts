@@ -104,11 +104,16 @@ scalar collapses and the two OML gaps listed below.
 ### Codecs
 
 `src/formats/*.ts` against the matching sections of `omnist/formats.py`.
-Both implementations define the same nine adjustment codes and no others:
-`temporal.stringified`, `null.omitted`, `value.stringified`,
-`key.sanitized`, `float.special`, `shape.empty_ambiguous`,
-`string.illegal_xml_char`, `string.cr_normalized`,
-`string.line-break-char`.
+At the time of this comparison both implementations defined the same nine
+adjustment codes and no others: `temporal.stringified`, `null.omitted`,
+`value.stringified`, `key.sanitized`, `float.special`,
+`shape.empty_ambiguous`, `string.illegal_xml_char`, `string.cr_normalized`,
+`string.line-break-char`. That set is historical: since fail-don't-invent,
+the cases behind `null.omitted`, `key.sanitized`, `float.special`,
+`shape.empty_ambiguous` and `string.illegal_xml_char` are unconditional
+`write.unsupported-value` failures, `string.cr_normalized` is gone (a CR is
+escaped and round-trips), and `format.interleaving-lost` was added. The
+current codes are on each page under `docs/formats/`.
 
 A 32-document corpus was run through all five `check*` functions on both
 sides (160 reports), comparing every path, code and severity triple, prior
@@ -526,16 +531,15 @@ authored declaration order.
 ```
 <!-- verified-by: test/python-parity.test.ts -->
 
-### G8. `docs/formats/*.md` document none of the nine adjustment codes
+### G8. `docs/formats/*.md` document none of the nine adjustment codes -- **fixed**
 
 Tracked as issue [#57](https://github.com/omnist-dev/omnist-ts/issues/57).
 
 Python documents each codec at length -- the coercion heuristic, the
 round-trip caveats, and every adjustment code the writer can emit, with
-worked examples. The five pages under `docs/formats/` here are short
-orientation stubs: none of the nine codes appears in any of them (the only
-mention anywhere in `docs/` is one example in `cli.md`). The behavior is
-implemented and tested; only the user-facing explanation is missing.
+worked examples. The pages under `docs/formats/` now document the codes
+their writer can emit, and the failures that replaced the retired ones; the
+sets are pinned by `test/fuzz.test.ts`.
 
 ### G9. Two public-surface omissions
 
