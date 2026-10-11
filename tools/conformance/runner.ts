@@ -279,16 +279,14 @@ function runInfer(caseDir: string): CaseResult {
   return fail("expected failure (ambiguous type, no allowAny), infer succeeded");
 }
 
-/** Message text is never compared (Sec8.5's own matching rule 1), and `code`
- * is compared code-agnostically (Sec8.5.2 rule 4, conformance-harness.md) --
- * strip both, so a fixture's expected.json doesn't have to pin exact wording
- * or a bare-vs-namespaced code spelling, only severity/location. Mirrors
- * vectorRunner.ts's Track-2 lint driver, which does the same by comparing
- * finding locations only. */
+/** Message text is never compared (Sec8.5.2 rule 1); `code` is. Sec8.3 is
+ * mandatory, so a lint finding's code (`lint.<name>`, Sec8.3.7) is compared
+ * exactly, alongside severity and location (omnist-ts#164). */
 function dropMessages(payload: { ok: boolean; findings: readonly LintFinding[] }) {
   return {
     ok: payload.ok,
     findings: payload.findings.map((f) => ({
+      code: f.code,
       severity: f.severity,
       location: f.location,
     })),
