@@ -121,12 +121,16 @@ the set against `ALLOWED_CODES.xml`:
 
 | code | severity | trigger |
 |---|---|---|
-| `temporal.stringified` | warning | a `Date` leaf -- written as text, reads back as a plain string, not a `Date` |
-| `value.stringified` | warning | a non-string scalar leaf (`number`/`boolean`) -- written as text, reads back as a plain string on a schema-less read, not its original type |
+| `format.temporal-stringified` | warning | a date, time or datetime leaf -- written as its ISO-8601 text, reads back as a plain string, not a `Date` |
+| `format.value-stringified` | warning | a non-string, non-temporal scalar leaf (`number`/`boolean`) -- written as text, reads back as a plain string on a schema-less read, not its original type |
 
-(`temporal.stringified` is shared with JSON/YAML's own version of the
-code; `value.stringified` replaced the pre-#88 `string.ambiguous` code --
-see below.)
+A leaf takes exactly one of the two codes (spec E-5): the temporal one for
+the three temporal kinds, never also the value one. Both are reported once per
+leaf at its Document path, indexed (E-10) when the label repeats.
+(`format.temporal-stringified` is shared with JSON's own version of the code;
+`format.value-stringified` replaced the pre-#88 `string.ambiguous` code -- see
+below. Before 0.9.0-alpha the two were reported under the unregistered names
+`temporal.stringified` and `value.stringified`.)
 
 `readXml` can also report two codes into an optional `report`:
 `format.attribute-dropped` and `format.namespace-dropped`, one per element
@@ -165,7 +169,7 @@ a TOML `null`. The error's `path` names the null leaf, with an `[n]` index
 (from 0) on a label that repeats among its siblings. The old
 `null.omitted` adjustment no longer exists for XML.
 
-### `temporal.stringified`
+### `format.temporal-stringified`
 
 ```ts
 import { doc } from "@omnist-dev/omnist";
@@ -173,7 +177,7 @@ import { checkXml } from "@omnist-dev/omnist";
 
 const node = doc({ root: { when: new Date(Date.UTC(2024, 0, 1)) } }).toData();
 checkXml(node).adjustments;
-// [{ path: "$.root.when", code: "temporal.stringified",
+// [{ path: "$.root.when", code: "format.temporal-stringified",
 //    message: "temporal value written as text (reads back as a string)", severity: "warning" }]
 ```
 <!-- doc-illustrative -->
@@ -210,7 +214,7 @@ writeXml(badChar);
 The pre-fail-don't-invent codes `shape.empty_ambiguous`, `key.sanitized` and
 `string.illegal_xml_char` no longer exist.
 
-### `value.stringified`
+### `format.value-stringified`
 
 ```ts
 import { doc } from "@omnist-dev/omnist";
@@ -218,7 +222,7 @@ import { checkXml } from "@omnist-dev/omnist";
 
 const node = doc({ root: { code: 30 } }).toData();
 checkXml(node).adjustments;
-// [{ path: "$.root.code", code: "value.stringified",
+// [{ path: "$.root.code", code: "format.value-stringified",
 //    message: "non-string scalar written as text (reads back as a string)", severity: "warning" }]
 ```
 <!-- doc-illustrative -->
@@ -227,7 +231,7 @@ The mirror image of the scalar-coercion section above: since issue #88, a
 schema-less `readXml` never coerces text back into a number/boolean, so a
 non-string Document leaf (a `number` or `boolean`) written as element text
 is the one XML round-trip that always loses its type -- `30` (a number)
-comes back as `"30"` (a string) on a plain read. `value.stringified` flags
+comes back as `"30"` (a string) on a plain read. `format.value-stringified` flags
 that before it happens. (Before #88, this was the reverse situation --
 `string.ambiguous` flagged a *string* leaf that happened to look numeric,
 because the old shape-based coercion would have turned it back into a

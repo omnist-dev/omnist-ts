@@ -42,7 +42,9 @@ the shortest possible tour.
 ## Safety limits
 
 Reading untrusted input is bounded: nesting depth 200, 1,000,000 nodes, 4,300
-integer digits, and, for YAML, an alias expansion factor of 50 (spec D-18;
+integer digits (each configurable per call: `readJson(text, { maxDepth,
+maxNodes, maxIntDigits })`; a refusal is `document.limit.depth`,
+`document.limit.nodes` or `document.limit.int-digits`), and, for YAML, an alias expansion factor of 50 (spec D-18;
 configurable with `readYaml(text, { maxAliasExpansion })`, rejected input
 reports `document.limit.alias-expansion`) and an expanded size of 1,000,000
 value slots (spec D-22; `readYaml(text, { maxExpandedSlots })`, rejected input

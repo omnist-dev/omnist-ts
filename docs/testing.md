@@ -86,7 +86,8 @@ implementation. Two independent tracks, from the same submodule pin:
 - **The JSON-vector suite** (`tools/conformance/vectorRunner.ts`) runs
   `test-suite/`'s JSON-envelope vectors (`name`/`operation`/`input`/
   `expect`) against the same functions. Currently
-  **333 passed, 0 failed, 34 skipped** (of 367, spec v0.33.0-beta).
+  **494 passed, 0 failed, 28 skipped** (of 522, spec v0.34.0-beta); the 28
+  skips are the `extensions-osd-oml` vectors (OSD-OML is not implemented).
 
 Every skip cites an explicit, checkable reason, per
 [`docs/08-conformance-and-errors.md` Sec8.5.5](https://github.com/omnist-dev/omnist-spec/blob/master/docs/08-conformance-and-errors.md)
@@ -99,15 +100,14 @@ in `omnist-spec` -- never an unreasoned skip:
   of a schema (JS has one numeric type; see
   [python-parity.md](python-parity.md) #1). One vector is affected.
 - **"not yet implemented"** for a spec-required capability this port
-  hasn't built -- e.g. the 6 `document-model/limits.json` vectors assume
-  a runtime-configurable safety limit, and this port's `MAX_DEPTH`/
-  `MAX_NODES`/`MAX_INT_DIGITS` are compile-time constants with no
-  configuration surface. (The alias expansion limit, by contrast, IS
-  configurable -- `ReadYamlOptions.maxAliasExpansion`, and the expanded
-  size by `ReadYamlOptions.maxExpandedSlots` -- so the 35
-  `formats-yaml/alias-expansion` vectors, which declare vector-local
-  maximums through `declared_max_alias_expansion` and
-  `declared_max_expanded_slots`, run for real.)
+  hasn't built -- today only the 28 `extensions-osd-oml` vectors (the
+  OSD-OML extension, E-20/E-21). The safety limits are all configurable per
+  call -- `maxDepth`, `maxNodes`, `maxIntDigits` (since 0.9.0-alpha; they
+  were compile-time constants and 52 vectors skipped), the alias expansion
+  limit by `ReadYamlOptions.maxAliasExpansion`, the expanded size by
+  `maxExpandedSlots`, and the input size by `maxInputBytes` -- so every
+  vector that declares a vector-local maximum through a `declared_max_*` key
+  runs for real, against that maximum and never the default.
 - **A structured-diagnostics gap** ("not yet implemented") -- a vector
   skips this way **only** when the error this port throws genuinely lacks a
   `path` and/or `code`. Errors that carry both are compared for real:
@@ -134,27 +134,27 @@ pin-bump procedure.
 
 ## Safety limits
 
-This port hardcodes four compile-time safety limits, plus two configurable limits for YAML's aliases, that bound the work
-done against untrusted input, each documented alongside the code that
-enforces it:
+This port enforces the safety limits below, which bound the work done against
+untrusted input, each documented alongside the code that enforces it. All of
+them are configurable per call:
 
 | Limit | Value | Enforced in | Bounds |
 |---|---|---|---|
-| `MAX_DEPTH` | 200 | `src/document.ts` (`buildNode`), and locally redefined per the same convention in `src/oml.ts`, `src/infer.ts`, `src/schema.ts`, and each of `src/formats/{json,yaml,toml,xml}.ts` | Levels of node nesting in a materialized Document |
-| `MAX_NODES` | 1,000,000 | `src/document.ts` (`buildNode`), `src/formats/xml.ts` (`xmlToNode`) | Total nodes materialized while building one Document |
-| `MAX_INT_DIGITS` | 4,300 | `src/document.ts`, and a raw-text pre-parse scan in each of `src/formats/{json,yaml,toml,xml}.ts` | Decimal digits in an `integer` literal |
+| Depth (`maxDepth`) | 200 | `src/limits.ts` (the defaults and the resolver), `src/document.ts` (`buildNode`), `src/oml.ts` (the parser), `src/formats/xml.ts` (`xmlToNode`); the writers and traversals keep their own backstop at the default | Levels of node nesting counted from the Document root, which is level 1; `document.limit.depth` at `$` |
+| Node count (`maxNodes`) | 1,000,000 | `src/document.ts` (`buildNode`), `src/oml.ts`, `src/formats/xml.ts` | Nodes of one Document, the root included, a scalar leaf not; `document.limit.nodes` at `$` |
+| Integer digits (`maxIntDigits`) | 4,300 | `src/limits.ts` (`digitsExceed`), checked by value in `src/document.ts` (`buildNode`), `src/oml.ts`, and as each reader resolves an integer (`json.ts`, `yaml.ts`, `toml.ts`, `xml.ts`) | Decimal digits of an integer's value, sign excluded (D-28); `document.limit.int-digits` at the literal's Document path |
 | Alias expansion factor | 50 (configurable: `ReadYamlOptions.maxAliasExpansion`, 1 to 10,000) | `src/formats/yaml-alias.ts` (`checkAliasExpansion`), called by `readYaml` before anything is materialized | The ratio of value slots materialized to value slots written, per anchored node, mapping, sequence, and the document root (D-18) |
 | Expanded size | 1,000,000 slots (configurable: `ReadYamlOptions.maxExpandedSlots`, 1 to 10,000,000) | `src/formats/yaml-alias.ts` (`checkAliasExpansion`), called by `readYaml` before anything is materialized | The value slots one YAML input materializes (`W` of the root), for an input that contains an alias or a merge key (D-22); an alias-free input is exempt |
 | Input size | 64 MiB (67,108,864 bytes; configurable: `maxInputBytes` on every reader, `--max-input-bytes` on the CLI, any integer of at least 1) | `src/formats/input-size.ts` (`checkInputSize`), called first thing in each of `readJson`/`readYaml`/`readToml`/`readXml`/`readOml` | Raw input size in UTF-8 bytes, a leading BOM counted, before anything is decoded or parsed (D-23); see [Limitations](limitations.md) |
 
-`MAX_DEPTH`/`MAX_NODES`/`MAX_INT_DIGITS` match the reference defaults in
-`omnist-spec`'s [`02-document-model.md` Sec2.4](https://github.com/omnist-dev/omnist-spec/blob/master/docs/02-document-model.md#24-safety-limits).
-None of the three is spec-required to have a runtime-configurable
-surface (see the Conformance testing section above), and this port
-doesn't expose one. The alias expansion factor matches the reference
-default of 50 and the expanded size the reference default of 1,000,000
-(`02-document-model.md` Sec2.4.1, D-18 to D-22); these are the two limits this
-port does expose, as `ReadYamlOptions.maxAliasExpansion` and
+The depth, node and digit defaults match the reference defaults in
+`omnist-spec`'s [`02-document-model.md` Sec2.4](https://github.com/omnist-dev/omnist-spec/blob/master/docs/02-document-model.md#24-safety-limits),
+and each reader takes them as options (`maxDepth`, `maxNodes`,
+`maxIntDigits`; an integer of at least 1, else a `RangeError`: D-10); see
+[Limitations](limitations.md#safety-limits-and-how-to-set-them). The alias
+expansion factor matches the reference default of 50 and the expanded size
+the reference default of 1,000,000 (`02-document-model.md` Sec2.4.1, D-18 to
+D-22), exposed as `ReadYamlOptions.maxAliasExpansion` and
 `ReadYamlOptions.maxExpandedSlots` (D-10, D-11: finite, documented; see
 [YAML](formats/yaml.md)).
 
@@ -162,7 +162,7 @@ The input-size limit is `omnist-spec` D-23 to D-26 (`02-document-model.md`
 Sec2.4.2; it began as this port's own guard, issue #110). The codecs each hand
 raw input text to an external parsing library (native `JSON.parse`, the `yaml`
 package, `smol-toml`, `fast-xml-parser`) *before* `buildNode`'s
-`MAX_DEPTH`/`MAX_NODES` checks ever run -- those checks bound the materialized
+depth and node checks ever run -- those checks bound the materialized
 Document, not the work the library does producing the intermediate value.
 `checkInputSize` refuses an oversized input first, with
 `document.limit.input-size` at `$`. The default is 64 MiB, a deliberate

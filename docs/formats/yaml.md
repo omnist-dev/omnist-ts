@@ -55,8 +55,10 @@ refused in milliseconds however large the expansion it describes.
 
 For both options, zero, a negative value and NaN select the default and are
 never "no limit"; a value above the ceiling, infinite or fractional throws a
-`RangeError`. This port has no other configurable limit: `MAX_DEPTH`,
-`MAX_NODES` and `MAX_INT_DIGITS` are compile-time constants.
+`RangeError`. The three universal limits (depth, node count, integer digits,
+spec D-9) are options too: `maxDepth`, `maxNodes` and `maxIntDigits`, each an
+integer of at least 1 (anything else is a `RangeError`); see
+[Limitations](../limitations.md#safety-limits-and-how-to-set-them).
 
 ```ts
 import { readYaml } from "@omnist-dev/omnist";
@@ -153,32 +155,36 @@ bounded by the checks above alone (`W(root)` is at most the ratio maximum times
 
 ## Adjustment codes
 
-`writeYaml`/`checkYaml` can report one adjustment code -- the full set
+`writeYaml`/`checkYaml` can report two adjustment codes -- the full set
 YAML's codec can ever emit (`test/fuzz.test.ts` asserts this against
 `ALLOWED_CODES.yaml`):
 
 | code | severity | trigger |
 |---|---|---|
-| `string.line-break-char` | warning | a label or string value containing U+0085 (NEL) -- forced to a double-quoted scalar so it round-trips correctly |
+| `format.string-line-break-char` | warning | a label or string value containing U+0085 (NEL) -- written as a double-quoted scalar with the escape `\N`, so it round-trips correctly |
+| `format.interleaving-lost` | warning | labels interleaved across other labels -- YAML's grouping rule collapses same-label edges; reported once, at `$` |
 
-U+0085 is one of the line-break characters YAML's block-scalar folding
-treats specially; left unquoted, a value containing it can be re-folded
-on read in a way that doesn't reproduce the original text byte-for-byte.
-`writeYaml` sidesteps that by writing any string containing it (label or
-value) as an explicitly double-quoted scalar instead of a plain or
-block one.
+U+0085 is one of the line-break characters YAML 1.1 treats specially: a raw
+U+0085 inside a scalar is read as a line break and folded, so it does not
+round-trip. `writeYaml` writes any string containing it (label or value) as a
+double-quoted scalar in which each NEL is the two characters `\N`, the one
+YAML escape defined for it (spec E-34), so `"x\Ny"` is the string `x` NEL `y`
+and any YAML reader resolves it back to the single character. The code is
+reported once per such string, at the leaf's Document path (indexed per E-10),
+although the write is lossless. Before 0.9.0-alpha the character was written raw
+and the code was the unregistered `string.line-break-char`.
 
 ```ts
 import { doc } from "@omnist-dev/omnist";
 import { checkYaml, writeYaml } from "@omnist-dev/omnist";
 
-const node = doc({ note: "line1line2" }).toData();
+const node = doc({ note: "line1\u0085line2" }).toData();
 checkYaml(node).adjustments;
-// [{ path: "$.note", code: "string.line-break-char",
+// [{ path: "$.note", code: "format.string-line-break-char",
 //    message: "value contains U+0085 (NEL); written double-quoted to round-trip correctly",
 //    severity: "warning" }]
 writeYaml(node);
-// 'note: "line1line2"\n' -- double-quoted, not the plain/block form writeYaml uses otherwise
+// 'note: "line1\\Nline2"\n' -- double-quoted, with the NEL spelled \N
 ```
 <!-- doc-illustrative -->
 
@@ -228,17 +234,42 @@ unaffected and stay plain JS `number`.
 `.inf`/`-.inf`/`.nan` are unaffected either way: those round-trip natively
 (see this file's top comment) and are not integer literals.
 
-`readYaml` still raises `ParseError` on a bare integer-shaped token (all
-digits, outside a quoted scalar or comment) with more than 4300 digits
-(`MAX_INT_DIGITS`, matching CPython's `sys.get_int_max_str_digits()`
-default and `src/document.ts`'s own cap). Before issue #98 this same scan
-existed to catch the underlying `yaml` package silently rounding an
-over-long literal to `Infinity` (indistinguishable from `.inf`); now that
-`intAsBigInt: true` makes the package construct an arbitrarily large
-`bigint` instead of overflowing, the scan's purpose has shifted but its
-necessity hasn't: an unbounded-digit literal is still a real
-unbounded-digit-to-string conversion risk (security, superlinear),
-whether it would have overflowed or not.
+`readYaml` raises `ParseError` (code `document.limit.int-digits`, at the
+literal's Document path) on an integer whose value has more than 4300 decimal
+digits by default (spec D-9, D-28; `readYaml(text, { maxIntDigits })` sets it).
+The digits are those of the value, whatever the spelling: a hex (`0xFFF`),
+octal (`01750`) or binary (`0b1111101000`) literal, an underscore (`1_000`)
+and a leading zero are not digits, so `0x3E7`, `01747`, `0b1111100111` and
+`9_9_9` are three digits and `0xFFF`, `1_000` are four. The check is made as the
+`yaml` package resolves the integer (its integer tags are wrapped), so an
+over-long literal is never converted to a `bigint`: that conversion is
+superlinear, which is what the limit bounds, and a word that merely ends in
+digits (`id4444...`) is a string and is never mistaken for one. A sexagesimal
+integer (`190:20:30`) is checked on its converted value. A float that overflows
+(`1.0e+999`) reads as an infinity and one that underflows as `0.0` (D-29).
+
+## Tags outside the profile (spec C-13)
+
+A node tagged `!!omap`, `!!pairs` or `!!set` is refused with a `ParseError`,
+code `format.tag-forbidden`, at path `$` -- well-formed YAML that falls outside
+the supported profile, not a syntax error (the same family as the XML profile
+refusals). An untagged sequence of single-entry mappings is not refused: it
+reads as repeated edges. (Before 0.9.0-alpha the three tags were read as the
+plain sequence or mapping they resemble.)
+
+```ts
+import { readYaml } from "@omnist-dev/omnist";
+
+readYaml("t: !!omap [{k: 1}, {j: 2}]\n");
+// throws ParseError, code "format.tag-forbidden", path "$"
+```
+<!-- doc-illustrative -->
+
+## The merge key and its tag (spec D-27)
+
+Only an untagged or `!!merge`-tagged plain `<<` is the merge key. `!!str <<` is
+an ordinary string key `"<<"` (the `yaml` package would treat it as a merge
+key, so `readYaml` marks it quoted first), and so is a quoted `"<<"`.
 
 `writeYaml` also forces every plain JS `number` scalar (never a `bigint`)
 to render with at least one fraction digit, even when whole (e.g. `-0`

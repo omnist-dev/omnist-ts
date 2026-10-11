@@ -6,6 +6,79 @@ the first documented release of the TypeScript port; the public API
 mirrors the upstream Python package's `__all__` (camelCase names of the
 same functions).
 
+## [v0.9.0-alpha] -- adopts omnist-spec v0.34.0-beta: configurable limits, registered write codes, YAML profile decisions
+
+A minor release: new options, new codes and new rejections. The spec pin moves
+from v0.33.0-beta (`64cbb68`) to **v0.34.0-beta** (`3346b50`), which grows the
+suite from 367 to 522 vectors. Track 1 stays 19 of 19. Track 2 was 430 passed,
+12 failed, 80 skipped of 522 against the old source and runners (the 52
+limit vectors skipped, 28 OSD-OML skipped); it is now **494 passed, 0 failed,
+28 skipped**, the 28 being the OSD-OML extension (E-20, E-21). Closes
+omnist-ts#164 and omnist-ts#166.
+
+- **Safety limits are options (D-9, DIV-28, omnist-ts#166).** Every reader
+  (`readJson`, `readYaml`, `readToml`, `readXml`, `readOml`, and `readFormat`)
+  takes `maxDepth`, `maxNodes` and `maxIntDigits`, like `maxInputBytes`; an
+  integer of at least 1, else a `RangeError`. They were compile-time constants.
+  The defaults are the spec's (200, 1,000,000, 4,300), exported as
+  `DEFAULT_MAX_DEPTH`, `DEFAULT_MAX_NODES` and `DEFAULT_MAX_INT_DIGITS`, with the
+  `DocumentLimits` type. The Track 2 runner hands each `declared_max_*` key to
+  the reader, so the 52 limit vectors it skipped now run.
+- **Limit refusals carry a code and a path (E-4a, E-11, DIV-29).** Depth, node
+  count and integer digits were bare messages, in OML and in every other
+  format. They are now `document.limit.depth` and `document.limit.nodes` at
+  `$`, and `document.limit.int-digits` at the Document path of the integer
+  literal (`$.n`, `$.a[1]`, indexed per E-10), never a text position. The classes
+  are unchanged: `ParseError` from the OML reader and for an over-long integer
+  from any reader, `DocumentError` for depth and nodes from a builder.
+- **Integer digits count the value (D-28).** A hex, octal, binary or underscored
+  YAML/TOML literal is counted by its decimal value: `0xFFF` is four digits,
+  `0b1111100111` and `9_9_9` three. A 3,600-digit hex literal (4,335 digits) is
+  refused by default and a 4,301-digit binary one (1,295) is read. The
+  check is made as each reader resolves the integer, so an over-long literal is
+  never converted to a `bigint` (OML, JSON, YAML) or is found in the text first
+  (a decimal TOML literal): the old heuristic pre-scans of the YAML and JSON
+  text are gone, and with them the YAML scan's false positives. A schema-directed
+  XML integer leaf is refused at the leaf's path.
+- **Behaviour change: the depth limit counts levels from the Document root
+  (D-9, D-12).** The root is level 1, so a chain of 200 edges is read and 201 is
+  refused in every format. OML used to take 200 `{` after a top-level edge and
+  XML 201 elements (one level more than JSON and YAML, as Python's did); both
+  now take one level less. A repeated label's targets were also counted one
+  level deeper than a single edge's; they now sit at their siblings' depth. A
+  scalar leaf is no longer a level.
+- **Behaviour change: the node count includes the root (D-9).** An XML
+  document's Document root now counts, like the other formats'.
+- **Registered write codes (E-5, DIV-31, omnist-ts#166).** The writers reported
+  `temporal.stringified`, `value.stringified` and `string.line-break-char`,
+  which are not in the taxonomy. They are `format.temporal-stringified`,
+  `format.value-stringified` and `format.string-line-break-char`; the CLI
+  `check` command prints the new names too. An XML date, time or datetime leaf
+  reports only `format.temporal-stringified`.
+- **YAML writes U+0085 as `\N` (E-34).** The string was double-quoted but the
+  character raw, which YAML 1.1 folds as a line break; it is now the escape `\N`,
+  which any YAML reader resolves back. The report is the registered code.
+- **YAML refuses `!!omap`, `!!pairs` and `!!set` (C-13, new code
+  `format.tag-forbidden`).** A `ParseError` at `$`; they were read as the plain
+  collection they resemble. The aliases inside them (part 2 of omnist-ts#157) can
+  no longer be reached through `readYaml`; `checkAliasExpansion` still walks them
+  when handed a parsed document.
+- **YAML `!!str <<` is an ordinary key (D-27).** The `yaml` package treated any
+  plain `<<` as the merge key whatever its tag; `readYaml` now marks a plain
+  `<<` that resolved to a string as quoted first. `!!merge <<` and an untagged
+  `<<` still merge.
+- **D-29 (infinity and underflow) needed no change:** `1e999` already read as
+  `Infinity` and `1e-999` as `0` in JSON, YAML, TOML and OML. Tests pin it.
+- **Runners (omnist-ts#164, omnist-ts#166, E-35).** Track 1 compares a lint
+  finding's `code` exactly (spec Sec8.3 is mandatory) and its stale comments are
+  gone; Track 2 compares a write vector's diagnostics, and a parse vector's
+  read-time ones, by `(path, code)` pairs rather than paths alone, and passes
+  `compact: true` to the OML writer. Before the source was fixed, that
+  comparison turned 9 passing write vectors red (426 passed, 16 failed).
+- **Docs.** `docs/formats/{json,yaml,xml,toml,oml}.md`, `docs/limitations.md`
+  (a new "Safety limits and how to set them" section), `docs/testing.md`,
+  `docs/api.md`, `docs/python-parity.md`, `README.md` and the conformance README.
+
 ## [v0.8.1-alpha] -- XML drop-report paths carry the E-10 index; YAML mapping parse is linear; stale format docs
 
 A patch: a path fix, a performance fix and documentation. No spec pin change

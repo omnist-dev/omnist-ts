@@ -42,18 +42,22 @@ at the first old occurrence and drops later duplicates; `remove`, `labels`
 and `count` agree; `toGrouped` applies the same count-1 rule. Equality is
 order-sensitive on both sides.
 
-Both implementations share `MAX_DEPTH = 200` (`src/document.ts:47`,
-`omnist/document.py:34`) and the `MAX_INT_DIGITS = 4300` constant.
+Both implementations share the reference defaults, a depth of 200 and 4300
+integer digits (this port's now live in `src/limits.ts`, and are options on every
+reader since 0.9.0-alpha).
 
 **The depth-boundary numbering noted during issue
 [#37](https://github.com/omnist-dev/omnist-ts/issues/37) was re-measured,
 and the earlier description of it was wrong.** Reader by reader, the
-deepest accepted nesting is identical in both languages: JSON 200, YAML
-200, OML 200, XML 201. OML is *not* off by one; only XML is. That
-off-by-one is inherited from the Python source, whose `_xml_to_node` starts
-its recursion at depth 0 for the document element `read_xml` has already
-wrapped in an edge. Faithful parity, not a port defect, so it stays as-is.
-(Verified via `test/python-parity.test.ts`, depth boundary.)
+deepest accepted nesting was identical in both languages at the time: JSON 200,
+YAML 200, OML 200 braces, XML 201. **Superseded in 0.9.0-alpha (omnist-spec
+v0.34.0-beta):** the spec's vectors fix the numbering as levels of node
+nesting counted from the Document root, which is level 1 (a chain of N edges
+from the root to a scalar leaf is N levels), the same for every format, so
+this port now accepts 200 edges and refuses 201 in JSON, YAML, TOML, OML (a
+top-level edge and 199 `{`) and XML (200 nested elements). OML and XML each
+take one level less than they did. (Verified via `test/python-parity.test.ts`,
+depth boundary.)
 
 ### Schema model
 
@@ -108,7 +112,11 @@ At the time of this comparison both implementations defined the same nine
 adjustment codes and no others: `temporal.stringified`, `null.omitted`,
 `value.stringified`, `key.sanitized`, `float.special`,
 `shape.empty_ambiguous`, `string.illegal_xml_char`, `string.cr_normalized`,
-`string.line-break-char`. That set is historical: since fail-don't-invent,
+`string.line-break-char`. That set is historical (and the names of the
+`temporal.stringified`, `value.stringified` and `string.line-break-char`
+codes are now the registered `format.temporal-stringified`,
+`format.value-stringified` and `format.string-line-break-char`, since
+0.9.0-alpha): since fail-don't-invent,
 the cases behind `null.omitted`, `key.sanitized`, `float.special`,
 `shape.empty_ambiguous` and `string.illegal_xml_char` are unconditional
 `write.unsupported-value` failures, `string.cr_normalized` is gone (a CR is

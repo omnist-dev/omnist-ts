@@ -29,9 +29,13 @@ each group.
   `parse.*` codes are reachable from OML's grammar; `parse.separator-in-array`
   is not (see `src/oml.ts`'s file-top comment). Every other throw site leaves
   `code` `undefined` -- some (invalid DATE/TIME/DATETIME literal values) still
-  carry a `path`, since the position is always known there even without a code;
-  resource-limit throw sites (MAX_DEPTH/MAX_NODES/MAX_INT_DIGITS) leave both
-  `undefined`.
+  carry a `path`, since the position is always known there even without a code.
+  The resource limits are coded: `document.limit.depth` and
+  `document.limit.nodes` at `$`, and `document.limit.int-digits` at the
+  integer literal's Document path (spec E-4a); every reader takes `maxDepth`,
+  `maxNodes` and `maxIntDigits` to set them. A YAML `!!omap`, `!!pairs` or
+  `!!set` is a `ParseError` with `code` `format.tag-forbidden` and `path` `$`
+  (C-13).
 - `class WriteError extends OmnistError`
 - `class DocumentError extends OmnistError` -- `code?: string` and `path?: string`; the YAML alias expansion limit (D-18/D-20) throws it with `code` `document.limit.alias-expansion` and `path` `$`, and the YAML expanded-size limit (D-22) with `code` `document.limit.expanded-size` and `path` `$`.
 - `class DetachedNode extends OmnistError`
@@ -133,6 +137,8 @@ Every format module exports the same three-function shape:
 - `readYaml(text, opts?: ReadYamlOptions): Node` (`ReadYamlOptions.maxAliasExpansion`: the D-18 maximum expansion factor, default `DEFAULT_MAX_ALIAS_EXPANSION` = 50, at most `MAX_RECOMMENDED_ALIAS_EXPANSION` = 10000) / `writeYaml(node, opts?: WriteYamlOptions): string` / `checkYaml(node): WriteReport`
 
 Every `read*` function takes `maxInputBytes` in its options (spec D-23): the largest input, in UTF-8 bytes, it reads at all. The default is `DEFAULT_MAX_INPUT_BYTES` = 64 MiB; an integer of at least 1, otherwise a `RangeError`. A larger input is refused with a `ParseError` whose `code` is `document.limit.input-size` and `path` is `$`, before anything is decoded or parsed; an input of exactly the maximum is accepted, and a leading byte-order mark counts. `readFormat(name, text, opts?)` reads with any registered format under the same limit, checking the size before a plugin reader runs. See [Limitations](limitations.md).
+
+Every `read*` function also takes the three universal safety limits of spec D-9 as options (`DocumentLimits`): `maxDepth` (default `DEFAULT_MAX_DEPTH` = 200, levels of node nesting counted from the Document root, which is level 1), `maxNodes` (`DEFAULT_MAX_NODES` = 1,000,000, the root included, a scalar leaf not) and `maxIntDigits` (`DEFAULT_MAX_INT_DIGITS` = 4,300, the decimal digits of an integer's value, D-28). Each is an integer of at least 1, otherwise a `RangeError`. A refusal carries `code` `DEPTH_CODE` / `NODES_CODE` (`document.limit.depth`, `document.limit.nodes`) at `path` `$`, or `INT_DIGITS_CODE` (`document.limit.int-digits`) at the integer literal's Document path. See [Limitations](limitations.md#safety-limits-and-how-to-set-them).
 
 Every `write*` and `check*` function throws `WriteError` (`write.unsupported-value`, at the Document path of the node holding the string) for a string value or edge label with no UTF-8 encoding, a lone surrogate (spec C-9), whatever `strict` says; `checkOml` is no longer always empty for that reason.
 
