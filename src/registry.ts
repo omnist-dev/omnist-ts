@@ -13,6 +13,7 @@
 import { OmnistError } from "./errors.js";
 import type { WriteReport } from "./report.js";
 import { checkInputSize } from "./formats/input-size.js";
+import type { DocumentLimits } from "./limits.js";
 
 /** A registered format plugin: a name plus read/write/check callables. */
 export interface Format {
@@ -60,7 +61,7 @@ export function getFormat(name: string): Format {
  * a plugin reader that ignores the option is bounded too. `opts` is passed to
  * the reader unchanged.
  */
-export function readFormat(name: string, text: string, opts: { maxInputBytes?: number } = {}): unknown {
+export function readFormat(name: string, text: string, opts: { maxInputBytes?: number } & DocumentLimits = {}): unknown {
   const fmt = getFormat(name);
   checkInputSize(text, opts.maxInputBytes);
   return fmt.read(text, opts);

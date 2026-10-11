@@ -29,7 +29,14 @@
  */
 
 import { parse as parseToml, stringify as stringifyToml, TomlDate, type TomlError } from "smol-toml";
-import { buildNode, grouped, hasInterleaving, type Node } from "../document.js";
+import { buildNodeWithLimits, findLeaf, grouped, hasInterleaving, type Node } from "../document.js";
+import {
+  DEFAULT_MAX_DEPTH as MAX_DEPTH,
+  intDigitsIssue,
+  resolveLimits,
+  type DocumentLimits,
+  type ResolvedLimits,
+} from "../limits.js";
 import { EdgePaths } from "../paths.js";
 import { checkEncodable } from "../encodable.js";
 import { TimeValue } from "../temporal.js";
@@ -41,10 +48,6 @@ import type { Schema } from "../schema.js";
 import { rejectSecondLeadingBom, stripLeadingBom } from "../bom.js";
 import { codecSyntaxError, type CodecBlame } from "./codec-error.js";
 import { checkInputSize } from "./input-size.js";
-
-// Matches src/formats/json.ts's own copy of the same guard constant -- see
-// that file's comment for this convention's precedent in this port.
-const MAX_DEPTH = 200;
 
 function checkWriteDepth(depth: number): void {
   // Originally a real, exercised backstop (issue #37): writeToml takes a
@@ -178,7 +181,7 @@ function convertTomlDates(value: unknown): unknown {
 
 /** Options accepted by readToml. */
 /** Options for parsing TOML text into a Document node. */
-export interface ReadTomlOptions {
+export interface ReadTomlOptions extends DocumentLimits {
   /** Optional {@link Schema} for schema-directed materialization (spec §4). */
   schema?: Schema;
   /**
@@ -209,17 +212,24 @@ export interface ReadTomlOptions {
  * issue #25). Rejecting with a clear ParseError, rather than silently
  * losing precision, matches this port's numeric model everywhere else.
  */
-// Matches src/document.ts's own MAX_INT_DIGITS / src/formats/json.ts's and
-// yaml.ts's own local copies of the same guard constant (see json.ts's
-// comment for this convention's precedent). Needed here since issue #98:
-// smol-toml is now called with { integersAsBigInt: true } (see readToml
-// below), so it no longer implicitly caps an integer literal's magnitude
-// the way its old float64-only parsing did -- this text-level scan is the
-// only remaining place that can see an over-long literal's true digit
-// count before BigInt construction.
-const MAX_INT_DIGITS = 4300;
+// D-9 / D-28: smol-toml is called with { integersAsBigInt: true }, so an
+// over-long decimal literal would become an enormous, exact `bigint`, and that
+// conversion is superlinear in the digit count -- the cost the digit limit
+// exists to bound. The builder checks every converted integer by value (so a
+// hex, octal, binary or underscored literal is counted by what it denotes,
+// D-28, and refused at its own Document path), and that is enough for a
+// literal that is cheap to convert. A decimal literal longer than this is
+// found in the text first, so it can be refused before smol-toml converts it.
+const CHEAP_LITERAL = 64;
 
-function checkTomlIntegerDigits(text: string): void {
+/**
+ * Scan raw TOML text for a bare decimal integer-shaped token (not a float, a
+ * date or part of a larger word) of more than `max` digits, underscores not
+ * counted, and longer than {@link CHEAP_LITERAL}; skipping comments and
+ * quoted scalars. Returns its offsets, sign included. A heuristic, not a
+ * tokenizer: a token it finds is only ever a candidate.
+ */
+function findHugeDecimal(text: string, max: number): { start: number; end: number } | undefined {
   const n = text.length;
   let i = 0;
   while (i < n) {
@@ -241,34 +251,63 @@ function checkTomlIntegerDigits(text: string): void {
     if (c === "-" || c === "+" || (c >= "0" && c <= "9")) {
       let j = c === "-" || c === "+" ? i + 1 : i;
       const digitsStart = j;
-      while (j < n && ((text.charAt(j) >= "0" && text.charAt(j) <= "9") || text.charAt(j) === "_")) j++;
-      const digitsLen = j - digitsStart;
+      let underscores = 0;
+      while (j < n && ((text.charAt(j) >= "0" && text.charAt(j) <= "9") || text.charAt(j) === "_")) {
+        if (text.charAt(j) === "_") underscores++;
+        j++;
+      }
+      const digits = j - digitsStart - underscores;
       const next = text.charAt(j);
       const isFloatOrDate = next === "." || next === "e" || next === "E" || next === "-" || next === ":";
       const isWordChar = (ch: string): boolean => /[A-Za-z0-9_]/.test(ch);
       const precededByWord = i > 0 && isWordChar(text.charAt(i - 1));
-      if (!isFloatOrDate && !precededByWord && digitsLen > MAX_INT_DIGITS) {
-        throw new ParseError(
-          "invalid TOML: integer literal has more than " +
-            String(MAX_INT_DIGITS) +
-            " digits, exceeding the digit limit (security: unbounded-digit " +
-            "int-to-str conversion is superlinear); matches this port's " +
-            "digit cap elsewhere (src/document.ts's MAX_INT_DIGITS)",
-        );
+      if (!isFloatOrDate && !precededByWord && digits > max && digits > CHEAP_LITERAL) {
+        return { start: i, end: j };
       }
       i = j;
       continue;
     }
     i++;
   }
+  return undefined;
+}
+
+/**
+ * The Document path of the literal found by {@link findHugeDecimal}, without
+ * converting it: the same text is parsed with the literal replaced, offset for
+ * offset, by a quoted string no value in the text equals, and the string's
+ * path is looked up in the resulting Document. `undefined` when the candidate
+ * was no value (a bare key made of digits) or the text fails for another
+ * reason -- the ordinary parse that follows then reports the truth.
+ */
+function hugeDecimalPath(text: string, at: { start: number; end: number }, limits: ResolvedLimits): string | undefined {
+  const len = at.end - at.start;
+  let k = 0;
+  while (text.includes("omnist-overlong-" + String(k) + "-")) k++;
+  const content = ("omnist-overlong-" + String(k) + "-").padEnd(len - 2, "x");
+  const defused = text.slice(0, at.start) + '"' + content + '"' + text.slice(at.end);
+  try {
+    const node = buildNodeWithLimits(convertTomlDates(parseToml(defused, { integersAsBigInt: true })), limits);
+    return findLeaf(node, (leaf) => leaf === content);
+  } catch {
+    return undefined;
+  }
 }
 
 /** Parses TOML text into a Document node (spec §4). */
 export function readToml(text: string, opts: ReadTomlOptions = {}): Node {
+  const limits = resolveLimits(opts);
   checkInputSize(text, opts.maxInputBytes); // D-23: first, the BOM's bytes counted
   text = stripLeadingBom(text); // D-15: one leading U+FEFF
   rejectSecondLeadingBom(text, "TOML"); // D-21: a second one is an error
-  checkTomlIntegerDigits(text);
+  const huge = findHugeDecimal(text, limits.maxIntDigits);
+  if (huge !== undefined) {
+    const at = hugeDecimalPath(text, huge, limits);
+    if (at !== undefined) {
+      const issue = intDigitsIssue(limits.maxIntDigits, at);
+      throw new ParseError(issue.message, [], issue.code, issue.path);
+    }
+  }
   let parsed: unknown;
   try {
     parsed = parseToml(text, { integersAsBigInt: true });
@@ -285,7 +324,7 @@ export function readToml(text: string, opts: ReadTomlOptions = {}): Node {
     const at: CodecBlame = { line: e.line, col: e.column };
     throw codecSyntaxError("TOML", message.split(String.fromCharCode(10))[0] as string, text, at);
   }
-  const node = buildNode(convertTomlDates(parsed));
+  const node = buildNodeWithLimits(convertTomlDates(parsed), limits);
   if (opts.schema === undefined) return node;
   return materialize(node, opts.schema) as Node;
 }

@@ -266,7 +266,8 @@ describe("readXml", () => {
     it(
       "parses at the MAX_NODES (1,000,000) boundary",
       () => {
-        const k = 999_999;
+        // The Document root counts as a node: root + <root> + k <x> elements.
+        const k = 999_998;
         const parts: string[] = [];
         for (let i = 0; i < k; i++) parts.push("<x><y/></x>");
         const s = "<root>" + parts.join("") + "</root>";
@@ -278,7 +279,7 @@ describe("readXml", () => {
     it(
       "raises DocumentError one node past the boundary",
       () => {
-        const k = 1_000_000;
+        const k = 999_999;
         const parts: string[] = [];
         for (let i = 0; i < k; i++) parts.push("<x><y/></x>");
         const s = "<root>" + parts.join("") + "</root>";
@@ -302,13 +303,13 @@ describe("readXml", () => {
   describe("depth guard", () => {
     it("parses at the 200-level depth boundary", () => {
       let s = "<v>1</v>";
-      for (let i = 0; i < 200; i++) s = "<a>" + s + "</a>";
+      for (let i = 0; i < 199; i++) s = "<a>" + s + "</a>";
       expect(() => readXml(s)).not.toThrow();
     });
 
     it("raises DocumentError one level past the boundary", () => {
       let s = "<v>1</v>";
-      for (let i = 0; i < 201; i++) s = "<a>" + s + "</a>";
+      for (let i = 0; i < 200; i++) s = "<a>" + s + "</a>";
       expect(() => readXml(s)).toThrow(DocumentError);
       expect(() => readXml(s)).toThrow(/nesting exceeds the maximum depth/);
     });
@@ -706,12 +707,12 @@ describe("checkXml", () => {
   it("reports value.stringified for a non-string scalar leaf (number/boolean read back as text)", () => {
     const numberNode = [{ label: "a", target: 30 }];
     const numRep = checkXml(numberNode);
-    expect(numRep.adjustments.map((a) => a.code)).toEqual(["value.stringified"]);
+    expect(numRep.adjustments.map((a) => a.code)).toEqual(["format.value-stringified"]);
     expect(readXml(writeXml(numberNode))).toEqual([{ label: "a", target: "30" }]);
 
     const boolNode = [{ label: "a", target: true }];
     const boolRep = checkXml(boolNode);
-    expect(boolRep.adjustments.map((a) => a.code)).toEqual(["value.stringified"]);
+    expect(boolRep.adjustments.map((a) => a.code)).toEqual(["format.value-stringified"]);
     expect(readXml(writeXml(boolNode))).toEqual([{ label: "a", target: "true" }]);
   });
 
@@ -812,7 +813,7 @@ describe("strict/report integration", () => {
     const node = doc({ r: { a: 1, b: new Date(Date.UTC(2024, 0, 1)) } }).toData();
     const rep = new WriteReport();
     expect(() => writeXml(node, { strict: true, report: rep })).toThrow(WriteError);
-    expect(rep.adjustments.map((a) => a.code)).toEqual(["value.stringified", "temporal.stringified"]);
+    expect(rep.adjustments.map((a) => a.code)).toEqual(["format.value-stringified", "format.temporal-stringified"]);
   });
 });
 

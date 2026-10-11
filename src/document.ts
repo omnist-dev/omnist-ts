@@ -49,23 +49,32 @@
  * text on write, same as `date`/`datetime`'s `Date` mapping already does.
  */
 
-import { DocumentError } from "./errors.js";
+import { DocumentError, ParseError } from "./errors.js";
 import { TimeValue } from "./temporal.js";
 import { EdgePaths } from "./paths.js";
+import {
+  DEFAULT_LIMITS,
+  DEFAULT_MAX_DEPTH as MAX_DEPTH,
+  bigintExceeds,
+  depthIssue,
+  INT_DIGITS_CODE,
+  intDigitsIssue,
+  nodesIssue,
+  OverlongInteger,
+  type LimitIssue,
+  type ResolvedLimits,
+} from "./limits.js";
 
-const MAX_DEPTH = 200;
-// Matches CPython's default sys.get_int_max_str_digits(); JS numbers can't
-// represent integers with this many digits anyway (they'd already have lost
-// precision converting to `number`), so this guard is dormant for `number`
-// input but kept for parity/documentation with the Python cap it mirrors.
-const MAX_INT_DIGITS = 4300;
-// Total node count across a single buildNode() call -- the spec's third
-// safety limit alongside MAX_DEPTH and MAX_INT_DIGITS (docs/02-document-model.md
-// section 2.4): a document can be shallow (well under MAX_DEPTH) yet still
-// unbounded in total size, e.g. one label repeated an arbitrary number of
-// times. 1,000,000 is the reference default the Python port uses. See
-// issue #77.
-const MAX_NODES = 1_000_000;
+// The three safety limits of the spec (docs/02-document-model.md section 2.4)
+// live in limits.ts. buildNode() takes them as a parameter (the readers pass
+// the caller's); every other depth guard below (traversal and writers) uses
+// the default. Node count is a running total across a single buildNode() call
+// tree: a document can be shallow yet still unbounded in total size, e.g. one
+// label repeated an arbitrary number of times (issue #77).
+
+function limitError(issue: LimitIssue): DocumentError {
+  return new DocumentError(issue.message, issue.code, issue.path);
+}
 
 /** Mutable counter threaded through a single buildNode() call tree so every
  * node built anywhere in the recursion shares one running total (mirrors
@@ -75,10 +84,10 @@ interface NodeCounter {
   count: number;
 }
 
-function countNode(counter: NodeCounter, path: string): void {
+function countNode(counter: NodeCounter, limits: ResolvedLimits): void {
   counter.count++;
-  if (counter.count > MAX_NODES) {
-    throw new DocumentError(`${path}: node count exceeds the maximum (${MAX_NODES})`);
+  if (counter.count > limits.maxNodes) {
+    throw limitError(nodesIssue(limits.maxNodes));
   }
 }
 
@@ -111,6 +120,7 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
 function isScalar(v: unknown): v is Scalar {
   return (
     v === null ||
+    v instanceof OverlongInteger ||
     typeof v === "string" ||
     typeof v === "number" ||
     typeof v === "bigint" ||
@@ -120,32 +130,17 @@ function isScalar(v: unknown): v is Scalar {
   );
 }
 
-function checkIntDigits(v: unknown, path: string): void {
-  if (typeof v === "bigint") {
-    const digits = (v < 0n ? -v : v).toString().length;
-    if (digits <= MAX_INT_DIGITS) return;
-    throw new DocumentError(
-      `${path}: integer has more than ${MAX_INT_DIGITS} digits, exceeding ` +
-        "the digit limit (security: unbounded-digit int-to-str conversion " +
-        "is superlinear)",
-    );
+/**
+ * D-9 / D-28: an integer's value may have at most `limits.maxIntDigits`
+ * decimal digits, sign excluded. The check is on the value, so it holds for
+ * a `bigint` however the literal was spelled. (A plain JS `number` tops out
+ * around 1.8e308, ~309 digits, so it can never trip the default cap.)
+ */
+function checkIntDigits(v: unknown, path: string, limits: ResolvedLimits): void {
+  if (v instanceof OverlongInteger || (typeof v === "bigint" && bigintExceeds(v, limits.maxIntDigits))) {
+    throw limitError(intDigitsIssue(limits.maxIntDigits, path));
   }
-  /* v8 ignore start -- unreachable: a plain JS `number` (float64) tops out
-   * around 1.8e308 (~309 digits), well under MAX_INT_DIGITS (4300), and
-   * since issue #98 `integer`-kinded values are represented as `bigint`
-   * (handled above), not `number` -- so this branch documents why a
-   * `number` can never trip the cap, matching Python's `_check_int_digits`
-   * structurally even though it is dormant for this type here. */
-  if (typeof v !== "number" || !Number.isInteger(v)) return;
-  const digits = Math.abs(v).toString().length;
-  if (digits <= MAX_INT_DIGITS) return;
-  throw new DocumentError(
-    `${path}: integer has more than ${MAX_INT_DIGITS} digits, exceeding ` +
-      "the digit limit (security: unbounded-digit int-to-str conversion " +
-      "is superlinear)",
-  );
 }
-/* v8 ignore stop */
 
 function join(path: string, key: string): string {
   return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(key) ? `${path}.${key}` : `${path}["${key}"]`;
@@ -170,10 +165,8 @@ export function buildNode(
   depth = 0,
   seen: ReadonlySet<unknown> = new Set(),
   counter: NodeCounter = { count: 0 },
+  limits: ResolvedLimits = DEFAULT_LIMITS,
 ): Node {
-  if (depth > MAX_DEPTH) {
-    throw new DocumentError(`${path}: nesting exceeds the maximum depth (${MAX_DEPTH})`);
-  }
   if (Array.isArray(value)) {
     throw new DocumentError(
       `${path}: a bare array has no labeled-edge form ` +
@@ -184,7 +177,12 @@ export function buildNode(
     // Only an actual node (an edge list -- spec section 2.2 `node = [ edge, ... ]`)
     // counts against MAX_NODES; a scalar leaf's target is a `value`,
     // categorically distinct from `node`, and must not be counted (issue #107).
-    countNode(counter, path);
+    // D-9: the nesting limit counts levels of nodes from the root, which is
+    // level 1; this node (at `depth`, the root's being 0) is level depth + 1.
+    if (depth + 1 > limits.maxDepth) {
+      throw limitError(depthIssue(limits.maxDepth));
+    }
+    countNode(counter, limits);
     if (seen.has(value)) {
       throw new DocumentError(`${path}: cycle detected`);
     }
@@ -199,17 +197,56 @@ export function buildNode(
         throw new DocumentError(`${path}: object key ${String(k)} is not a string`, "document.unlabeled-element", path);
       }
       const kp = join(path, k);
-      for (const child of children(v, kp, depth + 1, nextSeen, counter)) {
+      for (const child of children(v, kp, depth + 1, nextSeen, counter, limits)) {
         edges.push({ label: k, target: child });
       }
     }
     return edges;
   }
   if (isScalar(value)) {
-    checkIntDigits(value, path);
+    checkIntDigits(value, path, limits);
     return value;
   }
   throw new DocumentError(`${path}: ${typeName(value)} is not a Document value`);
+}
+
+/**
+ * {@link buildNode} under the caller's resolved safety limits, from the root,
+ * for a reader. A reader has always refused an over-long integer with a
+ * {@link ParseError} (it is a fault of the input text), unlike the depth and
+ * node limits, which `buildNode` raises as a {@link DocumentError}; that split
+ * is kept, with the code and path of E-4a on both.
+ */
+export function buildNodeWithLimits(value: unknown, limits: ResolvedLimits): Node {
+  try {
+    return buildNode(value, "$", 0, new Set(), { count: 0 }, limits);
+  } catch (e) {
+    if (e instanceof DocumentError && e.code === INT_DIGITS_CODE) {
+      throw new ParseError(e.message, [], e.code, e.path);
+    }
+    throw e;
+  }
+}
+
+/**
+ * The Document path of the first leaf of `node` (in document order) that
+ * satisfies `test`, or `undefined` when there is none. For a reader that builds
+ * its own tree, or finds a marker in one, and so has no `buildNode` to name the
+ * literal's path (E-4a, E-10).
+ */
+export function findLeaf(node: Node, test: (leaf: unknown) => boolean, path = "$"): string | undefined {
+  if (!Array.isArray(node)) return test(node) ? path : undefined;
+  const paths = new EdgePaths(path, node);
+  for (const { label, target } of node) {
+    const hit = findLeaf(target, test, paths.next(label));
+    if (hit !== undefined) return hit;
+  }
+  return undefined;
+}
+
+/** The Document path of the first {@link OverlongInteger} leaf of `node`, or `undefined`. */
+export function findOverlong(node: Node): string | undefined {
+  return findLeaf(node, (leaf) => leaf instanceof OverlongInteger);
 }
 
 function* children(
@@ -218,6 +255,7 @@ function* children(
   depth: number,
   seen: ReadonlySet<unknown>,
   counter: NodeCounter,
+  limits: ResolvedLimits,
 ): Generator<Node> {
   if (Array.isArray(v)) {
     for (let i = 0; i < v.length; i++) {
@@ -229,10 +267,12 @@ function* children(
           `${path}[${i}]`,
         );
       }
-      yield buildNode(item, `${path}[${i}]`, depth + 1, seen, counter);
+      // A repeated label's targets are siblings of any other edge's target:
+      // the same depth, not one deeper.
+      yield buildNode(item, `${path}[${i}]`, depth, seen, counter, limits);
     }
   } else {
-    yield buildNode(v, path, depth, seen, counter);
+    yield buildNode(v, path, depth, seen, counter, limits);
   }
 }
 

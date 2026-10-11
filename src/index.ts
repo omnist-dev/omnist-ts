@@ -46,6 +46,16 @@ export {
 export { DEFAULT_MAX_INPUT_BYTES, INPUT_SIZE_CODE } from "./formats/input-size.js";
 
 export {
+  DEFAULT_MAX_DEPTH,
+  DEFAULT_MAX_NODES,
+  DEFAULT_MAX_INT_DIGITS,
+  DEPTH_CODE,
+  NODES_CODE,
+  INT_DIGITS_CODE,
+  type DocumentLimits,
+} from "./limits.js";
+
+export {
   Schema,
   schema,
   t,
@@ -195,4 +205,4 @@ _registerFormat({
 });
 
 /** The package version of `@omnist-dev/omnist`, matching `package.json`. */
-export const VERSION = "0.8.1-alpha";
+export const VERSION = "0.9.0-alpha";

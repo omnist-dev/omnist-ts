@@ -1480,11 +1480,11 @@ describe("OML parse error codes (spec Sec8.3.1, issue #108)", () => {
     expect(errOf("a: { b: 1 c: 2 }\n").code).toBe("parse.unexpected-token");
   });
 
-  it("resource-limit throw sites (MAX_DEPTH) still carry no code/path (out of this issue's scope)", () => {
-    const tooDeep = "a: " + "{ b: ".repeat(201) + "1" + " }".repeat(201);
+  it("the depth limit is document.limit.depth at $ (E-4a), not a text position", () => {
+    const tooDeep = "a: " + "{ b: ".repeat(200) + "1" + " }".repeat(200);
     const err = errOf(tooDeep);
-    expect(err.code).toBeUndefined();
-    expect(err.path).toBeUndefined();
+    expect(err.code).toBe("document.limit.depth");
+    expect(err.path).toBe("$");
   });
 
   it("an invalid calendar DATE / TIME / DATETIME value: parse.invalid-date / parse.invalid-time at the token start", () => {
