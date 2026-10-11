@@ -183,13 +183,17 @@ type Located = { range?: [number, number, number] | null | undefined };
 /**
  * True when a mapping key is the YAML merge key `<<`, mirroring the `yaml`
  * package's own test (so a quoted `"<<"` is an ordinary key here exactly as
- * it is when materializing).
+ * it is when materializing). A plain `<<` that resolved to a string (an
+ * explicit `!!str <<`) is an ordinary key (D-27); `readYaml` marks it quoted
+ * before the package or this pass sees it, so here only the merge symbol of
+ * an untagged or `!!merge`-tagged `<<` counts.
  */
 function isMergeKey(key: unknown): boolean {
   return (
     YAML.isScalar(key) &&
     key.type === "PLAIN" &&
-    (key.value === "<<" || (typeof key.value === "symbol" && key.value.description === "<<"))
+    typeof key.value === "symbol" &&
+    key.value.description === "<<"
   );
 }
 

@@ -147,14 +147,14 @@ describe("check_yaml / write_yaml parity", () => {
   it("a value containing U+0085 (NEL) is reported and round-trips", () => {
     const node = [{ label: "a", target: "\x85" }];
     const rep = checkYaml(node);
-    expect(rep.adjustments.map((a) => a.code)).toEqual(["string.line-break-char"]);
+    expect(rep.adjustments.map((a) => a.code)).toEqual(["format.string-line-break-char"]);
     expect(readYaml(writeYaml(node))).toEqual(node);
   });
 
   it("a label containing U+0085 (NEL) is reported and round-trips", () => {
     const node = [{ label: "\x85", target: null }];
     const rep = checkYaml(node);
-    expect(rep.adjustments.map((a) => a.code)).toEqual(["string.line-break-char"]);
+    expect(rep.adjustments.map((a) => a.code)).toEqual(["format.string-line-break-char"]);
     expect(readYaml(writeYaml(node))).toEqual(node);
   });
 
@@ -175,7 +175,7 @@ describe("check_yaml / write_yaml parity", () => {
     const node = [{ label: "a", target: "\x85" }];
     const out = new WriteReport();
     writeYaml(node, { report: out });
-    expect(out.adjustments.map((a) => a.code)).toEqual(["string.line-break-char"]);
+    expect(out.adjustments.map((a) => a.code)).toEqual(["format.string-line-break-char"]);
   });
 
   // Sec8.3.8/D-3 (issue #123): same grouping rule as JSON's -- see

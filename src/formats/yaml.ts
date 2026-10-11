@@ -63,7 +63,14 @@
  */
 
 import YAML from "yaml";
-import { buildNode, grouped, hasInterleaving, unwrapTimeValues, type Node, type Scalar } from "../document.js";
+import { buildNodeWithLimits, grouped, hasInterleaving, unwrapTimeValues, type Node, type Scalar } from "../document.js";
+import {
+  DEFAULT_MAX_DEPTH as MAX_DEPTH,
+  digitsExceed,
+  OverlongInteger,
+  resolveLimits,
+  type DocumentLimits,
+} from "../limits.js";
 import { EdgePaths } from "../paths.js";
 import { checkEncodable } from "../encodable.js";
 import { ParseError, WriteError } from "../errors.js";
@@ -75,86 +82,35 @@ import { codecSyntaxError, type CodecBlame } from "./codec-error.js";
 import { checkInputSize } from "./input-size.js";
 import { checkAliasExpansion, resolveMaxAliasExpansion, resolveMaxExpandedSlots } from "./yaml-alias.js";
 
-// Matches src/document.ts's own MAX_DEPTH (locally redefined here, same as
-// src/formats/json.ts's own copy of the same guard constant -- see that
-// file for this convention's precedent in this port).
-const MAX_DEPTH = 200;
-
-// Matches src/document.ts's own MAX_INT_DIGITS / src/formats/json.ts's own
-// copy of the same guard constant. Needed as a pre-parse text-level check
-// for the same reason json.ts/toml.ts need one: since issue #98,
-// YAML.parse runs with { intAsBigInt: true } (native support in the yaml
-// package), so an over-long integer literal no longer silently overflows
-// to `Infinity` -- it would happily become an enormous, exact `bigint`
-// instead, unbounded, which is exactly the unbounded-digit int-to-str
-// superlinear-conversion risk this cap exists to prevent (see issue #54
-// and document.ts's own checkIntDigits).
-const MAX_INT_DIGITS = 4300;
-
 /**
- * Scan raw YAML text for a bare integer-shaped token (all digits, no `.`,
- * `e`/`E`, or surrounding letters -- so not a float literal and not part
- * of a larger word) whose digit count exceeds MAX_INT_DIGITS, skipping
- * quoted scalars and comments.
- *
- * This is a heuristic, not a full YAML tokenizer: it does not track block
- * scalar (`|`/`>`) indentation, so an over-long digit run that appears
- * inside literal block-scalar *text* (not a bare integer value) could in
- * principle be misflagged. That mirrors this port's other documented,
- * accepted format-layer gaps (e.g. the YAML "<<" merge-key limitation --
- * docs/formats/yaml.md) rather than a full YAML grammar reimplementation,
- * which is out of scope for this fix (see issue #54's discussion of BigInt
- * threading being out of scope for the same reason).
+ * D-9 / D-28: wrap the `yaml` package's integer resolvers so an integer whose
+ * value has more than `maxIntDigits` decimal digits is not converted. The
+ * conversion of a huge literal to a `bigint` is superlinear in its digit
+ * count, which is what the limit bounds; the literal resolves to an
+ * {@link OverlongInteger} instead, which the builder refuses at the literal's
+ * Document path (E-4a). The count is of the value in decimal, whatever the
+ * spelling: a hex, octal or binary literal, an underscore and a leading zero
+ * are not digits. Sexagesimal integers (`190:20:30`) are left to the builder's
+ * check on the converted value.
  */
-function checkYamlIntegerDigits(text: string): void {
-  const n = text.length;
-  let i = 0;
-  while (i < n) {
-    const c = text.charAt(i);
-    if (c === "#" && (i === 0 || /\s/.test(text.charAt(i - 1)))) {
-      while (i < n && text.charAt(i) !== "\n") i++;
-      continue;
-    }
-    if (c === '"' || c === "'") {
-      const quote = c;
-      i++;
-      while (i < n && text.charAt(i) !== quote) {
-        if (quote === '"' && text.charAt(i) === "\\") i++;
-        i++;
-      }
-      i++;
-      continue;
-    }
-    if (c === "-" || (c >= "0" && c <= "9")) {
-      let j = c === "-" ? i + 1 : i;
-      const digitsStart = j;
-      while (j < n && text.charAt(j) >= "0" && text.charAt(j) <= "9") j++;
-      const digitsLen = j - digitsStart;
-      const next = text.charAt(j);
-      const isFloat = next === "." || next === "e" || next === "E";
-      // Unlike JSON (where a bare digit outside quotes can only ever start
-      // a number), YAML plain scalars freely mix letters and digits (an
-      // id/hash/token like "abc123..." or "key456"). Only treat this run
-      // as a candidate standalone integer literal -- not part of a larger
-      // word -- if it's not glued to a word character on either side.
-      const isWordChar = (ch: string): boolean => /[A-Za-z0-9_]/.test(ch);
-      const precededByWord = i > 0 && isWordChar(text.charAt(i - 1));
-      const followedByWord = !isFloat && isWordChar(next);
-      if (!isFloat && !precededByWord && !followedByWord && digitsLen > MAX_INT_DIGITS) {
-        throw new ParseError(
-          "invalid YAML: integer literal has more than " +
-            String(MAX_INT_DIGITS) +
-            " digits, exceeding the digit limit (security: unbounded-digit " +
-            "int-to-str conversion is superlinear); matches this port's " +
-            "digit cap elsewhere (src/document.ts's MAX_INT_DIGITS) and " +
-            "CPython's own int-to-str digit cap",
-        );
-      }
-      i = j;
-      continue;
-    }
-    i++;
-  }
+function limitIntTags(tags: YAML.Tags, maxIntDigits: number): YAML.Tags {
+  const radixOf: Readonly<Record<string, 2 | 8 | 16>> = { BIN: 2, OCT: 8, HEX: 16 };
+  return tags.map((tag) => {
+    if (typeof tag === "string" || tag.tag !== "tag:yaml.org,2002:int") return tag;
+    // Only ScalarTag ever carries this tag name (the same cast as customBoolTags).
+    const intTag = tag as YAML.ScalarTag;
+    const format = intTag.format;
+    if (format === "TIME") return tag;
+    const radix = format === undefined ? 10 : (radixOf[format] as 2 | 8 | 16);
+    const prefix = radix === 10 ? 0 : radix === 8 ? 1 : 2;
+    return {
+      ...intTag,
+      resolve(str: string, onError: (message: string) => void, options: YAML.ParseOptions): unknown {
+        const digits = str.replace(/^[-+]/, "").replace(/_/g, "").slice(prefix);
+        return digitsExceed(digits, radix, maxIntDigits) ? new OverlongInteger() : intTag.resolve(str, onError, options);
+      },
+    };
+  });
 }
 
 /**
@@ -227,7 +183,7 @@ function* labeledEdges(
 
 /** Options accepted by readYaml. */
 /** Options for parsing YAML text into a Document node. */
-export interface ReadYamlOptions {
+export interface ReadYamlOptions extends DocumentLimits {
   /** Optional {@link Schema} for schema-directed materialization (spec §4). */
   schema?: Schema;
   /**
@@ -283,10 +239,15 @@ function yamlSyntaxError(exc: unknown, text: string): ParseError {
  * therefore runs with the check off, and {@link findDuplicateKey} does the
  * same test in one linear pass.
  */
-function parseYamlDocument(text: string, uniqueKeys: boolean, lineCounter?: YAML.LineCounter): YAML.Document.Parsed {
+function parseYamlDocument(
+  text: string,
+  uniqueKeys: boolean,
+  maxIntDigits: number,
+  lineCounter?: YAML.LineCounter,
+): YAML.Document.Parsed {
   return YAML.parseDocument(text, {
     schema: "yaml-1.1",
-    customTags: customBoolTags,
+    customTags: (tags) => limitIntTags(customBoolTags(tags), maxIntDigits),
     intAsBigInt: true,
     uniqueKeys,
     ...(lineCounter === undefined ? {} : { lineCounter }),
@@ -355,26 +316,71 @@ function duplicateKeyError(
   return new YAML.YAMLParseError([start, end], "DUPLICATE_KEY", message);
 }
 
+/** The YAML 1.1 collection tags outside the supported profile (spec C-13). */
+const FORBIDDEN_TAGS: ReadonlySet<string> = new Set([
+  "tag:yaml.org,2002:omap",
+  "tag:yaml.org,2002:pairs",
+  "tag:yaml.org,2002:set",
+]);
+
+/**
+ * C-13: a node tagged `!!omap`, `!!pairs` or `!!set` is well-formed YAML that
+ * the Document model has no shape for (an ordered map of single-key maps, a
+ * list of key/value pairs, a set); it is refused, as `format.tag-forbidden`
+ * at `$`, not read as the plain collection it resembles.
+ */
+function rejectForbiddenTags(doc: YAML.Document.Parsed): void {
+  YAML.visit(doc, {
+    Collection(_key, node) {
+      if (node.tag !== undefined && FORBIDDEN_TAGS.has(node.tag)) {
+        const name = "!!" + node.tag.slice("tag:yaml.org,2002:".length);
+        throw new ParseError(
+          "YAML tag " + name + " is outside the supported profile and is refused",
+          [],
+          "format.tag-forbidden",
+          "$",
+        );
+      }
+    },
+  });
+}
+
+/**
+ * D-27: only an untagged (or `!!merge`-tagged) plain `<<` is the merge key;
+ * `!!str <<` is the ordinary string key `"<<"`. The package treats any plain
+ * `<<` as a merge key whatever its tag, so a plain scalar key that resolved to
+ * the string `<<` (which only an explicit `!!str` can do) is marked quoted,
+ * which the package reads as an ordinary key.
+ */
+function makeStringMergeKeysOrdinary(doc: YAML.Document.Parsed): void {
+  YAML.visit(doc, {
+    Pair(_key, pair) {
+      const k = pair.key;
+      if (YAML.isScalar(k) && k.type === "PLAIN" && k.value === "<<") k.type = "QUOTE_DOUBLE";
+    },
+  });
+}
+
 /** Parse YAML text into a Document node. */
 export function readYaml(text: string, opts: ReadYamlOptions = {}): Node {
+  const limits = resolveLimits(opts);
   const maxAliasExpansion = resolveMaxAliasExpansion(opts.maxAliasExpansion);
   const maxExpandedSlots = resolveMaxExpandedSlots(opts.maxExpandedSlots);
   checkInputSize(text, opts.maxInputBytes); // D-23: first, the BOM's bytes counted
   text = stripLeadingBom(text); // D-15: one leading U+FEFF
   rejectSecondLeadingBom(text, "YAML"); // D-21: a second one is an error
-  checkYamlIntegerDigits(text);
   // Parse to the library's Document AST, which keeps Alias nodes, so the
   // D-18/D-22 checks can run on the reference graph BEFORE anything is expanded.
   let doc: YAML.Document.Parsed;
   try {
     const lineCounter = new YAML.LineCounter();
-    doc = parseYamlDocument(text, false, lineCounter);
+    doc = parseYamlDocument(text, false, limits.maxIntDigits, lineCounter);
     const dup = findDuplicateKey(doc);
     if (dup !== undefined) {
       if (dup.cost <= EXACT_DUPLICATE_ERROR_BUDGET) {
         // The library's own check, with its own error ordering and position:
         // quadratic in the keys of one mapping, so only within the budget.
-        doc = parseYamlDocument(text, true);
+        doc = parseYamlDocument(text, true, limits.maxIntDigits);
       } else {
         // Too much quadratic work to repeat: report the duplicate from the
         // linear scan, at the duplicate key's own position.
@@ -386,6 +392,8 @@ export function readYaml(text: string, opts: ReadYamlOptions = {}): Node {
   } catch (exc) {
     throw yamlSyntaxError(exc, text);
   }
+  rejectForbiddenTags(doc);
+  makeStringMergeKeysOrdinary(doc);
   checkAliasExpansion(doc.contents, maxAliasExpansion, text, maxExpandedSlots);
   let parsed: unknown;
   try {
@@ -404,7 +412,7 @@ export function readYaml(text: string, opts: ReadYamlOptions = {}): Node {
   } catch (exc) {
     throw yamlSyntaxError(exc, text);
   }
-  const node = buildNode(parsed);
+  const node = buildNodeWithLimits(parsed, limits);
   if (opts.schema === undefined) return node;
   return materialize(node, opts.schema);
 }
@@ -448,7 +456,10 @@ export function writeYaml(node: Node, opts: WriteYamlOptions = {}): string {
       }
     },
   });
-  const text = doc.toString() as string;
+  // E-34: YAML 1.1 folds a raw U+0085 inside a scalar as a line break. Every
+  // scalar holding one is written double-quoted, where the escape `\N` is the
+  // one spelling that reads back as the single character.
+  const text = (doc.toString() as string).split("\x85").join("\\N");
   return finishWrite(text, rep, report === undefined ? { strict } : { strict, report });
 }
 
@@ -465,7 +476,7 @@ function scanYaml(node: Node): WriteReport {
     if (label.includes("\x85")) {
       rep.add(
         path,
-        "string.line-break-char",
+        "format.string-line-break-char",
         "label contains U+0085 (NEL); written double-quoted to round-trip correctly",
         "warning",
       );
@@ -473,7 +484,7 @@ function scanYaml(node: Node): WriteReport {
     if (typeof value === "string" && value.includes("\x85")) {
       rep.add(
         path,
-        "string.line-break-char",
+        "format.string-line-break-char",
         "value contains U+0085 (NEL); written double-quoted to round-trip correctly",
         "warning",
       );

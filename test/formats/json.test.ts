@@ -42,7 +42,7 @@ describe("temporal and special-float handling", () => {
   it("a Date leaf is stringified with a warning", () => {
     const node = doc({ d: new Date(Date.UTC(2024, 0, 1)) }).toData();
     const rep = checkJson(node);
-    expect(rep.adjustments.map((a) => a.code)).toEqual(["temporal.stringified"]);
+    expect(rep.adjustments.map((a) => a.code)).toEqual(["format.temporal-stringified"]);
     expect(writeJson(node)).toBe('{"d": "2024-01-01"}');
   });
 
@@ -238,7 +238,7 @@ describe("remaining serialize branches", () => {
     const node = doc({ d: new Date(Date.UTC(2024, 0, 1)) }).toData();
     const out = new WriteReport();
     writeJson(node, { report: out });
-    expect(out.adjustments.map((a) => a.code)).toEqual(["temporal.stringified"]);
+    expect(out.adjustments.map((a) => a.code)).toEqual(["format.temporal-stringified"]);
   });
 
   it("strict mode still computes text for -Infinity before throwing", () => {
