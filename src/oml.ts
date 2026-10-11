@@ -73,8 +73,19 @@
  * the first); `readOml` lets that propagate as-is.
  */
 
-import type { Edge, Node, Scalar } from "./document.js";
+import { findOverlong, type Edge, type Node, type Scalar } from "./document.js";
 import { ParseError, WriteError } from "./errors.js";
+import {
+  DEFAULT_MAX_DEPTH as MAX_DEPTH,
+  depthIssue,
+  intDigitsIssue,
+  nodesIssue,
+  OverlongInteger,
+  resolveLimits,
+  type DocumentLimits,
+  type LimitIssue,
+  type ResolvedLimits,
+} from "./limits.js";
 import { stripLeadingBom } from "./bom.js";
 import { checkInputSize } from "./formats/input-size.js";
 import { checkEncodable } from "./encodable.js";
@@ -90,18 +101,15 @@ import {
   TimeValue,
 } from "./temporal.js";
 
-// Matches src/document.ts's own MAX_DEPTH and MAX_INT_DIGITS constants
-// (locally redefined here, same as src/schema.ts's own MAX_DEPTH -- see
-// that file's precedent for this "each module keeps its own copy of the
-// shared guard constant" convention in this port).
-const MAX_DEPTH = 200;
-const MAX_INT_DIGITS = 4300;
-// Matches src/document.ts's own MAX_NODES (locally redefined here, same
-// convention as this file's own MAX_DEPTH/MAX_INT_DIGITS copies) -- see
-// issue #77. The Parser builds its edge tree directly rather than going
-// through buildNode(), so it keeps its own running counter (`nodeCount`
-// below) across the whole parse.
-const MAX_NODES = 1_000_000;
+// The three safety limits (D-9) are limits.ts's; the Parser takes the caller's
+// as a ResolvedLimits. It builds its edge tree directly rather than going
+// through buildNode(), so it keeps its own running node count (`nodeCount`
+// below) across the whole parse, and the same depth rule as buildNode (levels
+// of nodes, the root being level 1: D-12 says the two MUST match).
+
+function limitError(issue: LimitIssue): ParseError {
+  return new ParseError(issue.message, [], issue.code, issue.path);
+}
 
 // omnist-spec Sec4.2.3 (issue #131): int-part = "0" / (nonzero-digit
 // *DIGIT) -- a leading zero followed by more digits is a lexical error
@@ -277,17 +285,14 @@ type Tok = readonly [TokKind, number, number];
 // newline/`;` separator run, that separator stood in for the missing comma
 // and the code is separator-in-array; every other malformed closing token
 // stays parse.unexpected-token.
-// Two throw-site families deliberately stay *uncoded* (no `code`, though
-// they may still carry a `path` if they went through errorAt/errorFor):
-// invalid DATE/TIME/DATETIME literal *values* (the token matched the
-// grammar's lexical shape via errorAt; only its calendar value is
-// invalid, which no `parse.*` code describes -- "a token appears where
-// the grammar does not allow it" is about position/kind, not content
-// validity) and, with neither `code` nor `path`,
-// MAX_DEPTH/MAX_NODES/MAX_INT_DIGITS overflow (bare `new ParseError(msg)`
-// calls that never reach errorAt/errorFor at all -- these are resource
-// limits that map to `document.limit.*`, not `parse.*`, and are out of
-// this issue's scope).
+// One throw-site family deliberately stays *uncoded*, though it may still carry
+// a `path` if it went through errorAt/errorFor: invalid DATE/TIME/DATETIME
+// literal *values* (the token matched the grammar's lexical shape via errorAt;
+// only its calendar value is invalid, which no `parse.*` code describes --
+// "a token appears where the grammar does not allow it" is about
+// position/kind, not content validity). The resource limits are coded
+// `document.limit.depth`, `.nodes` and `.int-digits` (Sec8.3.2, E-4a): the
+// first two at `$`, the digit limit at the literal's Document path.
 class Scanner {
   readonly s: string;
   readonly n: number;
@@ -596,19 +601,22 @@ class Parser {
   // Total node count across this Parser instance's whole parse (one
   // instance per readOml() call) -- see MAX_NODES above.
   private nodeCount = 0;
+  private readonly limits: ResolvedLimits;
+  /** True once an integer literal over the digit limit was read (see {@link OverlongInteger}). */
+  sawOverlong = false;
 
-  constructor(scanner: Scanner) {
+  constructor(scanner: Scanner, limits: ResolvedLimits) {
     this.sc = scanner;
+    this.limits = limits;
     [this.kind, this.start, this.end] = scanner.next();
   }
 
-  /** Count one more node (an internal edge-list node or a scalar leaf) and
-   * throw once the running total exceeds MAX_NODES -- mirrors the bare
-   * ParseError depth check in parseValue() below. */
+  /** Count one more node (an internal edge-list node) and throw
+   * `document.limit.nodes` once the running total exceeds the limit. */
   private countNode(): void {
     this.nodeCount++;
-    if (this.nodeCount > MAX_NODES) {
-      throw new ParseError(`node count exceeds the maximum (${MAX_NODES})`);
+    if (this.nodeCount > this.limits.maxNodes) {
+      throw limitError(nodesIssue(this.limits.maxNodes));
     }
   }
 
@@ -760,10 +768,11 @@ class Parser {
 
   private parseValue(depth: number): Node {
     if (this.kind === "LBRACE") {
-      if (depth + 1 > MAX_DEPTH) {
-        // No "line X, col Y:" prefix here, matching omnist/oml.py's
-        // parse_value exactly (a bare ParseError for this one message).
-        throw new ParseError(`nesting exceeds the maximum depth (${MAX_DEPTH})`);
+      // The braced node is a child of the node at `depth` (the root's being 0),
+      // so level depth + 2 of the nesting (the root is level 1). A resource
+      // limit, not a position: `document.limit.depth` at `$` (E-4a).
+      if (depth + 2 > this.limits.maxDepth) {
+        throw limitError(depthIssue(this.limits.maxDepth));
       }
       this.advance();
       this.skipSep();
@@ -853,13 +862,11 @@ class Parser {
           );
         }
         const digits = text[0] === "-" ? text.slice(1) : text;
-        if (digits.length > MAX_INT_DIGITS) {
-          throw this.sc.errorAt(
-            start,
-            `integer literal has ${digits.length} digits, exceeding the ` +
-              `${MAX_INT_DIGITS}-digit limit (security: unbounded-digit ` +
-              "int-to-str conversion is superlinear)",
-          );
+        if (digits.length > this.limits.maxIntDigits) {
+          // Not converted: the refusal needs the literal's Document path,
+          // which is known once the tree is built (readOml, findOverlong).
+          this.sawOverlong = true;
+          return new OverlongInteger() as unknown as Scalar;
         }
         return BigInt(text);
       }
@@ -961,13 +968,26 @@ export interface ReadOmlOptions {
    * `RangeError`.
    */
   readonly maxInputBytes?: number;
+  /** Nesting-depth limit (spec D-9): see {@link DocumentLimits.maxDepth}. Default 200. */
+  readonly maxDepth?: number;
+  /** Node-count limit (spec D-9): see {@link DocumentLimits.maxNodes}. Default 1 000 000. */
+  readonly maxNodes?: number;
+  /** Integer-digit limit (spec D-9, D-28): see {@link DocumentLimits.maxIntDigits}. Default 4300. */
+  readonly maxIntDigits?: number;
 }
 
 /** Parse OML source into a canonical Document node (edge list or leaf). */
 export function readOml(text: string, opts: ReadOmlOptions = {}): Node {
+  const limits = resolveLimits(opts satisfies DocumentLimits);
   checkInputSize(text, opts.maxInputBytes); // D-23: first, the BOM's bytes counted
   const scanner = new Scanner(text);
-  const node = new Parser(scanner).parseDocument();
+  const parser = new Parser(scanner, limits);
+  const node = parser.parseDocument();
+  if (parser.sawOverlong) {
+    // Always found: the parser set the flag because it put the sentinel in the tree.
+    const at = findOverlong(node) as string;
+    throw limitError(intDigitsIssue(limits.maxIntDigits, at));
+  }
   if (opts.schema !== undefined) {
     return materialize(node, opts.schema);
   }

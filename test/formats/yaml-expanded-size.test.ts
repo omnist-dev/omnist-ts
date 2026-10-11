@@ -225,7 +225,21 @@ describe("D-18a: malformed merge shapes are parse.codec-syntax, at a line:col", 
   });
 });
 
-describe("tagged collections whose items are Pairs (!!omap, !!pairs) and root aliases", () => {
+// C-13 (spec v0.34.0-beta): `readYaml` refuses a !!omap, !!pairs or !!set, so the
+// alias and merge checks below can no longer meet a Pair as a sequence item
+// through it. `checkAliasExpansion` is still exported, and still has to walk
+// such a tree correctly, so these tests hand it a parsed document directly.
+describe("checkAliasExpansion over tagged collections whose items are Pairs (!!omap, !!pairs), and root aliases", () => {
+  function direct(text: string, opts: Opts = {}): unknown {
+    const doc = YAML.parseDocument(text, { schema: "yaml-1.1", intAsBigInt: true });
+    try {
+      checkAliasExpansion(doc.contents, opts.maxAliasExpansion ?? 50, text, opts.maxExpandedSlots ?? 1_000_000);
+    } catch (e) {
+      return e;
+    }
+    return undefined;
+  }
+
   it.each([
     ["!!omap of mappings", "a: !!omap [{x: 1}, {y: 2}]\n"],
     ["!!pairs of mappings", "a: !!pairs [{x: 1}, {x: 2}]\n"],
@@ -233,25 +247,30 @@ describe("tagged collections whose items are Pairs (!!omap, !!pairs) and root al
     ["!!pairs of scalar-valued entries", "a: !!pairs [x: 1, x: 2]\n"],
     ["a root !!omap", "!!omap [{x: 1}]\n"],
     ["a block !!omap", "a: !!omap\n  - x: 1\n  - y: 2\n"],
-    ["!!timestamp and a custom tag", "c: !!timestamp 2001-12-14\nd: !foo 1\n"],
-  ])("%s is accepted as before", (_name, text) => {
-    ok(text, {});
+  ])("%s is walked without complaint", (_name, text) => {
+    expect(direct(text)).toBeUndefined();
+  });
+
+  it("!!timestamp and a custom tag are read as before", () => {
+    ok("c: !!timestamp 2001-12-14\nd: !foo 1\n", {});
   });
 
   it("an anchor defined inside a Pair is known to a later alias, in the shape pass and in the count", () => {
-    ok("a: !!pairs [{x: &z {q: 1}}]\nb: *z\n", {});
-    ok("a: !!omap [x: &z {q: 1}]\nb: {<<: *z}\n", {});
+    expect(direct("a: !!pairs [{x: &z {q: 1}}]\nb: *z\n")).toBeUndefined();
+    expect(direct("a: !!omap [x: &z {q: 1}]\nb: {<<: *z}\n")).toBeUndefined();
   });
 
   it("a ratio bomb written inside !!pairs is still counted", () => {
     const text = "p: &p " + flow(10) + "\na: !!pairs [{x: {u: *p, v: *p, w: *p}}]\n";
-    ratio(text, 5);
-    okRatio(text, 10000);
+    expect((direct(text, { maxAliasExpansion: 5 }) as DocumentError).code).toBe(ALIAS_EXPANSION_CODE);
+    expect(direct(text, { maxAliasExpansion: 10000 })).toBeUndefined();
   });
 
   it("a genuinely malformed merge inside !!pairs is parse.codec-syntax at its real position", () => {
-    expect(syntax("a: !!pairs [{x: {<<: 5}}]\n").path).toBe("1:22");
-    expect(syntax("a: !!omap [x: {<<: 5}]\n").path).toBe("1:20");
+    const pairs = direct("a: !!pairs [{x: {<<: 5}}]\n") as ParseError;
+    expect(pairs.code).toBe("parse.codec-syntax");
+    expect(pairs.path).toBe("1:22");
+    expect((direct("a: !!omap [x: {<<: 5}]\n") as ParseError).path).toBe("1:20");
   });
 
   it("a root alias is an unresolved alias, positioned, not a bare 1:1 library error", () => {

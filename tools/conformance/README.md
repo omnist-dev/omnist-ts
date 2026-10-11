@@ -36,7 +36,7 @@ built (steps 1-3 of the harness's 7-step build-out, issue #85).
 `vendor/omnist-spec` is a git submodule pinned to a specific `omnist-spec`
 tag -- **not** tracking `omnist-spec@master`, so fixture updates are
 explicit, reviewable version bumps rather than silent drift. Currently
-pinned to `v0.33.0-beta` (commit `64cbb68`).
+pinned to `v0.34.0-beta` (commit `3346b50`).
 
 Cloning this repo doesn't check the submodule out by default; either
 clone with `--recurse-submodules`, or after a normal clone:
@@ -98,10 +98,11 @@ Sec9.4) by number. `vectorRunner.ts`'s current skips break down as:
   by-design, TypeScript-only divergence -- not a bug. Only the specific
   vectors whose outcome depends on this distinction are skipped; the
   Document-model area otherwise passes in full per Sec9.2's carve-out.
-- **"not yet implemented -- omnist-ts's safety limits are compile-time
-  constants, no runtime configuration surface"** -- vectors that probe
-  runtime-configurable safety limits Python exposes but this repo
-  currently bakes in as constants.
+- **"no driver wired up yet for operation parse_schema_oml/write_schema_oml"**
+  -- the 28 `extensions-osd-oml` vectors (E-20/E-21): the OSD-OML extension is
+  not implemented. They are the only skips. (The safety-limit vectors used to
+  skip as "compile-time constants"; `maxDepth`, `maxNodes` and `maxIntDigits`
+  made them run in 0.9.0-alpha.)
 - **"not yet implemented -- <Class> carries no structured code/path for
   this diagnostic"** -- an error with no structured fields. No vector skips
   this way today: since omnist-ts#149 every `schema.*` throw site

@@ -323,7 +323,7 @@ describe("check", () => {
 
   it("strict exits 0 when nothing would adjust", () => {
     // A plain string leaf writes to XML with zero adjustment (unlike a
-    // number, which XML always reports value.stringified for -- XML has
+    // number, which XML always reports format.value-stringified for -- XML has
     // no native typed literals).
     const p = writeTmp("in.json", '{"a": "x"}');
     const { code } = run(["check", p, "--from", "json", "--to", "xml", "--strict"]);

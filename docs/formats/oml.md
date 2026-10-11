@@ -330,11 +330,13 @@ time-literal syntax) unwrap it to plain text on write, the same as
   leftover `: 1`. Quoting the label (`"nan": 1`) sidesteps the whole
   issue, since a quoted `STRING` token is unambiguously a label.
 - **The 4300-digit integer cap.** An unsuffixed integer literal is capped
-  at 4300 digits (sign excluded) -- exactly `MAX_INT_DIGITS` in
-  `src/oml.ts`, matching CPython's own `sys.get_int_max_str_digits()`
-  default and this port's other codecs (see `docs/formats/json.md`).
-  4300 digits parses; 4301 raises `ParseError` naming the limit. This is
-  a denial-of-service guard (int-to-string conversion on an
+  at 4300 digits (sign excluded) by default, matching CPython's own
+  `sys.get_int_max_str_digits()` default and this port's other codecs (see
+  `docs/formats/json.md`); `readOml(text, { maxIntDigits })` sets it per call.
+  4300 digits parses; 4301 raises `ParseError` with code
+  `document.limit.int-digits` at the literal's Document path (`$.n`,
+  `$.a[1]`), never a text position (spec E-4a). The literal is not converted
+  first. This is a denial-of-service guard (int-to-string conversion on an
   arbitrarily-long digit string is superlinear), not a data-modeling
   constraint.
 
@@ -473,17 +475,23 @@ readOml("b: [1, 2, 3,]")   // [{ label: "b", target: 1 }, { label: "b", target: 
 
 ## The depth guard
 
-Nesting depth (the number of `{` a value may be wrapped in) is capped at
-200 on **both read and write**, matching the Document model's own bound
-(`MAX_DEPTH` in `src/oml.ts`, and the same constant `src/document.ts`/
-`src/schema.ts` each keep their own copy of). 200 levels of `{` parses or
-writes; 201 raises an error naming the limit:
+Nesting depth is capped at 200 levels on **both read and write**, matching
+the Document model's own bound (spec D-9, D-12). The levels are those of
+node nesting counted from the Document root, which is level 1, so a document
+whose chain from the root to a scalar leaf is 200 edges long (a top-level
+edge and 199 `{`) is read, and one of 201 edges is refused with
+`document.limit.depth` at `$` (a resource limit, not a text position):
 
 ```
-readOml(200-levels-deep-source)    // parses fine
-readOml(201-levels-deep-source)    // ParseError: nesting exceeds the maximum depth (200)
+readOml(200-edges-deep-source)    // parses fine
+readOml(201-edges-deep-source)    // ParseError: nesting exceeds the maximum depth (200)
 ```
 <!-- verified-by: test/oml.test.ts "nesting depth limit is enforced" -->
+
+`readOml(text, { maxDepth })` sets the limit per call, and `maxNodes` the node
+limit (the root and every `{ ... }` node, not a scalar leaf), refused with
+`document.limit.nodes` at `$`. Before 0.9.0-alpha OML took one level more than
+JSON (a top-level edge and 200 `{`); every reader now counts alike.
 
 This is a denial-of-service guard against a pathological *input* hanging
 or exhausting the call stack, not a data-modeling constraint -- see

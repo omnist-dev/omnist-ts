@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Runs omnist-spec's `test-suite/` JSON-vector suite (139 vectors, envelope
+ * Runs omnist-spec's `test-suite/` JSON-vector suite (522 vectors, envelope
  * `name`/`spec`/`operation`/`purpose`/`input`/`expect` -- see
  * `vendor/omnist-spec/test-suite/README.md` and
  * `docs/08-conformance-and-errors.md` Sec8.5) against omnist-ts's own
@@ -44,14 +44,15 @@
  * `integer <: number` value-level subtyping relation, Sec6.3, which is a
  * separate, intentional rule -- not a reopening of D-6).
  *
- * **3. Runtime-configurable-limit vectors (`document-model/limits.json`).**
- * Present in this suite (6 vectors), assuming a runtime-configurable safety
- * limit (`declared_max_depth`/`declared_max_nodes`/`declared_max_int_digits`
- * in `input`). Confirmed against `src/document.ts`: `MAX_DEPTH`/`MAX_NODES`/
- * `MAX_INT_DIGITS` are module-level `const`s (issue #77 added `MAX_NODES` as
- * `1_000_000`), with no runtime-configuration surface. These SKIP, citing
- * "not yet implemented -- omnist-ts's safety limits are compile-time
- * constants, no runtime configuration surface".
+ * **3. Runtime-configurable-limit vectors (`document-model/limits*.json`,
+ * `declared_max_*` keys).** Every reader takes `maxDepth`, `maxNodes` and
+ * `maxIntDigits` (alongside `maxInputBytes` and the YAML alias limits), and this
+ * runner hands a vector's `declared_max_*` value to the reader as that option,
+ * for that vector only. They used to be compile-time constants and the vectors
+ * were skipped (omnist-ts#166, DIV-28); none is skipped now. A key a path
+ * cannot honour (the `bytes_hex` path goes through the CLI, which takes no such
+ * option; every non-`parse` operation) is still skipped, never run against the
+ * default (E-20a).
  *
  * **4 (AMENDED, v0.18.0-beta sweep). Structured diagnostics on syntax
  * errors.** The paragraph below was written when no syntax error carried
@@ -113,25 +114,12 @@ const REPO_ROOT = path.resolve(HERE, "..", "..");
 const VECTOR_SUITE_DIR = path.resolve(REPO_ROOT, "vendor", "omnist-spec", "test-suite");
 const CLI_PATH = path.resolve(REPO_ROOT, "src", "cli.ts");
 
-// Allowlist of `declared_max_*` keys (test-suite/README.md, "declared-limit
-// keys"). A vector carrying one was written against a vector-local limit,
-// not this port's default, so it MUST be skipped -- never run against the
-// wrong threshold, which either fails for the wrong reason or (worse)
-// passes without exercising the boundary. Re-check this list against the
-// README's on every spec bump: a key missing here is silently treated as
-// an ordinary vector.
-const LIMIT_KEYS = [
-  "declared_max_depth",
-  "declared_max_nodes",
-  "declared_max_int_digits",
-  "declared_max_alias_expansion", // Sec2.4.1 D-18; enforced via ReadYamlOptions.maxAliasExpansion
-  "declared_max_expanded_slots", // Sec2.4.1 D-22; enforced via ReadYamlOptions.maxExpandedSlots
-  "declared_max_input_bytes", // Sec2.4.2 D-23; enforced via every reader's maxInputBytes
-] as const;
-
-// The keys this port can configure at runtime; a vector carrying any OTHER
-// limit key is skipped (the constants are compile-time).
+// The keys this port can configure at runtime, per call, on a reader; a vector
+// carrying any OTHER limit key is skipped.
 const CONFIGURABLE_LIMIT_KEYS: readonly string[] = [
+  "declared_max_depth", // Sec2.4 D-9; ReadXOptions.maxDepth on every reader
+  "declared_max_nodes", // Sec2.4 D-9; maxNodes
+  "declared_max_int_digits", // Sec2.4 D-9, D-28; maxIntDigits
   "declared_max_alias_expansion",
   "declared_max_expanded_slots",
   "declared_max_input_bytes",
@@ -544,6 +532,9 @@ function runParse(v: Vector): Result {
       maxAliasExpansion?: number;
       maxExpandedSlots?: number;
       maxInputBytes?: number;
+      maxDepth?: number;
+      maxNodes?: number;
+      maxIntDigits?: number;
     } = { report };
     if (inp.declared_max_alias_expansion !== undefined) {
       readOpts.maxAliasExpansion = Number(inp.declared_max_alias_expansion);
@@ -551,6 +542,11 @@ function runParse(v: Vector): Result {
     if (inp.declared_max_expanded_slots !== undefined) {
       readOpts.maxExpandedSlots = Number(inp.declared_max_expanded_slots);
     }
+    // D-9: the three universal limits likewise, through maxDepth/maxNodes/
+    // maxIntDigits.
+    if (inp.declared_max_depth !== undefined) readOpts.maxDepth = Number(inp.declared_max_depth);
+    if (inp.declared_max_nodes !== undefined) readOpts.maxNodes = Number(inp.declared_max_nodes);
+    if (inp.declared_max_int_digits !== undefined) readOpts.maxIntDigits = Number(inp.declared_max_int_digits);
     // D-23: `declared_max_input_bytes` is a vector-local maximum, handed to the
     // reader through `maxInputBytes`, for that vector only.
     if (inp.declared_max_input_bytes !== undefined) {
@@ -729,9 +725,13 @@ function runWrite(v: Vector): Result {
   const node = decodeDocument(inp.document as EncodedNode);
   const strict = inp.strict === true;
   const report = new WriteReport();
+  // E-35: `compact: true` (OML only) selects the one-line form, which this
+  // library spells `indent: null`.
+  const writeOpts: { strict: boolean; report: WriteReport; indent?: null } = { strict, report };
+  if (inp.compact === true) writeOpts.indent = null;
   let text: string;
   try {
-    text = getFormat(fmt).write(node, { strict, report });
+    text = getFormat(fmt).write(node, writeOpts);
   } catch (e) {
     if (expect.ok === false) {
       // Sec8.5.3: several formats-json/formats-toml/formats-xml write
@@ -759,11 +759,24 @@ function runWrite(v: Vector): Result {
     }
   }
   if (expect.diagnostics !== undefined) {
-    const expPaths = paths(asDiagnostics(expect.diagnostics));
-    const actPaths = paths(report.adjustments as unknown as Diagnostic[]);
-    if (!setsEqual(expPaths, actPaths)) {
-      return fail(`diagnostic paths differ: expected ${setStr(expPaths)}, got ${setStr(actPaths)}`);
-    }
+    // Sec8.5.3: a write vector's diagnostics are compared by (path, code),
+    // the two together as one pair (omnist-ts#166).
+    const r = compareReportedPairs(asDiagnostics(expect.diagnostics), report.adjustments);
+    if (r.status !== "pass") return r;
+  }
+  return pass();
+}
+
+/**
+ * Sec8.5.2: compare a success result's reported diagnostics with the expected
+ * ones as a set of `(path, code)` pairs. Message text is never compared.
+ */
+function compareReportedPairs(expected: readonly Diagnostic[], actual: readonly Diagnostic[]): Result {
+  const pairs = (ds: readonly Diagnostic[]): Set<string> => new Set(ds.map((d) => `${d.path}\u0000${String(d.code)}`));
+  const exp = pairs(expected);
+  const act = pairs(actual);
+  if (!setsEqual(exp, act)) {
+    return fail(`diagnostics differ: expected ${setStr(exp)}, got ${setStr(act)}`);
   }
   return pass();
 }
@@ -1047,9 +1060,7 @@ export function runVector(v: Vector): Result {
   const unhonoured = unhonouredDeclaredKeys(v)[0];
   if (unhonoured !== undefined) {
     return skip(
-      (LIMIT_KEYS as readonly string[]).includes(unhonoured) && v.operation === "parse" && v.input.bytes_hex === undefined
-        ? "not yet implemented -- omnist-ts's safety limits are compile-time constants, no runtime configuration surface"
-        : `not yet implemented -- omnist-ts does not honour ${unhonoured} on operation ${JSON.stringify(v.operation)} (E-20a)`,
+      `not yet implemented -- omnist-ts does not honour ${unhonoured} on operation ${JSON.stringify(v.operation)} (E-20a)`,
     );
   }
   try {

@@ -49,6 +49,17 @@
 
 import { XMLParser, XMLValidator } from "fast-xml-parser";
 import type { Edge, Node, Scalar } from "../document.js";
+import {
+  DEFAULT_MAX_DEPTH as MAX_DEPTH,
+  depthIssue,
+  digitsExceed,
+  intDigitsIssue,
+  nodesIssue,
+  resolveLimits,
+  type DocumentLimits,
+  type LimitIssue,
+  type ResolvedLimits,
+} from "../limits.js";
 import { EdgePaths } from "../paths.js";
 import { checkEncodable } from "../encodable.js";
 import { TimeValue } from "../temporal.js";
@@ -61,27 +72,17 @@ import { rejectSecondLeadingBom, stripLeadingBom } from "../bom.js";
 import { codecSyntaxError } from "./codec-error.js";
 import { checkInputSize } from "./input-size.js";
 
-const MAX_DEPTH = 200;
+// The three safety limits (D-9) are limits.ts's. xmlToNode builds its edge
+// tree directly rather than going through buildNode(), so it keeps its own
+// running node count, threaded like `depth` is, under the same rules as
+// buildNode (levels of nodes, the root being level 1; the root counts as a
+// node). The schema-directed integer path (xmlPretypeScalar, below) checks the
+// digit count on the text before BigInt() runs, since BigInt(text) is
+// superlinear in the digit count.
 
-// Matches src/document.ts's own MAX_NODES (locally redefined here, same
-// convention as this file's own MAX_DEPTH copy) -- see issue #77. xmlToNode
-// builds its edge tree directly rather than going through buildNode(), so
-// it needs its own running counter, threaded like `depth` is.
-const MAX_NODES = 1_000_000;
-
-// Matches src/document.ts's own MAX_INT_DIGITS (locally redefined here,
-// same convention as this file's own MAX_DEPTH/MAX_NODES copies -- see
-// json.ts's/toml.ts's identical constant for this port's precedent). PR
-// #99's schema-directed integer path (xmlPretypeScalar, below) switched
-// from Number(value) to BigInt(value) to fix issue #98's precision loss --
-// but xmlToNode never goes through document.ts's buildNode()/
-// checkIntDigits (see this file's top comment), so nothing else on this
-// route ever caps digit count. BigInt(text) does work proportional to the
-// digit count, so an uncapped, attacker-controlled digit string is exactly
-// the superlinear cost MAX_INT_DIGITS exists to prevent -- this check has
-// to run on the raw text, before BigInt() ever sees it, matching
-// json.ts's/toml.ts's checkJsonIntegerDigits/checkTomlIntegerDigits.
-const MAX_INT_DIGITS = 4300;
+function limitError(issue: LimitIssue): DocumentError {
+  return new DocumentError(issue.message, issue.code, issue.path);
+}
 
 const PARSER_MAX_NESTED_TAGS = 100000;
 
@@ -179,7 +180,7 @@ function checkWriteDepth(depth: number): void {
 }
 
 /** Options for parsing XML text into a Document node. */
-export interface ReadXmlOptions {
+export interface ReadXmlOptions extends DocumentLimits {
   /** Optional {@link Schema} for schema-directed materialization (spec §4). */
   schema?: Schema;
   /** Optional {@link WriteReport} accumulator to collect read-time codec
@@ -249,6 +250,7 @@ function mixedContentError(where: string): ParseError {
 
 /** Parses XML text into a Document node (spec §4). */
 export function readXml(text: string, opts: ReadXmlOptions = {}): Node {
+  const limits = resolveLimits(opts);
   checkInputSize(text, opts.maxInputBytes); // D-23: first, the BOM's bytes counted
   text = stripLeadingBom(text); // D-15: one leading U+FEFF
   rejectSecondLeadingBom(text, "XML"); // D-21: a second one is an error
@@ -297,12 +299,13 @@ export function readXml(text: string, opts: ReadXmlOptions = {}): Node {
   const rootLabel = local(tag);
   const rootPath = "$." + rootLabel;
   reportDroppedAttributesAndNamespace(root, tag, rootPath, opts.report);
-  const nodeCounter = { count: 0 };
+  // The Document root (the node holding the one element edge) is the first node.
+  const nodeCounter = { count: 1 };
   const node: Node = [
-    { label: rootLabel, target: xmlToNode(root[tag] as XmlEntry[], rootPath, 0, nodeCounter, opts.report) },
+    { label: rootLabel, target: xmlToNode(root[tag] as XmlEntry[], rootPath, 0, nodeCounter, opts.report, limits) },
   ];
   if (opts.schema === undefined) return node;
-  const pretyped = xmlPretype(node, opts.schema, opts.schema.root);
+  const pretyped = xmlPretype(node, opts.schema, opts.schema.root, "$", limits.maxIntDigits);
   return materialize(pretyped, opts.schema) as Node;
 }
 
@@ -352,10 +355,8 @@ function xmlToNode(
   depth: number,
   counter: { count: number },
   report: WriteReport | undefined,
+  limits: ResolvedLimits,
 ): Node {
-  if (depth > MAX_DEPTH) {
-    throw new DocumentError(path + ": nesting exceeds the maximum depth (" + String(MAX_DEPTH) + ")");
-  }
   const elementEntries = entries.filter((e) => !("#text" in e));
   if (elementEntries.length === 0) {
     /* v8 ignore next */
@@ -365,9 +366,14 @@ function xmlToNode(
   // Only an actual node (an edge list -- spec section 2.2 `node = [ edge, ... ]`)
   // counts against MAX_NODES; a scalar leaf's target is a `value`,
   // categorically distinct from `node`, and must not be counted (issue #107).
+  // A node at `depth` (the first element's being 0) is level depth + 2 of the
+  // nesting: the Document root is level 1.
+  if (depth + 2 > limits.maxDepth) {
+    throw limitError(depthIssue(limits.maxDepth));
+  }
   counter.count++;
-  if (counter.count > MAX_NODES) {
-    throw new DocumentError(path + ": node count exceeds the maximum (" + String(MAX_NODES) + ")");
+  if (counter.count > limits.maxNodes) {
+    throw limitError(nodesIssue(limits.maxNodes));
   }
   let ownText = "";
   let sawFirstElement = false;
@@ -405,7 +411,7 @@ function xmlToNode(
     reportDroppedAttributesAndNamespace(entry, childTag, childPath, report);
     out.push({
       label: childLabel,
-      target: xmlToNode(entry[childTag] as XmlEntry[], childPath, depth + 1, counter, report),
+      target: xmlToNode(entry[childTag] as XmlEntry[], childPath, depth + 1, counter, report, limits),
     });
   }
   if (ownText.trim() !== "") {
@@ -444,18 +450,20 @@ const FLOAT_RE = /^-?(0|[1-9]\d*)(\.\d+)?([eE][+-]?\d+)?$/;
 // happen here, locally, before materialize() ever sees the value. This
 // mirrors Python's `_xml_pretype`/`_xml_pretype_scalar` (omnist/formats.py,
 // v0.8.0) without copying its exact shape.
-function xmlPretype(node: Node, schema: Schema, type: FieldType): Node {
+function xmlPretype(node: Node, schema: Schema, type: FieldType, path: string, maxIntDigits: number): Node {
   const resolved = schema.resolve(type);
   if ("tag" in resolved && resolved.tag === "any") return node;
-  if ("tag" in resolved && resolved.tag === "scalar") return xmlPretypeScalar(node, resolved);
+  if ("tag" in resolved && resolved.tag === "scalar") return xmlPretypeScalar(node, resolved, path, maxIntDigits);
   if (!Array.isArray(node)) return node;
+  const paths = new EdgePaths(path, node);
   return node.map(({ label, target }) => {
     const f = recordField(resolved, label);
-    return { label, target: f ? xmlPretype(target, schema, f.type) : target };
+    const p = paths.next(label);
+    return { label, target: f ? xmlPretype(target, schema, f.type, p, maxIntDigits) : target };
   });
 }
 
-function xmlPretypeScalar(value: Node, s: ScalarType): Node {
+function xmlPretypeScalar(value: Node, s: ScalarType, path: string, maxIntDigits: number): Node {
   // value is always the string xmlToNode produced -- xmlPretype is only
   // ever called on a freshly-built XML node, never a value from elsewhere.
   if (typeof value !== "string") return value;
@@ -463,21 +471,14 @@ function xmlPretypeScalar(value: Node, s: ScalarType): Node {
     return value === "true";
   }
   if (s.scalarKind === "integer" && INT_RE.test(value)) {
-    // Digit-count cap before BigInt() ever runs (issue #98 follow-up):
-    // BigInt(text) is superlinear in digit count, and unlike JSON/TOML's
-    // text-scanning checks, INT_RE has already confirmed `value` is
-    // nothing but an optional leading '-' plus digits, so a plain
-    // length check (minus the sign) is exact here -- no comment/string
-    // skipping needed, this is already an isolated element-text scalar.
-    const digits = value.startsWith("-") ? value.length - 1 : value.length;
-    if (digits > MAX_INT_DIGITS) {
-      throw new ParseError(
-        "invalid XML: integer literal has more than " +
-          String(MAX_INT_DIGITS) +
-          " digits, exceeding the digit limit (security: unbounded-digit " +
-          "int-to-str conversion is superlinear); matches this port's " +
-          "digit cap elsewhere (src/document.ts's MAX_INT_DIGITS)",
-      );
+    // Digit-count cap before BigInt() ever runs (issue #98 follow-up, E-4a):
+    // BigInt(text) is superlinear in digit count. INT_RE has already
+    // confirmed `value` is nothing but an optional leading '-' plus digits,
+    // so the count is exact here. The refusal is the one the OML reader gives
+    // for the same Document: `document.limit.int-digits` at the leaf's path.
+    if (digitsExceed(value.startsWith("-") ? value.slice(1) : value, 10, maxIntDigits)) {
+      const issue = intDigitsIssue(maxIntDigits, path);
+      throw new ParseError(issue.message, [], issue.code, issue.path);
     }
     return BigInt(value);
   }
@@ -589,7 +590,8 @@ function scanXmlNode(node: Node, path: string, rep: WriteReport, depth: number):
       path,
     );
   } else if (v instanceof Date || v instanceof TimeValue) {
-    rep.add(path, "temporal.stringified", "temporal value written as text (reads back as a string)", "warning");
+    // E-5: a temporal leaf takes this code and never also the value one.
+    rep.add(path, "format.temporal-stringified", "temporal value written as text (reads back as a string)", "warning");
   } else if (typeof v === "boolean" || typeof v === "number" || typeof v === "bigint") {
     // #288-equivalent (issue #88): readXml no longer infers scalar kind
     // from text shape on a schema-less read, so a non-string scalar
@@ -599,7 +601,7 @@ function scanXmlNode(node: Node, path: string, rep: WriteReport, depth: number):
     // read); now reported like every other type-losing write.
     rep.add(
       path,
-      "value.stringified",
+      "format.value-stringified",
       "non-string scalar written as text (reads back as a string)",
       "warning",
     );

@@ -13,11 +13,18 @@
  * strict: true to throw on any adjustment. See src/report.ts.
  */
 
-import { buildNode, grouped, hasInterleaving, type Node, type Scalar } from "../document.js";
+import { buildNodeWithLimits, grouped, hasInterleaving, type Node, type Scalar } from "../document.js";
+import {
+  DEFAULT_MAX_DEPTH as MAX_DEPTH,
+  DEFAULT_MAX_INT_DIGITS,
+  OverlongInteger,
+  resolveLimits,
+  type DocumentLimits,
+} from "../limits.js";
 import { EdgePaths } from "../paths.js";
 import { checkEncodable } from "../encodable.js";
 import { TimeValue } from "../temporal.js";
-import { ParseError, WriteError } from "../errors.js";
+import { WriteError } from "../errors.js";
 import { finishWrite, WriteReport } from "../report.js";
 import { dateKind } from "../temporal.js";
 import { materialize } from "../deserialize.js";
@@ -25,72 +32,6 @@ import { rejectSecondLeadingBom, stripLeadingBom } from "../bom.js";
 import { codecSyntaxError, type CodecBlame } from "./codec-error.js";
 import { checkInputSize } from "./input-size.js";
 import type { Schema } from "../schema.js";
-
-// Matches src/document.ts's own MAX_DEPTH (locally redefined here, same as
-// src/oml.ts's own copy of the same guard constant -- see that file for
-// this convention's precedent in this port).
-const MAX_DEPTH = 200;
-
-// Matches src/document.ts's own MAX_INT_DIGITS (locally redefined here for
-// the same reason MAX_DEPTH is above -- see that file's comment for this
-// convention's precedent). Unlike document.ts's checkIntDigits -- which
-// runs on an already-parsed JS `number` and so can never see more than
-// ~309 digits' worth of magnitude before float64 rounds it away -- this
-// check runs on the raw JSON *text*, the only place an integer literal's
-// true digit count (e.g. 4301 "1"s) still exists. CPython's json module
-// hits this exact cap first, at int()-construction time, which is why
-// Python raises ValueError on the same input instead of silently
-// producing `Infinity` (see issue #54). A bare float literal that
-// overflows float64 (e.g. `1e400`) is deliberately NOT covered here --
-// Python overflows to `inf` for that case too, so rejecting it would be
-// a new mismatch, not a fix. Only an integer-shaped literal (no `.`, no
-// exponent) past the digit cap is a Python/JS behavioral gap.
-const MAX_INT_DIGITS = 4300;
-
-/**
- * Scan raw JSON text for an integer literal (a token with no `.` and no
- * `e`/`E`, i.e. not a float) whose digit count exceeds MAX_INT_DIGITS,
- * outside of any string literal. JSON.parse itself has no such guard --
- * it would silently round an over-long integer literal to `Infinity` --
- * so this check has to run on the source text, before JSON.parse ever
- * sees it, matching the point at which CPython's own int() raises.
- */
-function checkJsonIntegerDigits(text: string): void {
-  const n = text.length;
-  let i = 0;
-  while (i < n) {
-    const c = text.charAt(i);
-    if (c === '"') {
-      i++;
-      while (i < n && text.charAt(i) !== '"') {
-        if (text.charAt(i) === "\\") i++;
-        i++;
-      }
-      i++;
-      continue;
-    }
-    if (c === "-" || (c >= "0" && c <= "9")) {
-      if (c === "-") i++;
-      const digitsStart = i;
-      while (i < n && text.charAt(i) >= "0" && text.charAt(i) <= "9") i++;
-      const digitsLen = i - digitsStart;
-      const isFloat = i < n && (text.charAt(i) === "." || text.charAt(i) === "e" || text.charAt(i) === "E");
-      if (!isFloat && digitsLen > MAX_INT_DIGITS) {
-        throw new ParseError(
-          "invalid JSON: integer literal has more than " +
-            String(MAX_INT_DIGITS) +
-            " digits, exceeding the digit limit (security: unbounded-digit " +
-            "int-to-str conversion is superlinear); matches this port's " +
-            "digit cap elsewhere (src/document.ts's MAX_INT_DIGITS) and " +
-            "CPython's own int-to-str digit cap",
-        );
-      }
-      continue;
-    }
-    i++;
-  }
-}
-
 
 // Sentinel prefix used to round-trip an integer-shaped JSON numeral through
 // JSON.parse without losing precision (issue #98). JSON.parse always
@@ -103,8 +44,14 @@ function checkJsonIntegerDigits(text: string): void {
 // literal containing a NUL byte is legal JSON but vanishingly unlikely,
 // and even if one did, it would need to *also* match the exact tag below
 // to misfire -- accepted as with json.ts's other text-level scanning
-// tricks in this file, e.g. checkJsonIntegerDigits).
+// tricks in this file).
 const BIGINT_TAG = String.fromCharCode(0) + "omnist-bigint" + String.fromCharCode(0);
+// The tag of an integer literal whose value has more digits than the limit
+// (D-9, D-28). Such a literal is not converted to a BigInt (that conversion
+// is superlinear in the digit count, which is what the limit exists to
+// bound): it is tagged, and the reviver turns it into an OverlongInteger,
+// which the builder refuses at the literal's Document path.
+const OVERLONG_TAG = String.fromCharCode(0) + "omnist-overlong" + String.fromCharCode(0);
 
 /**
  * Rewrite every integer-shaped numeral in raw JSON text (outside string
@@ -120,7 +67,7 @@ const BIGINT_TAG = String.fromCharCode(0) + "omnist-bigint" + String.fromCharCod
  * (e.g. the issue #98 target vector), which plain `JSON.parse` would round
  * the same way `readJson` used to.
  */
-export function tagIntegerLiterals(text: string): string {
+export function tagIntegerLiterals(text: string, maxIntDigits: number = DEFAULT_MAX_INT_DIGITS): string {
   let out = "";
   const n = text.length;
   let i = 0;
@@ -164,7 +111,8 @@ export function tagIntegerLiterals(text: string): string {
       }
       const numText = text.slice(start, i);
       if (!isFloat && numText !== "-" && numText.length > 0) {
-        out += JSON.stringify(BIGINT_TAG + numText);
+        const digits = numText.length - (numText.startsWith("-") ? 1 : 0);
+        out += JSON.stringify(digits > maxIntDigits ? OVERLONG_TAG : BIGINT_TAG + numText);
       } else {
         out += numText;
       }
@@ -177,8 +125,9 @@ export function tagIntegerLiterals(text: string): string {
 }
 
 export function bigintReviver(_key: string, value: unknown): unknown {
-  if (typeof value === "string" && value.startsWith(BIGINT_TAG)) {
-    return BigInt(value.slice(BIGINT_TAG.length));
+  if (typeof value === "string") {
+    if (value.startsWith(BIGINT_TAG)) return BigInt(value.slice(BIGINT_TAG.length));
+    if (value === OVERLONG_TAG) return new OverlongInteger();
   }
   return value;
 }
@@ -209,7 +158,7 @@ function* leaves(node: Node, path = "$", depth = 0): Generator<[string, Scalar]>
 
 /** Options accepted by readJson. */
 /** Options for parsing JSON text into a Document node. */
-export interface ReadJsonOptions {
+export interface ReadJsonOptions extends DocumentLimits {
   /** Optional {@link Schema} for schema-directed materialization (spec §4). */
   schema?: Schema;
   /**
@@ -246,13 +195,13 @@ function jsonBlame(text: string, taggedMessage: string): CodecBlame {
 
 /** Parse JSON text into a Document node. */
 export function readJson(text: string, opts: ReadJsonOptions = {}): Node {
+  const limits = resolveLimits(opts);
   checkInputSize(text, opts.maxInputBytes); // D-23: first, the BOM's bytes counted
   text = stripLeadingBom(text); // D-15: one leading U+FEFF
   rejectSecondLeadingBom(text, "JSON"); // D-21: a second one is an error
-  checkJsonIntegerDigits(text);
   let parsed: unknown;
   try {
-    parsed = JSON.parse(tagIntegerLiterals(text), bigintReviver);
+    parsed = JSON.parse(tagIntegerLiterals(text, limits.maxIntDigits), bigintReviver);
   } catch (exc) {
     // JSON.parse always throws a SyntaxError (an Error instance) on
     // malformed input, never a bare value, so the non-Error branch below is
@@ -261,7 +210,7 @@ export function readJson(text: string, opts: ReadJsonOptions = {}): Node {
     const message = exc instanceof Error ? exc.message : String(exc);
     throw codecSyntaxError("JSON", message, text, jsonBlame(text, message));
   }
-  const node = buildNode(parsed);
+  const node = buildNodeWithLimits(parsed, limits);
   if (opts.schema === undefined) return node;
   return materialize(node, opts.schema) as Node;
 }
@@ -300,7 +249,7 @@ function scanJson(node: Node): WriteReport {
   const rep = new WriteReport();
   for (const [path, v] of leaves(node)) {
     if (v instanceof Date) {
-      rep.add(path, "temporal.stringified", "temporal value written as an ISO-8601 string", "warning");
+      rep.add(path, "format.temporal-stringified", "temporal value written as an ISO-8601 string", "warning");
     } else if (typeof v === "number" && !Number.isFinite(v)) {
       // issue #128: NaN/Infinity has no JSON token at all -- substituting
       // null is not a lossless fallback, it's a different, genuinely valid

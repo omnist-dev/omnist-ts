@@ -81,9 +81,18 @@ represent an integer beyond ±(2^53 - 1) (`Number.MAX_SAFE_INTEGER`)
 losslessly, so `readToml` threw `ParseError` on anything past that range
 even though TOML's own spec (and Python's `tomllib`/`tomli_w`) supports
 the full 64-bit range and beyond. `readToml` still enforces this port's
-own `MAX_INT_DIGITS` cap (4300 digits, matching CPython's
-`sys.get_int_max_str_digits()` default and `src/document.ts`'s own cap)
-via a text-level pre-parse scan (`checkTomlIntegerDigits`) -- that limit
-is a deliberate security guard against unbounded-digit int-to-str
-conversion, not a representational limit, and stays in place (see
-`docs/formats/json.md`'s equivalent note).
+own integer-digit limit (spec D-9, D-28): 4300 decimal digits by default
+(matching CPython's `sys.get_int_max_str_digits()` default), configurable as
+`readToml(text, { maxIntDigits })`. The limit counts the digits of the
+integer's VALUE, so `0xFFF` (4095) is four digits and refused at a limit of
+three, `0b1111100111` (999) and `9_9_9` are three and accepted, and a
+3 600-digit hex literal (a value of 4 335 digits) is refused by default. A
+refusal is a `ParseError` with code `document.limit.int-digits` at the
+literal's Document path (`$.a`, `$.t.a[1]`). Every converted integer is
+checked by value, without a decimal conversion of a huge one; a decimal
+literal of more than 64 digits that is over the limit is also found in the
+text first, so it is refused before `smol-toml` converts it. That limit is a
+deliberate security guard against unbounded-digit int-to-str conversion, not a
+representational limit (see `docs/formats/json.md`'s equivalent note).
+A float literal that overflows (`1e999`) reads as an infinity, and one that
+underflows as `0.0` (D-29).

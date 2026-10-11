@@ -32,6 +32,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { main, runVector, iterVectors, isWellFormedPosition } from "../tools/conformance/vectorRunner.js";
+import { ParseError } from "../src/errors.js";
+import { registerFormat } from "../src/registry.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REAL_SUITE_DIR = path.resolve(HERE, "..", "vendor", "omnist-spec", "test-suite");
@@ -42,7 +44,16 @@ function vec(operation: string, input: object, expect: object, name = "test-vect
   return { name, spec: "test", operation, purpose: "edge-case", input, expect } as V;
 }
 
-const BIG = "1".repeat(4400);
+/** Registers a plugin format whose reader fails with a bare ParseError (no code, no path). */
+function registerBareFormat(): void {
+  registerFormat({
+    name: "bare",
+    read: () => {
+      throw new ParseError("a bare failure");
+    },
+    write: () => "",
+  });
+}
 const ASTRAL = String.fromCodePoint(0x1f600);
 
 function withCapturedConsole<T>(fn: () => T): { result: T; logs: string[]; errs: string[] } {
@@ -234,9 +245,18 @@ describeIfVendored("main() against the real vendor/omnist-spec/test-suite", () =
     // v0.6.1-alpha: omnist-spec v0.27.0-beta (338 vectors, +7). D-18a: an empty
     // merge sequence `<<: []` is a carrier that merges nothing. No code change:
     // all 7 new vectors pass: 304 pass, 0 fail, 34 skip (6 limits, 28 OSD-OML).
+    //
+    // v0.9.0-alpha: omnist-spec v0.34.0-beta (522 vectors, +155). Before any
+    // fix (runners as they were): 430 pass, 12 fail, 80 skip (52 limits, 28
+    // OSD-OML). With the runners comparing write diagnostics by (path, code)
+    // and passing `compact`, before the source fixes: 426 pass, 16 fail, 80
+    // skip. Now 494 pass, 0 fail, 28 skip (the OSD-OML ones): the three
+    // limits are configurable per call, the write codes are the registered
+    // ones, !!omap/!!pairs/!!set are refused, `!!str <<` is an ordinary key
+    // and a YAML NEL is written as `\N`.
     expect(exitCode).toBe(0);
     expect(logs.at(-1)).toBe(
-      "\n333 passed, 0 failed, 34 skipped (of 367 vectors) -- " +
+      "\n494 passed, 0 failed, 28 skipped (of 522 vectors) -- " +
         "diagnostic paths always compared, codes compared where the error carries one (Sec8.5.2)",
     );
   }, 120000);
@@ -247,7 +267,7 @@ describeIfVendored("main() against the real vendor/omnist-spec/test-suite", () =
   it("every skip cites an explicit, reasoned category", () => {
     const { logs } = withCapturedConsole(() => main());
     const skipLines = logs.filter((l) => l.startsWith("[SKIP]"));
-    expect(skipLines.length).toBe(34);
+    expect(skipLines.length).toBe(28);
     for (const line of skipLines) {
       // D-6 (integer/number kind collapse) is CLOSED as of issue #98 --
       // no vector cites it anymore (see tools/conformance/vectorRunner.ts).
@@ -260,8 +280,8 @@ describeIfVendored("main() against the real vendor/omnist-spec/test-suite", () =
     }
   }, 120000);
 
-  it("iterVectors discovers all 367 real vectors", () => {
-    expect(iterVectors(REAL_SUITE_DIR).length).toBe(367);
+  it("iterVectors discovers all 522 real vectors", () => {
+    expect(iterVectors(REAL_SUITE_DIR).length).toBe(522);
   });
 });
 
@@ -333,12 +353,33 @@ describe("runVector() dispatch", () => {
 // ---------------------------------------------------------------------------
 
 describe("parse", () => {
-  it("skips a vector declaring a runtime-configurable limit", () => {
-    const r = runVector(vec("parse", { format: "oml", declared_max_depth: 3, text: "a: 1\n" }, { ok: true }));
-    expect(r).toEqual({
-      status: "skip",
-      message: "not yet implemented -- omnist-ts's safety limits are compile-time constants, no runtime configuration surface",
+  const int = (value: number) => ({ scalar: { kind: "integer", value } });
+  it.each([
+    [
+      "declared_max_depth", 3, "a: { b: { c: 1 } }\n", "a: { b: { c: { d: 1 } } }\n", "document.limit.depth", "$",
+      { edges: [["a", { edges: [["b", { edges: [["c", int(1)]] }]] }]] },
+    ],
+    [
+      "declared_max_nodes", 1, "a: 1\nb: 2\n", "a: { b: 1 }\n", "document.limit.nodes", "$",
+      { edges: [["a", int(1)], ["b", int(2)]] },
+    ],
+    [
+      "declared_max_int_digits", 3, "n: 999\n", "n: 1000\n", "document.limit.int-digits", "$.n",
+      { edges: [["n", int(999)]] },
+    ],
+  ])("runs a vector declaring %s with that maximum, not the default (D-9)", (key, max, within, over, code, at, document) => {
+    const rejected = { ok: false, diagnostics: [{ path: at, code }] };
+    // At the limit the vector reads; one past it, it is refused with the code at the path.
+    expect(runVector(vec("parse", { format: "oml", [key]: max, text: within }, { ok: true, document }))).toEqual({
+      status: "pass",
+      message: "ok",
     });
+    expect(runVector(vec("parse", { format: "oml", [key]: max, text: over }, rejected))).toEqual({
+      status: "pass",
+      message: "ok",
+    });
+    // Without the key the same text is read at the default, so a vector expecting the refusal fails.
+    expect(runVector(vec("parse", { format: "oml", text: over }, rejected)).status).toBe("fail");
   });
 
   it("runs a vector declaring declared_max_alias_expansion with that maximum, not the default", () => {
@@ -376,9 +417,12 @@ describe("parse", () => {
     expect(runVector(vec("parse", { format: "yaml", text }, reject)).status).toBe("fail");
   });
 
-  it("still skips a vector declaring one of the other (unconfigurable) limits", () => {
-    const r = runVector(vec("parse", { format: "yaml", declared_max_depth: 3, text: "a: 1" + String.fromCharCode(10) }, { ok: true }));
-    expect(r.status).toBe("skip");
+  it("still skips a limit key on a path that cannot honour it (E-20a), never running it at the default", () => {
+    const r = runVector(vec("parse", { format: "json", declared_max_depth: 3, bytes_hex: "7b7d" }, { ok: true }));
+    expect(r).toEqual({
+      status: "skip",
+      message: 'not yet implemented -- omnist-ts does not honour declared_max_depth on operation "parse" (E-20a)',
+    });
   });
 
   it("runs a vector declaring declared_max_input_bytes with that maximum, not the default (D-23)", () => {
@@ -454,10 +498,12 @@ describe("parse", () => {
   });
 
   it("skips a non-placeholder diagnostic ONLY when the error carries no path/code", () => {
-    // A limit failure (too many integer digits) is a bare ParseError, no
-    // code/path: a vector comparing a fixed path genuinely cannot be judged.
+    // A reader that fails with a bare ParseError (no code/path; none of the
+    // built-in readers does any more, so a plugin format stands in): a vector
+    // comparing a fixed path genuinely cannot be judged.
+    registerBareFormat();
     const r = runVector(
-      vec("parse", { format: "json", text: `{"a": ${BIG}}` }, { ok: false, diagnostics: [{ path: "1:1", code: "parse.codec-syntax" }] }),
+      vec("parse", { format: "bare", text: "x" }, { ok: false, diagnostics: [{ path: "1:1", code: "parse.codec-syntax" }] }),
     );
     expect(r).toEqual({
       status: "skip",
@@ -476,7 +522,8 @@ describe("parse", () => {
       expect(runVector(vec("parse", { format, text }, PH))).toEqual({ status: "pass", message: "ok" });
     });
     it("FAILS (never skips) when the error carries no code/path", () => {
-      const r = runVector(vec("parse", { format: "json", text: `{"a": ${BIG}}` }, PH));
+      registerBareFormat();
+      const r = runVector(vec("parse", { format: "bare", text: "x" }, PH));
       expect(r.status).toBe("fail");
     });
     it("fails when the code differs", () => {
@@ -1081,7 +1128,25 @@ describe("write", () => {
       ),
     );
     expect(r.status).toBe("fail");
-    expect(r.message).toContain("diagnostic paths differ");
+    expect(r.message).toContain("diagnostics differ");
+  });
+
+  it("fails when the path matches but the code does not (omnist-ts#166)", () => {
+    const r = runVector(
+      vec(
+        "write",
+        { format: "json", document: { edges: [["d", { scalar: { kind: "date", value: "2024-01-01" } }]] } },
+        { ok: true, text: '{"d": "2024-01-01"}', diagnostics: [{ path: "$.d", code: "temporal.stringified" }] },
+      ),
+    );
+    expect(r.status).toBe("fail");
+    expect(r.message).toContain("diagnostics differ");
+  });
+
+  it("passes `compact: true` to the OML writer (E-35)", () => {
+    const document = { edges: [["a", { scalar: { kind: "integer", value: 1 } }], ["b", { scalar: { kind: "integer", value: 2 } }]] };
+    expect(runVector(vec("write", { format: "oml", compact: true, document }, { ok: true, text: "a: 1; b: 2" })).status).toBe("pass");
+    expect(runVector(vec("write", { format: "oml", document }, { ok: true, text: "a: 1; b: 2" })).status).toBe("fail");
   });
 
   it("passes for XML when only insignificant inter-tag whitespace differs (Sec8.5.3)", () => {

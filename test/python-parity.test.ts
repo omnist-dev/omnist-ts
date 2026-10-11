@@ -51,16 +51,17 @@ describe("depth boundary (report: Confirmed identical -- Document model)", () =>
     return s;
   };
 
-  it("JSON and OML both accept 200 levels and reject 201, matching Python", () => {
+  // Spec D-9 (v0.34.0-beta vectors): the limit counts levels of node nesting
+  // from the Document root, which is level 1, so a chain of 200 edges is read
+  // and one of 201 is refused, in every format alike (D-12). Before v0.9.0-alpha
+  // OML and XML took one level more than JSON, as Python's did.
+  it("JSON, OML and XML all accept 200 levels of nesting and reject 201", () => {
     expect(() => readJson(nestJson(200))).not.toThrow();
     expect(() => readJson(nestJson(201))).toThrow();
-    expect(() => readOml(nestOml(200))).not.toThrow();
-    expect(() => readOml(nestOml(201))).toThrow();
-  });
-
-  it("XML accepts 201 levels -- the same off-by-one Python has, not a port bug", () => {
-    expect(() => readXml(nestXml(201))).not.toThrow();
-    expect(() => readXml(nestXml(202))).toThrow();
+    expect(() => readOml(nestOml(199))).not.toThrow();
+    expect(() => readOml(nestOml(200))).toThrow();
+    expect(() => readXml(nestXml(200))).not.toThrow();
+    expect(() => readXml(nestXml(201))).toThrow();
   });
 });
 

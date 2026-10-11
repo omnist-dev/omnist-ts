@@ -264,12 +264,12 @@ describe("OML round-trip fuzzing", () => {
 // failures out of this round-trip property (the exact failure behavior
 // for each is covered directly in test/formats/*.test.ts instead).
 const ALLOWED_CODES: Record<string, ReadonlySet<string>> = {
-  json: new Set(["temporal.stringified", "format.interleaving-lost"]),
-  yaml: new Set(["temporal.stringified", "format.interleaving-lost"]),
+  json: new Set(["format.temporal-stringified", "format.interleaving-lost"]),
+  yaml: new Set(["format.temporal-stringified", "format.interleaving-lost"]),
   toml: new Set(["format.interleaving-lost"]),
   xml: new Set([
-    "temporal.stringified",
-    "value.stringified",
+    "format.temporal-stringified",
+    "format.value-stringified",
   ]),
 };
 
@@ -298,7 +298,7 @@ describe("JSON round-trip fuzzing (modulo documented adjustments)", () => {
         for (const c of codes) expect((ALLOWED_CODES.json as ReadonlySet<string>).has(c)).toBe(true);
         const text = writeJson(node);
         const back = readJson(text);
-        if (!codes.has("temporal.stringified") && !codes.has("format.interleaving-lost")) {
+        if (!codes.has("format.temporal-stringified") && !codes.has("format.interleaving-lost")) {
           expect(nanSafeEqualGrouped(back, node)).toBe(true);
         }
       }),

@@ -76,6 +76,23 @@ If you read untrusted TOML, pass a `maxInputBytes` that matches what you expect 
 receive (for example `1024 * 1024`), and run the parse in a process you can time
 out. The same advice holds for YAML until the `!!pairs` part of #157 is closed.
 
+### Safety limits and how to set them
+
+Depth, node count and integer digits (spec D-9) are options on every reader,
+beside `maxInputBytes`:
+
+| Option | Default | Refusal | Counts |
+|---|---|---|---|
+| `maxDepth` | 200 | `document.limit.depth` at `$` | levels of node nesting from the Document root, which is level 1; a chain of N edges from the root to a scalar leaf is N levels |
+| `maxNodes` | 1,000,000 | `document.limit.nodes` at `$` | the nodes of one Document, the root included, a scalar leaf not |
+| `maxIntDigits` | 4,300 | `document.limit.int-digits` at the literal's Document path | the decimal digits of an integer's value, sign excluded; a hex, octal, binary or underscored literal is counted by the value it denotes (D-28) |
+
+Each is a safe integer of at least 1, else a `RangeError`: a limit is never
+"none" (D-10). They are passed per call (`readJson(text, { maxDepth: 50 })`,
+`readFormat("yaml", text, { maxNodes: 10_000 })`), and the same options reach
+the OML reader. A depth well above the default is bounded by the JavaScript call
+stack. The CLI has no flags for them.
+
 ### Why 64 MiB
 
 A document within `MAX_NODES` (1,000,000 nodes) is never refused by it: a

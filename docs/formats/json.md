@@ -31,7 +31,7 @@ JSON's codec can ever emit (`test/fuzz.test.ts` asserts this against
 
 | code | severity | trigger |
 |---|---|---|
-| `temporal.stringified` | warning | a `Date` leaf -- JSON has no date/time type, so it's written as an ISO-8601 string |
+| `format.temporal-stringified` | warning | a `Date` leaf -- JSON has no date/time type, so it's written as an ISO-8601 string |
 | `format.interleaving-lost` | warning | labels interleaved across other labels (`m, x, m`) -- JSON's grouping rule collapses same-label edges, so the order is lost; reported once, at `$` |
 
 ```ts
@@ -40,7 +40,7 @@ import { checkJson, writeJson } from "@omnist-dev/omnist";
 
 const node = doc({ when: new Date(Date.UTC(2024, 0, 1, 12, 0, 0)) }).toData();
 checkJson(node).adjustments;
-// [{ path: "$.when", code: "temporal.stringified",
+// [{ path: "$.when", code: "format.temporal-stringified",
 //    message: "temporal value written as an ISO-8601 string", severity: "warning" }]
 writeJson(node);
 // '{"when": "2024-01-01T12:00:00"}'
@@ -84,17 +84,21 @@ into `BigInt` (`bigintReviver`), and only then hands the result to
 functions to load the conformance-vector JSON files themselves, which can
 also contain large integer literals.
 
-`readJson` still raises `ParseError` on an integer literal with more than
-4300 digits (`MAX_INT_DIGITS`, matching CPython's
-`sys.get_int_max_str_digits()` default and `src/document.ts`'s own cap) --
-that limit is a deliberate security guard against unbounded-digit
-int-to-str conversion (superlinear), not a representational limit, and
-stays in place.
+`readJson` raises `ParseError` (code `document.limit.int-digits`, at the
+literal's Document path, `$.a` or `$.a[1]`) on an integer literal whose
+value has more than 4300 digits by default (spec D-9, D-28; matching
+CPython's `sys.get_int_max_str_digits()` default). The limit is configurable
+per call, `readJson(text, { maxIntDigits })`, like `maxDepth` and `maxNodes`
+(see [Limitations](../limitations.md#safety-limits-and-how-to-set-them)): it
+is a deliberate security guard against unbounded-digit int-to-str conversion
+(superlinear), not a representational limit. An over-long literal is never
+converted to a `bigint`; it is tagged and refused at its path.
 
 A float literal that overflows float64 to `Infinity` (e.g. `1e400`) is
-*not* rejected: Python's own `json` module produces `inf` for the same
-input, so treating that as an error would be a new mismatch, not a fix.
-Only an integer-shaped literal past the digit cap raises.
+*not* rejected: spec D-29 says a number literal that rounds to infinity is
+accepted and reads as an infinity (`-1e400` as `-Infinity`), and one that
+underflows (`1e-999`) reads as `0.0`. Only an integer-shaped literal past
+the digit cap raises.
 
 An integer value satisfies a `number`-typed schema field directly with no
 conversion (the one sanctioned scalar-subtyping relation, spec Sec6.3);
