@@ -192,6 +192,11 @@ function literalize(node: Node, depth = 0): Node {
   if (node instanceof Date) return new YamlLiteral(isoText(node), false) as unknown as Node;
   if (node instanceof TimeValue) return new YamlLiteral(timeText(node), true) as unknown as Node;
   if (Object.is(node, -0)) return new YamlLiteral("-0.0", false) as unknown as Node;
+  // C-17: an exponent needs a point and a sign, so `1e-300` would read back as a
+  // string; spell it `1.0e-300` (JavaScript always writes the exponent's sign).
+  if (typeof node === "number" && /^-?[0-9]+e/.test(String(node))) {
+    return new YamlLiteral(String(node).replace("e", ".0e"), false) as unknown as Node;
+  }
   return node;
 }
 

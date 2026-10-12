@@ -158,6 +158,15 @@ describe("C-17: YAML number spellings", () => {
   });
 });
 
+describe("C-17: the writer spells an exponent so it reads back as a number", () => {
+  it("writes 1.0e-300, not 1e-300", () => {
+    expect(writeYaml(leaf(1e-300))).toBe("a: 1.0e-300\n");
+    expect(writeYaml(leaf(1e21))).toBe("a: 1.0e+21\n");
+    expect(writeYaml(leaf(1.5e300))).toBe("a: 1.5e+300\n");
+    expect(readYaml("a: 1.0e-300")).toEqual([{ label: "a", target: 1e-300 }]);
+  });
+});
+
 describe("C-12: a merge key contributes first, wherever it is written", () => {
   it("places merged entries before the mapping's own, an own key overriding in place", () => {
     const node = readYaml("a: &a {x: 1, k: a}\nc:\n  p: 0\n  <<: *a\n  k: own\n  q: 9\n") as {
