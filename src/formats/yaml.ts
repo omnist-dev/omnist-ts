@@ -220,10 +220,10 @@ function narrowNumberTags(tags: YAML.Tags): YAML.Tags {
       if (scalar.format === "TIME") return { ...scalar, test: /^[-+]?[1-9][0-9_]*(?::[0-5]?[0-9])+$/ };
     } else if (scalar.tag === "tag:yaml.org,2002:float") {
       if (scalar.format === undefined && scalar.test?.test("1.5") === true) {
-        return { ...scalar, test: /^[-+]?(?:[0-9][0-9_]*\.[0-9_]*|\.[0-9_]+)$/ };
+        return { ...scalar, test: /^(?:[-+]?[0-9][0-9_]*\.[0-9_]*|\.[0-9][0-9_]*)$/ };
       }
       if (scalar.format === "EXP") {
-        return { ...scalar, test: /^[-+]?(?:[0-9][0-9_]*\.[0-9_]*|\.[0-9_]+)[eE][-+][0-9]+$/ };
+        return { ...scalar, test: /^(?:[-+]?[0-9][0-9_]*\.[0-9_]*|\.[0-9][0-9_]*)[eE][-+][0-9]+$/ };
       }
     }
     return tag;

@@ -141,7 +141,7 @@ describe("C-17: YAML number spellings", () => {
   const read = (text: string): unknown => (readYaml(text) as { target: unknown }[])[0]?.target;
 
   it("reads these as strings", () => {
-    for (const s of ["08", "09", "0:5", "1e3", "1.0e3", "0o17", "1e+3", "."]) expect(read("a: " + s)).toBe(s);
+    for (const s of ["08", "09", "0:5", "1e3", "1.0e3", "0o17", "1e+3", ".", "-.5", "+.5", "+.5e+3", "._5", "+._5"]) expect(read("a: " + s)).toBe(s);
   });
 
   it("reads these as numbers", () => {

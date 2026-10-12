@@ -303,4 +303,8 @@ limitation above, not a full YAML grammar reimplementation.
 - **Merge keys (C-12).** A `<<` contributes its entries first, wherever it is
   written in the mapping, and a later explicit key overrides a merged value in
   place.
+- **Exponents.** A number whose spelling has an exponent and no point is
+  written with one: `1e-300` is `1.0e-300` and `1e21` is `1.0e+21`, since an
+  exponent needs a point and a sign to read back as a number. A signed
+  leading-point float (`-.5`, `+.5`) reads as a string, as PyYAML does.
 - A negative zero is written as `-0.0` (D-29).

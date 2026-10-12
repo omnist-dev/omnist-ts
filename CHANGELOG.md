@@ -48,6 +48,10 @@ failed, 28 skipped**, the 28 being the OSD-OML extension (E-20, E-21).
   `\ufffe`) instead of raw. `08`, `0:5`, `1e3` and `1.0e3` read as strings (they
   were numbers); `.` alone is a string. A `<<` written after an explicit key
   contributes its entries first.
+- **YAML writes an exponent with a point (C-17).** `1e-300` is written
+  `1.0e-300` and `1e21` as `1.0e+21`, because PyYAML reads an exponent
+  without a point as a string. A signed leading-point float (`-.5`, `+.5`) now
+  reads as a string, as PyYAML reads it.
 - The 0.8.1-alpha YAML duplicate-key linearisation and the 0.9.0-alpha
   behaviours are unchanged.
 
@@ -55,7 +59,8 @@ failed, 28 skipped**, the 28 being the OSD-OML extension (E-20, E-21).
 `...T10:00:00.000Z` but at its own offset (and a source `Z` is written `Z`
 without `.000`); an OML `time` read as `12:00` is written `12:00:00`. A path
 that named a non-identifier label (`$["a-b"]`) is now `$.a-b`; one that held a
-dot or bracket (`$.a.b`) is now `$["a.b"]`. Input holding a control character,
+dot or bracket (`$.a.b`) is now `$["a.b"]`. A YAML number with an exponent and no point is now written with `.0` before
+the `e` (`1e-300` becomes `1.0e-300`). Input holding a control character,
 or a bad character reference, in XML is now refused.
 
 ## [v0.9.0-alpha] -- adopts omnist-spec v0.34.0-beta: configurable limits, registered write codes, YAML profile decisions
