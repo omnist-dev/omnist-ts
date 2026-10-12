@@ -51,7 +51,7 @@
 
 import { DocumentError, ParseError } from "./errors.js";
 import { TimeValue } from "./temporal.js";
-import { EdgePaths } from "./paths.js";
+import { childPath, EdgePaths } from "./paths.js";
 import {
   DEFAULT_LIMITS,
   DEFAULT_MAX_DEPTH as MAX_DEPTH,
@@ -143,7 +143,7 @@ function checkIntDigits(v: unknown, path: string, limits: ResolvedLimits): void 
 }
 
 function join(path: string, key: string): string {
-  return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(key) ? `${path}.${key}` : `${path}["${key}"]`;
+  return childPath(path, key);
 }
 
 // ---------------------------------------------------------------------------
@@ -401,7 +401,7 @@ export class Doc {
     this.requireInternal("add");
     // The new edge's target sits one level deeper than this cursor, so
     // seed buildNode with the cursor's own depth (not 0) -- see issue #37.
-    const node = buildNode(value, `${this.path}.${label}`, this.depth + 1);
+    const node = buildNode(value, childPath(this.path, label), this.depth + 1);
     (this._node as Edge[]).push({ label, target: node });
     return this;
   }
@@ -425,7 +425,7 @@ export class Doc {
     // Same reasoning as add(): seed buildNode with the cursor's own depth
     // so a splice is checked against where it is actually attached, not
     // restarted at 0 -- see issue #37.
-    const node = buildNode(value, `${this.path}.${label}`, this.depth + 1);
+    const node = buildNode(value, childPath(this.path, label), this.depth + 1);
     let first = -1;
     const kept: Edge[] = [];
     for (const e of this._node as Edge[]) {
@@ -505,29 +505,6 @@ function copyNode(node: Node, depth = 0): Node {
     return node.map(({ label, target }) => ({ label, target: copyNode(target, depth + 1) }));
   }
   return node;
-}
-
-/**
- * Replace every `TimeValue` leaf in a Node tree with its plain `.text`
- * string (issue #96). JSON/YAML/TOML have no native time-literal syntax
- * (unlike `Date`, which each of those writers/libraries handles itself),
- * so each of those three writers runs its Node through this first --
- * mirroring how `time` values already round-trip as plain strings through
- * those formats, regardless of provenance. OML's own writer (`src/oml.ts`)
- * deliberately does NOT call this: it is the one place the tag must stay
- * visible, to decide bare-vs-quoted output.
- */
-export function unwrapTimeValues(node: Node, depth = 0): Node {
-  if (Array.isArray(node)) {
-    if (depth > MAX_DEPTH) {
-      throw new DocumentError(`nesting exceeds the maximum depth (${MAX_DEPTH})`);
-    }
-    return node.map(({ label, target }) => ({
-      label,
-      target: unwrapTimeValues(target, depth + 1),
-    }));
-  }
-  return node instanceof TimeValue ? node.text : node;
 }
 
 export function grouped(node: Node, depth = 0): unknown {

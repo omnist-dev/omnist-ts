@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { doc, buildNode, Doc, unwrapTimeValues, type Node } from "../src/document.js";
+import { doc, buildNode, Doc, type Node } from "../src/document.js";
 import { DocumentError } from "../src/errors.js";
 import { TimeValue } from "../src/temporal.js";
 
@@ -241,8 +241,9 @@ describe("Doc: robustness (guards)", () => {
     );
   });
 
-  it("a non-identifier key gets a bracketed path in error messages", () => {
-    expect(() => doc({ "a-b": new Set([1]) })).toThrow(/\$\["a-b"\]/);
+  it("a key that needs no quoting stays a bare label in error paths (E-36)", () => {
+    expect(() => doc({ "a-b": new Set([1]) })).toThrow(/\$\.a-b: /);
+    expect(() => doc({ "a.b": new Set([1]) })).toThrow(/\$\["a\.b"\]: /);
   });
 
   it("doc() passes an existing Doc through unchanged", () => {
@@ -529,22 +530,6 @@ describe("issue #96: TimeValue's tag is invisible to Document equality", () => {
     const a = new Doc([{ label: "t", target: new TimeValue("12:00:00") }]);
     const b = doc({ t: "13:00:00" });
     expect(a.equals(b)).toBe(false);
-  });
-});
-
-describe("issue #96: unwrapTimeValues has its own MAX_DEPTH guard", () => {
-  it("rejects a node deeper than MAX_DEPTH", () => {
-    let node: Node = new TimeValue("12:00:00");
-    for (let i = 0; i < 5001; i++) {
-      node = [{ label: "a", target: node }];
-    }
-    expect(() => unwrapTimeValues(node)).toThrow(DocumentError);
-    expect(() => unwrapTimeValues(node)).toThrow(/nesting exceeds the maximum depth/);
-  });
-
-  it("unwraps a TimeValue leaf to its plain text at any depth within the limit", () => {
-    const node: Node = [{ label: "a", target: new TimeValue("12:00:00") }];
-    expect(unwrapTimeValues(node)).toEqual([{ label: "a", target: "12:00:00" }]);
   });
 });
 

@@ -102,8 +102,8 @@ describe("fixed (issue #51): writeOml preserves a UTC offset", () => {
   });
 
   it("TOML preserves local-vs-offset, per issue #26", () => {
-    expect(writeToml(readToml("a = 2024-01-01T12:00:00"))).toBe("a = 2024-01-01T12:00:00.000\n");
-    expect(writeToml(readToml("a = 2024-01-01T12:00:00Z"))).toBe("a = 2024-01-01T12:00:00.000Z\n");
+    expect(writeToml(readToml("a = 2024-01-01T12:00:00"))).toBe("a = 2024-01-01T12:00:00\n");
+    expect(writeToml(readToml("a = 2024-01-01T12:00:00Z"))).toBe("a = 2024-01-01T12:00:00Z\n");
   });
 });
 
@@ -115,10 +115,8 @@ describe("fixed (issue #52): an OML TIME literal round-trips", () => {
     // already has for date/datetime. The OML text is stable across a
     // read/write cycle either way.
     expect(readOml("a: 12:00")).toEqual([{ label: "a", target: new TimeValue("12:00") }]);
-    expect(writeOml(readOml("a: 12:00"))).toBe("a: 12:00");
-    // Python normalizes the spelling to `a: 12:00:00`, having parsed the token
-    // into a `datetime.time`; this port writes the token text back verbatim,
-    // which is text-stable and not an observable value difference.
+    // E-37 rule 2: the seconds are always written, as Python does.
+    expect(writeOml(readOml("a: 12:00"))).toBe("a: 12:00:00");
   });
 });
 
@@ -233,10 +231,11 @@ describe("divergence: documented scalar collapses (issues #3, #14)", () => {
 });
 
 describe("divergence: error-path formatting for a non-ASCII key", () => {
-  it("brackets a key Python str.isidentifier() would dot", () => {
-    // Python emits a dotted path for an identifier-shaped non-ASCII key.
+  it("writes a non-ASCII key bare, as E-36 requires", () => {
+    // E-36: only an empty label or one holding `.` `[` `]` `"` `\`, a control
+    // character, U+007F, U+0085, U+2028 or U+2029 is bracket-quoted.
     expect(() => buildNode({ ["caf" + String.fromCharCode(0xe9)]: new Set() })).toThrow(
-      /^\$\["caf/,
+      /^\$\.caf/,
     );
   });
 });
