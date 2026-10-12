@@ -108,7 +108,7 @@ describe("merge-key label is a genuine YAML limitation (issue #46)", () => {
   // writeup). These two tests just pin down the concrete failure modes.
   it("a non-map merge target throws ParseError on read-back", () => {
     const text = writeYaml(doc({ "<<": -1e300 }).toData());
-    expect(text).toBe("<<: -1e+300\n");
+    expect(text).toBe("<<: -1.0e+300\n");
     expect(() => readYaml(text)).toThrow(ParseError);
   });
 

@@ -60,12 +60,11 @@ import {
   type LimitIssue,
   type ResolvedLimits,
 } from "../limits.js";
-import { EdgePaths } from "../paths.js";
+import { childPath as edgePath, EdgePaths } from "../paths.js";
 import { checkEncodable } from "../encodable.js";
-import { TimeValue } from "../temporal.js";
+import { isoText, TimeValue, timeText } from "../temporal.js";
 import { DocumentError, ParseError, WriteError } from "../errors.js";
 import { finishWrite, WriteReport } from "../report.js";
-import { dateKind } from "../temporal.js";
 import { materialize } from "../deserialize.js";
 import { recordField, type FieldType, type Schema, type ScalarType } from "../schema.js";
 import { rejectSecondLeadingBom, stripLeadingBom } from "../bom.js";
@@ -109,22 +108,66 @@ const XML_ILLEGAL_CHAR = new RegExp(
 // stateful lastIndex that would silently skip matches across repeated calls.
 const XML_ILLEGAL_CHAR_G = new RegExp(XML_ILLEGAL_CHAR.source, "g");
 
-// issue #129: fast-xml-parser's default config (no `htmlEntities`) decodes
-// only the 5 predefined XML entities (&amp; &lt; &gt; &apos; &quot;), not
-// numeric character references -- confirmed live, `<x>a&#13;b</x>` reads
-// back with the literal text "a&#13;b" unless `htmlEntities: true`, which
-// would also decode the full named HTML entity set (&nbsp;, &copy;, ...),
-// far wider than this port's narrow data-XML profile wants to silently
-// interpret. Decode only the two numeric forms XML itself defines
-// (decimal &#NNN; and hex &#xHHH;) as a narrow post-processing step
-// instead, so writeXml's &#13; escape (and any other numeric reference a
-// well-formed input happens to contain) round-trips exactly.
-const NUMERIC_CHAR_REF = /&#(\d+);|&#x([0-9A-Fa-f]+);/g;
+// C-16: entities are decoded exactly once, in a single pass over the raw text.
+// The parser runs with `processEntities: false` (it would decode the five
+// predefined entities itself, and a second pass for the numeric references
+// would then re-read `&amp;#65;` as `A`), so this one pass is the only
+// decoding. The five predefined entities and the two numeric forms XML defines
+// (decimal `&#NNN;` and hexadecimal `&#xHHH;`, lowercase `x`) are replaced by
+// the character they name and the result is never scanned again; this is also
+// what lets writeXml's `&#13;` escape round-trip. Anything else was refused
+// earlier (assertXmlCharacters, refuseOutOfProfile), so every reference
+// reaching here is one of these and names a character of XML 1.0's `Char`.
+const XML_REFERENCE = /&(?:(lt|gt|amp|quot|apos)|#([0-9]+)|#x([0-9A-Fa-f]+));/g;
+const PREDEFINED_CHAR: Readonly<Record<string, string>> = { lt: "<", gt: ">", amp: "&", quot: '"', apos: "'" };
 
-function decodeNumericCharRefs(text: string): string {
-  return text.replace(NUMERIC_CHAR_REF, (_m, dec: string | undefined, hex: string | undefined) =>
-    String.fromCodePoint(Number.parseInt((dec ?? hex) as string, dec !== undefined ? 10 : 16)),
+function decodeReferences(text: string): string {
+  return text.replace(
+    XML_REFERENCE,
+    (_m, name: string | undefined, dec: string | undefined, hex: string | undefined) =>
+      name !== undefined
+        ? (PREDEFINED_CHAR[name] as string)
+        : String.fromCodePoint(Number.parseInt((dec ?? hex) as string, dec !== undefined ? 10 : 16)),
   );
+}
+
+/** True if `cp` is a code point of XML 1.0's `Char` production. */
+function isXmlChar(cp: number): boolean {
+  return (
+    cp === 0x9 || cp === 0xa || cp === 0xd || (cp >= 0x20 && cp <= 0xd7ff) || (cp >= 0xe000 && cp <= 0xfffd) || (cp >= 0x10000 && cp <= 0x10ffff)
+  );
+}
+
+const CHAR_REFERENCE = /&#(?:([0-9]+)|x([0-9A-Fa-f]+));/y;
+
+/**
+ * C-16: text holds only XML 1.0 `Char`s, and a numeric character reference is
+ * well-formed and names one. Both are `parse.codec-syntax`, at the offending
+ * position. The character check covers the whole input (text, CDATA, attribute
+ * values, comments, processing instructions, names); the reference check skips
+ * the inert sections (a comment, CDATA section or processing instruction holds
+ * its `&#` as literal text).
+ */
+function assertXmlCharacters(text: string): void {
+  const bad = XML_ILLEGAL_CHAR.exec(text);
+  if (bad !== null) {
+    throw codecSyntaxError("XML", "character outside the XML 1.0 Char production", text, { offset: bad.index });
+  }
+  const live = text.replace(XML_INERT, (m) => m.replace(/[^\n]/g, " "));
+  for (let at = live.indexOf("&#"); at !== -1; at = live.indexOf("&#", at + 2)) {
+    CHAR_REFERENCE.lastIndex = at;
+    const m = CHAR_REFERENCE.exec(live);
+    if (m === null) {
+      throw codecSyntaxError("XML", "malformed character reference", text, { offset: at });
+    }
+    const dec = m[1];
+    const digits = (dec ?? m[2]) as string;
+    // A value too long to be a code point is out of range without being parsed.
+    const cp = digits.replace(/^0+/, "").length > 8 ? Infinity : Number.parseInt(digits, dec !== undefined ? 10 : 16);
+    if (!isXmlChar(cp)) {
+      throw codecSyntaxError("XML", "character reference to a character outside the XML 1.0 Char production", text, { offset: at });
+    }
+  }
 }
 
 // fast-xml-parser 5.x (GHSA-gh4j-gqv2-49f6) added a second, *configurable*
@@ -161,6 +204,8 @@ const PARSER = new XMLParser({
   trimValues: false,
   parseTagValue: false,
   ignoreAttributes: false,
+  processEntities: false,
+  cdataPropName: "#cdata",
   maxNestedTags: PARSER_MAX_NESTED_TAGS,
   onDangerousProperty: (name: string) => name,
 });
@@ -207,7 +252,7 @@ export interface ReadXmlOptions extends DocumentLimits {
 // instructions are stripped first: a `<!DOCTYPE` or `&name;` inside one is
 // inert text, not a declaration or a reference. Numeric character
 // references (`&#13;`, `&#xD;`) are character references, not entity
-// references, and stay legal (decodeNumericCharRefs handles them).
+// references, and stay legal (decodeReferences handles them).
 const XML_INERT = /<!--[\s\S]*?-->|<!\[CDATA\[[\s\S]*?\]\]>|<\?[\s\S]*?\?>/g;
 const PREDEFINED_ENTITIES = new Set(["lt", "gt", "amp", "quot", "apos"]);
 const ENTITY_REF = /&([^#;\s&<][^;\s&<]*);/g;
@@ -266,6 +311,7 @@ export function readXml(text: string, opts: ReadXmlOptions = {}): Node {
     // The validator reports a 1-based `line` (and usually `col`, UTF-16 units).
     throw codecSyntaxError("XML", valid.err.msg, text, { line: valid.err.line, col: valid.err.col });
   }
+  assertXmlCharacters(text);
   refuseOutOfProfile(text);
   let parsed: XmlEntry[];
   try {
@@ -286,7 +332,7 @@ export function readXml(text: string, opts: ReadXmlOptions = {}): Node {
   // effectively all real-world XML -- doesn't get miscounted as a second
   // document element.
   const roots = parsed.filter(
-    (e) => !("#text" in e) && Object.keys(e).length > 0 && !Object.keys(e)[0]?.startsWith("?"),
+    (e) => !isTextEntry(e) && Object.keys(e).length > 0 && !Object.keys(e)[0]?.startsWith("?"),
   );
   // Several top-level elements (`<a/><b/>`) validate as true under
   // fast-xml-parser but are not well-formed XML: a syntax error, with no
@@ -307,6 +353,17 @@ export function readXml(text: string, opts: ReadXmlOptions = {}): Node {
   if (opts.schema === undefined) return node;
   const pretyped = xmlPretype(node, opts.schema, opts.schema.root, "$", limits.maxIntDigits);
   return materialize(pretyped, opts.schema) as Node;
+}
+
+/** True for a character-data entry of a preserveOrder element: text, or a CDATA section. */
+function isTextEntry(entry: XmlEntry): boolean {
+  return "#text" in entry || "#cdata" in entry;
+}
+
+/** The characters of a character-data entry: text has its references decoded (once), a CDATA section is literal. */
+function textOfEntry(entry: XmlEntry): string {
+  if ("#text" in entry) return decodeReferences(String(entry["#text"]));
+  return String(((entry["#cdata"] as XmlEntry[])[0] as XmlEntry)["#text"]);
 }
 
 /** The element's own tag key inside a preserveOrder entry object -- the
@@ -357,11 +414,9 @@ function xmlToNode(
   report: WriteReport | undefined,
   limits: ResolvedLimits,
 ): Node {
-  const elementEntries = entries.filter((e) => !("#text" in e));
+  const elementEntries = entries.filter((e) => !isTextEntry(e));
   if (elementEntries.length === 0) {
-    /* v8 ignore next */
-    const text = decodeNumericCharRefs(entries.map((e) => String(e["#text"] ?? "")).join(""));
-    return text;
+    return entries.map(textOfEntry).join("");
   }
   // Only an actual node (an edge list -- spec section 2.2 `node = [ edge, ... ]`)
   // counts against MAX_NODES; a scalar leaf's target is a `value`,
@@ -389,9 +444,8 @@ function xmlToNode(
     elementEntries.map((e) => ({ label: local(tagKeyOf(e)) })),
   );
   for (const entry of entries) {
-    if ("#text" in entry) {
-      /* v8 ignore next */
-      const t = decodeNumericCharRefs(String(entry["#text"] ?? ""));
+    if (isTextEntry(entry)) {
+      const t = textOfEntry(entry);
       if (!sawFirstElement) {
         ownText += t;
       } else {
@@ -400,7 +454,7 @@ function xmlToNode(
       continue;
     }
     if (sawFirstElement && tailText.trim() !== "") {
-      throw mixedContentError(path + "." + String(lastElementLabel));
+      throw mixedContentError(edgePath(path, String(lastElementLabel)));
     }
     tailText = "";
     sawFirstElement = true;
@@ -418,7 +472,7 @@ function xmlToNode(
     throw mixedContentError(path);
   }
   if (tailText.trim() !== "") {
-    throw mixedContentError(path + "." + String(lastElementLabel));
+    throw mixedContentError(edgePath(path, String(lastElementLabel)));
   }
   return out;
 }
@@ -671,37 +725,12 @@ function xmlName(name: string): string {
   /* v8 ignore stop */
 }
 
-function isoOf(d: Date): string {
-  const kind = dateKind(d);
-  const datePart =
-    String(d.getUTCFullYear()).padStart(4, "0") +
-    "-" +
-    String(d.getUTCMonth() + 1).padStart(2, "0") +
-    "-" +
-    String(d.getUTCDate()).padStart(2, "0");
-  const isMidnight =
-    d.getUTCHours() === 0 && d.getUTCMinutes() === 0 && d.getUTCSeconds() === 0 && d.getUTCMilliseconds() === 0;
-  if (kind === "date" || (kind === undefined && isMidnight)) return datePart;
-  const ms = d.getUTCMilliseconds();
-  const frac = ms === 0 ? "" : "." + String(ms).padStart(3, "0");
-  return (
-    datePart +
-    "T" +
-    String(d.getUTCHours()).padStart(2, "0") +
-    ":" +
-    String(d.getUTCMinutes()).padStart(2, "0") +
-    ":" +
-    String(d.getUTCSeconds()).padStart(2, "0") +
-    frac
-  );
-}
-
 function xmlText(v: Scalar): string {
   if (typeof v === "boolean") return v ? "true" : "false";
-  if (v instanceof Date) return isoOf(v);
+  if (v instanceof Date) return isoText(v);
   // No native XML time-literal syntax (issue #96): a genuinely time-kinded
   // value still writes as its plain text, same as a plain string would.
-  if (v instanceof TimeValue) return v.text;
+  if (v instanceof TimeValue) return timeText(v);
   return String(v);
 }
 

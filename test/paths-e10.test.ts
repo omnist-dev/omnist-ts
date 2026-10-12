@@ -123,7 +123,7 @@ describe("writer diagnostics use E-10 paths", () => {
 
   it("YAML: a NEL label under a repeated label", () => {
     const rep = checkYaml([e("a\x85", 1n), e("a\x85", 2n)]);
-    expect(rep.adjustments.map((a) => a.path)).toEqual(["$.a\x85[0]", "$.a\x85[1]"]);
+    expect(rep.adjustments.map((a) => a.path)).toEqual(['$["a\\u0085"][0]', '$["a\\u0085"][1]']);
   });
 
   it("XML: a null leaf under a repeated label", () => {

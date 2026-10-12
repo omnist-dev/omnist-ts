@@ -256,3 +256,21 @@ writeXml(cr);
 // "<root>\n  <text>a&#13;b</text>\n</root>\n"
 ```
 <!-- verified-by: test/formats/xml.test.ts::escapes a literal carriage return as the numeric character reference &#13; -->
+
+## Characters and references (since 0.10.0-alpha, spec C-15, C-16)
+
+XML text holds only XML 1.0 `Char`s. A raw character outside it (U+0000 to
+U+0008, U+000B, U+000C, U+000E to U+001F, U+FFFE, U+FFFF) anywhere in the input
+(text, CDATA, attribute values, comments, processing instructions, names), and
+a numeric character reference that is malformed (`&#;`, `&#x;`, `&#65`,
+`&#X41;`, a value past any integer) or names a character outside `Char`
+(`&#0;`, a surrogate, `&#xFFFE;`, `&#x110000;`), are `parse.codec-syntax`. A
+valid reference (`&#65;`, `&#x41;`, `&#9;`, `&#x10FFFF;`) reads as the one
+character it names. Entities are decoded exactly once, in a single pass:
+`&amp;#65;` reads as the five characters `&#65;`, not `A`, and a CDATA section is
+literal text. An `encoding=` declaration is ignored; the input is read as UTF-8
+(C-15).
+
+Every Document path is built by one renderer (spec E-36): a label that is empty
+or holds `.` `[` `]` `"` `\`, a control character, U+007F, U+0085, U+2028 or
+U+2029 is written bracket-quoted (`$["a.b"]`, `$["l1\nl2"]`).

@@ -17,19 +17,21 @@ writeToml(node);
 <!-- doc-illustrative -->
 
 TOML round-trips `date`/`datetime` natively in both directions (via
-`smol-toml`'s `TomlDate`, which tags which of TOML's temporal kinds a
-literal came from -- see the module's file-top comment and issue #26): a
-`Date` leaf written by `writeToml` comes back from `readToml` as the same
-kind of `Date`, offset-vs-local included. TOML's bare `time` literal
-(no calendar date) is the one exception -- this port's `Scalar` type only
-maps `date`/`datetime` onto `Date` (see `src/temporal.ts`'s file-top
-comment: "a time scalar stays a plain string at the Document layer"), so
-a TOML `time` literal reads as a plain ISO-ish string and writes back out
-as a TOML string, not a TOML time literal. This is a deliberate,
-pre-existing asymmetry with Python's `tomllib`/`tomli_w` (which round-trip
-`datetime.time` natively), not a `smol-toml` gap -- see the OML/`TIME`
-token handling in `docs/formats/oml.md` for the corresponding OML-side
-treatment.
+`smol-toml`'s `TomlDate` on read): a `Date` leaf written by `writeToml` comes
+back from `readToml` as the same kind of `Date`, offset-vs-local included.
+Since 0.10.0-alpha (spec E-37) the writer never alters the value: an offset
+datetime is written at its own offset and wall-clock reading
+(`2024-01-15T12:00:00+01:00`, never converted to UTC), a datetime without an
+offset is a local date-time with no `Z`, every fractional digit is kept, the
+separator is `T`, and a `time` or `datetime` read without seconds is written
+with them. A `time` without an offset is written as TOML's local time
+(`12:00:00`); a `time` with an offset has no TOML literal, so it is written as
+a double-quoted string and reported as `format.temporal-stringified`. A TOML
+`time` literal still reads as a plain string (this port's `Scalar` maps only
+`date`/`datetime` onto `Date`), so it writes back as a string.
+
+Since 0.10.0-alpha a negative zero (`-0.0`) is written as `-0.0`; it was
+`0.0` (spec D-29).
 
 Unlike JSON, TOML's own grammar accepts `nan`/`inf`/`-inf` float literals
 directly, so a `NaN`/`Infinity` leaf is written as is: it needs no

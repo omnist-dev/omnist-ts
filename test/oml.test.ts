@@ -1193,12 +1193,21 @@ describe("issue #52: a TIME literal round-trips as a TIME token", () => {
   // as a string, not a time. OML is the one supported format with a native
   // TIME token, so this was the one place the port discarded information the
   // format itself can carry.
-  it.each(["a: 12:00", "a: 12:00:00", "a: 23:59:59.500", "a: 12:00+05:30", "a: 00:00"])(
+  it.each(["a: 12:00:00", "a: 23:59:59.500", "a: 12:00:00+05:30", "a: 00:00:00"])(
     "round-trips %s as text",
     (src) => {
       expect(writeOml(readOml(src), { indent: null })).toBe(src);
     },
   );
+
+  // E-37 rule 2: a time read without seconds is written with them.
+  it.each([
+    ["a: 12:00", "a: 12:00:00"],
+    ["a: 12:00+05:30", "a: 12:00:00+05:30"],
+    ["a: 00:00", "a: 00:00:00"],
+  ])("writes %s with its seconds", (src, out) => {
+    expect(writeOml(readOml(src), { indent: null })).toBe(out);
+  });
 
   it("reads a TIME token as a TimeValue at the Document layer (issue #96)", () => {
     // Superseded by issue #96: a genuinely time-kinded value is now a
@@ -1207,9 +1216,9 @@ describe("issue #52: a TIME literal round-trips as a TIME token", () => {
     expect(readOml("a: 12:00")).toEqual([e("a", new TimeValue("12:00"))]);
   });
 
-  it("round-trips docs/formats/oml.md's TIME-token example verbatim", () => {
+  it("round-trips docs/formats/oml.md's TIME-token example, with the seconds written", () => {
     const src = ["a: 12:00", 'b: "24:00"', 'c: "noon"'].join(NEWLINE);
-    expect(writeOml(readOml(src))).toBe(src);
+    expect(writeOml(readOml(src))).toBe(["a: 12:00:00", 'b: "24:00"', 'c: "noon"'].join(NEWLINE));
   });
 
   it("a string that is only time-shaped, not a valid time, stays quoted", () => {

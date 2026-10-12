@@ -22,6 +22,39 @@ interface Labeled {
   readonly label: string;
 }
 
+/** True if `label` must be written bracket-quoted in a path (E-36). */
+// eslint-disable-next-line no-control-regex
+const NEEDS_QUOTING = /[.[\]"\\\u0000-\u001f\u007f\u0085\u2028\u2029]|^$/;
+/** The characters a quoted segment writes as a lowercase four-digit \u escape. */
+// eslint-disable-next-line no-control-regex
+const ESCAPED_CTRL = /[\u0000-\u001f\u007f\u0085\u2028\u2029]/;
+
+/**
+ * One label segment of a Document path (E-36): bare `.label`, or
+ * `["label"]` (no dot) when the label is empty or holds `.` `[` `]` `"` `\`,
+ * a control character, U+007F, U+0085, U+2028 or U+2029. The single path
+ * renderer: every Document path is built through it.
+ */
+export function labelSegment(label: string): string {
+  if (!NEEDS_QUOTING.test(label)) return "." + label;
+  let out = '["';
+  for (const ch of label) {
+    if (ch === '"') out += '\\"';
+    else if (ch === "\\") out += "\\\\";
+    else if (ch === "\n") out += "\\n";
+    else if (ch === "\r") out += "\\r";
+    else if (ch === "\t") out += "\\t";
+    else if (ESCAPED_CTRL.test(ch)) out += "\\u" + (ch.codePointAt(0) as number).toString(16).padStart(4, "0");
+    else out += ch;
+  }
+  return out + '"]';
+}
+
+/** The path of the edge labelled `label` under the node at `path`. */
+export function childPath(path: string, label: string): string {
+  return path + labelSegment(label);
+}
+
 /** Nodes of at most this many edges are checked for a repeat without a Set. */
 const SMALL = 8;
 
@@ -68,11 +101,11 @@ export class EdgePaths {
 
   /** The Document path of the next edge, whose label is `label`. */
   next(label: string): string {
-    if (this.repeated === undefined || !this.repeated.has(label)) return this.path + "." + label;
+    if (this.repeated === undefined || !this.repeated.has(label)) return this.path + labelSegment(label);
     const seen = (this.seen ??= new Map<string, number>());
     const k = seen.get(label) ?? 0;
     seen.set(label, k + 1);
-    return this.path + "." + label + "[" + String(k) + "]";
+    return this.path + labelSegment(label) + "[" + String(k) + "]";
   }
 }
 

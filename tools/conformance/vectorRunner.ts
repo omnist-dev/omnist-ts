@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Runs omnist-spec's `test-suite/` JSON-vector suite (522 vectors, envelope
+ * Runs omnist-spec's `test-suite/` JSON-vector suite (731 vectors, envelope
  * `name`/`spec`/`operation`/`purpose`/`input`/`expect` -- see
  * `vendor/omnist-spec/test-suite/README.md` and
  * `docs/08-conformance-and-errors.md` Sec8.5) against omnist-ts's own

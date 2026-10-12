@@ -94,11 +94,12 @@ import { WriteReport } from "./report.js";
 import type { Schema } from "./schema.js";
 import { materialize } from "./deserialize.js";
 import {
-  datetimeOffset,
+  isoText,
   parseDateToken,
   parseDatetimeToken,
   parseTimeToken,
   TimeValue,
+  timeText,
 } from "./temporal.js";
 
 // The three safety limits (D-9) are limits.ts's; the Parser takes the caller's
@@ -1162,46 +1163,6 @@ function writeLabel(label: string): string {
   return writeString(label);
 }
 
-function pad2(n: number): string {
-  return String(n).padStart(2, "0");
-}
-
-function pad4(n: number): string {
-  return String(n).padStart(4, "0");
-}
-
-function writeDate(v: Date): string {
-  // An offset-tagged datetime (issue #51) is written at its source offset's
-  // wall-clock time with that offset spelled out, and never collapsed to a bare
-  // DATE: the tag is proof a DATETIME literal was read, so the midnight
-  // heuristic below has no work to do.
-  const offsetMin = datetimeOffset(v);
-  if (offsetMin !== undefined) {
-    const wall = new Date(v.getTime() + offsetMin * 60000);
-    const sign = offsetMin < 0 ? "-" : "+";
-    const abs = Math.abs(offsetMin);
-    const offset = `${sign}${pad2(Math.floor(abs / 60))}:${pad2(abs % 60)}`;
-    return `${writeDatePart(wall)}T${writeTimePart(wall)}${offset}`;
-  }
-  const isMidnight =
-    v.getUTCHours() === 0 &&
-    v.getUTCMinutes() === 0 &&
-    v.getUTCSeconds() === 0 &&
-    v.getUTCMilliseconds() === 0;
-  if (isMidnight) return writeDatePart(v);
-  return `${writeDatePart(v)}T${writeTimePart(v)}`;
-}
-
-function writeDatePart(v: Date): string {
-  return `${pad4(v.getUTCFullYear())}-${pad2(v.getUTCMonth() + 1)}-${pad2(v.getUTCDate())}`;
-}
-
-function writeTimePart(v: Date): string {
-  const ms = v.getUTCMilliseconds();
-  const frac = ms === 0 ? "" : `.${String(ms).padStart(3, "0")}`;
-  return `${pad2(v.getUTCHours())}:${pad2(v.getUTCMinutes())}:${pad2(v.getUTCSeconds())}${frac}`;
-}
-
 function writeScalar(v: Scalar): string {
   if (v === null) return "null";
   if (typeof v === "boolean") return v ? "true" : "false";
@@ -1209,7 +1170,7 @@ function writeScalar(v: Scalar): string {
   if (typeof v === "number") {
     if (Number.isNaN(v)) return "nan";
     if (!Number.isFinite(v)) return v < 0 ? "-inf" : "inf";
-    const text = String(v);
+    const text = Object.is(v, -0) ? "-0" : String(v); // D-29: the sign of negative zero is data
     // Since issue #98, a bare digit-only token (no "." and no "e"/"E")
     // parses back as an INTEGER token -- a real `bigint`, a different
     // kind. A whole-valued `number` (e.g. 1e10, or a `number`-typed
@@ -1222,11 +1183,11 @@ function writeScalar(v: Scalar): string {
     if (!/[.eE]/.test(text)) return `${text}.0`;
     return text;
   }
-  if (v instanceof Date) return writeDate(v);
+  if (v instanceof Date) return isoText(v);
   // A genuinely time-kinded value carries its own provenance tag (issue
   // #96) and always writes bare; a plain string -- even one shaped exactly
   // like a TIME literal -- always writes quoted. No shape-guessing.
-  if (v instanceof TimeValue) return v.text;
+  if (v instanceof TimeValue) return timeText(v);
   if (typeof v === "string") return writeString(v);
   throw new TypeError(`${typeName(v)} has no OML scalar form`);
 }

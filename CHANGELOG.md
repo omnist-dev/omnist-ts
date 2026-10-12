@@ -6,6 +6,63 @@ the first documented release of the TypeScript port; the public API
 mirrors the upstream Python package's `__all__` (camelCase names of the
 same functions).
 
+## [v0.10.0-alpha] -- adopts omnist-spec v0.35.0-beta: quoted path labels, unaltered temporals, XML characters, YAML number spellings
+
+A minor release: new rejections and changed output. The spec pin moves from
+v0.34.0-beta (`3346b50`) to **v0.35.0-beta** (`237ef00`), which grows the suite
+from 522 to 731 vectors. Track 1 stays 19 of 19. Track 2 was 614 passed, 89
+failed, 28 skipped of 731 against the old source; it is now **703 passed, 0
+failed, 28 skipped**, the 28 being the OSD-OML extension (E-20, E-21).
+
+- **Temporals are written unaltered (E-37, DIV-36).** The JSON, TOML and YAML
+  writers converted a `datetime` with an offset to UTC and dropped the offset
+  (`2024-01-15T12:00:00+01:00` was written `2024-01-15T11:00:00`): a silent data
+  change. Every writer now writes the value as it holds it: the offset and
+  wall-clock reading, every fractional digit (a six-digit fraction was cut to
+  three), and the seconds always (`12:00` is `12:00:00`, in OML and XML too).
+  TOML and YAML write a datetime with the `T` separator and no quotes (TOML: a
+  datetime without an offset is a local date-time, no longer given a `Z`; a
+  `time` without an offset is a local time, no longer quoted). A `time` has no
+  YAML literal and a `time` with an offset no TOML literal: both are written as
+  double-quoted strings. `format.temporal-stringified` is now reported for a
+  `time` leaf in JSON, for an offset `time` in TOML and for any `time` in YAML,
+  where it was silent.
+- **Document paths quote a label that needs it (E-36, DIV-35).** One renderer
+  builds every path (readers, writers, validate, materialize, infer, the CLI):
+  a label that is empty or holds `.` `[` `]` `"` `\`, a control character,
+  U+007F, U+0085, U+2028 or U+2029 is written `["a.b"]` with the spec's escapes.
+  The old rule bracketed any label that was not an identifier (`$["a-b"]`); a
+  label such as `a-b` or `café` now stays bare (`$.a-b`).
+- **XML characters and references (C-15, C-16, DIV-38).** Entities are decoded
+  exactly once (`&amp;#65;` was read as `A`) and a CDATA section is literal
+  (`<![CDATA[&#65;]]>` was decoded). A character outside XML 1.0's `Char`,
+  written raw anywhere in the input (text, CDATA, attribute values, comments,
+  processing instructions, names), and a numeric character reference that is
+  malformed (`&#;`, `&#65`, `&#X41;`) or names a character outside `Char`
+  (`&#0;`, `&#xD800;`, `&#xFFFE;`), are `parse.codec-syntax`; `&#x110000;` was
+  an uncaught `RangeError`.
+- **Negative zero (D-29, OML-19, DIV-37).** The JSON, TOML, YAML and OML writers
+  wrote `-0.0` as `0.0`; they write `-0.0`.
+- **YAML (C-14, C-17, C-12, DIV-39).** DEL, U+0080 to U+009F (except U+0085),
+  U+FFFE and U+FFFF are written escaped in lowercase hex (`\x7f`, `\x80`,
+  `\ufffe`) instead of raw. `08`, `0:5`, `1e3` and `1.0e3` read as strings (they
+  were numbers); `.` alone is a string. A `<<` written after an explicit key
+  contributes its entries first.
+- **YAML writes an exponent with a point (C-17).** `1e-300` is written
+  `1.0e-300` and `1e21` as `1.0e+21`, because PyYAML reads an exponent
+  without a point as a string. A signed leading-point float (`-.5`, `+.5`) now
+  reads as a string, as PyYAML reads it.
+- The 0.8.1-alpha YAML duplicate-key linearisation and the 0.9.0-alpha
+  behaviours are unchanged.
+
+**Migration.** Output bytes change: a TOML offset datetime is no longer written
+`...T10:00:00.000Z` but at its own offset (and a source `Z` is written `Z`
+without `.000`); an OML `time` read as `12:00` is written `12:00:00`. A path
+that named a non-identifier label (`$["a-b"]`) is now `$.a-b`; one that held a
+dot or bracket (`$.a.b`) is now `$["a.b"]`. A YAML number with an exponent and no point is now written with `.0` before
+the `e` (`1e-300` becomes `1.0e-300`). Input holding a control character,
+or a bad character reference, in XML is now refused.
+
 ## [v0.9.0-alpha] -- adopts omnist-spec v0.34.0-beta: configurable limits, registered write codes, YAML profile decisions
 
 A minor release: new options, new codes and new rejections. The spec pin moves

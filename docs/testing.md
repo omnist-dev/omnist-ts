@@ -86,7 +86,7 @@ implementation. Two independent tracks, from the same submodule pin:
 - **The JSON-vector suite** (`tools/conformance/vectorRunner.ts`) runs
   `test-suite/`'s JSON-envelope vectors (`name`/`operation`/`input`/
   `expect`) against the same functions. Currently
-  **494 passed, 0 failed, 28 skipped** (of 522, spec v0.34.0-beta); the 28
+  **703 passed, 0 failed, 28 skipped** (of 731, spec v0.35.0-beta); the 28
   skips are the `extensions-osd-oml` vectors (OSD-OML is not implemented).
 
 Every skip cites an explicit, checkable reason, per

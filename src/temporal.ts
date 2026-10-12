@@ -93,6 +93,11 @@ const DATE_KIND = new WeakMap<Date, DateKind>();
  * tagging"). */
 const DATETIME_OFFSET = new WeakMap<Date, number>();
 
+/** The fraction digits (after the point, as written) of a `Date` built from a
+ * DATETIME literal with a fractional second. A `Date` holds milliseconds only,
+ * so a six-digit fraction would otherwise lose its last three digits (E-37). */
+const DATETIME_FRAC = new WeakMap<Date, string>();
+
 function tagDateKind(d: Date, kind: DateKind): Date {
   DATE_KIND.set(d, kind);
   return d;
@@ -146,6 +151,8 @@ interface TimeParts {
   mm: number;
   ss: number;
   ms: number;
+  /** The fraction digits as written (no point), `""` when there are none. */
+  frac: string;
   offsetMin: number | null;
 }
 
@@ -168,8 +175,9 @@ export function parseTimeToken(text: string): TimeParts | null {
   const ss = m[3] !== undefined ? Number(m[3]) : 0;
   if (hh > 23 || mm > 59 || ss > 59) return null;
   let ms = 0;
-  if (m[4] !== undefined) {
-    ms = Number((m[4] + "000").slice(0, 3));
+  const frac = m[4] ?? "";
+  if (frac !== "") {
+    ms = Number((frac + "000").slice(0, 3));
   }
   let offsetMin: number | null = null;
   if (m[5] !== undefined) {
@@ -179,7 +187,7 @@ export function parseTimeToken(text: string): TimeParts | null {
     if (oh > 23 || om > 59) return null;
     offsetMin = sign * (oh * 60 + om);
   }
-  return { hh, mm, ss, ms, offsetMin };
+  return { hh, mm, ss, ms, frac, offsetMin };
 }
 
 /** Parse a `YYYY-MM-DDTHH:MM[:SS[.ffffff]][+-HH:MM]` datetime token into a
@@ -210,7 +218,64 @@ export function parseDatetimeToken(text: string): Date | null {
   // #51). An offset-less literal is left untagged, which is *not* the same as
   // tagging it 0 -- see `datetimeOffset`.
   if (time.offsetMin !== null) DATETIME_OFFSET.set(out, time.offsetMin);
+  // A fraction of only zeros is insignificant (E-37) and is not kept.
+  if (/[1-9]/.test(time.frac)) DATETIME_FRAC.set(out, time.frac);
   return out;
+}
+
+function pad(n: number, width: number): string {
+  return String(n).padStart(width, "0");
+}
+
+/**
+ * The ISO-8601 text of a `Date` leaf, shared by every writer (E-37): a `date`
+ * is `YYYY-MM-DD`; a `datetime` is `YYYY-MM-DDTHH:MM:SS`, then the fraction
+ * with every digit the value holds, then its offset. A datetime read from a
+ * literal with an offset is written at that offset's wall-clock reading, never
+ * converted to UTC; one without an offset is written without one. A `Date`
+ * that never came from a literal (no tag) is an instant: a midnight instant is
+ * a date, any other is written as its UTC reading with no offset.
+ */
+export function isoText(d: Date): string {
+  const kind = DATE_KIND.get(d);
+  const off = DATETIME_OFFSET.get(d);
+  const wall = off === undefined ? d : new Date(d.getTime() + off * 60000);
+  const datePart = pad(wall.getUTCFullYear(), 4) + "-" + pad(wall.getUTCMonth() + 1, 2) + "-" + pad(wall.getUTCDate(), 2);
+  const isMidnight =
+    wall.getUTCHours() === 0 && wall.getUTCMinutes() === 0 && wall.getUTCSeconds() === 0 && wall.getUTCMilliseconds() === 0;
+  if (kind === "date" || (kind === undefined && isMidnight)) return datePart;
+  const ms = wall.getUTCMilliseconds();
+  const frac = DATETIME_FRAC.get(d) ?? (ms === 0 ? "" : pad(ms, 3));
+  let out =
+    datePart +
+    "T" +
+    pad(wall.getUTCHours(), 2) +
+    ":" +
+    pad(wall.getUTCMinutes(), 2) +
+    ":" +
+    pad(wall.getUTCSeconds(), 2) +
+    (frac === "" ? "" : "." + frac);
+  if (off !== undefined) {
+    const abs = Math.abs(off);
+    out += (off < 0 ? "-" : "+") + pad(Math.floor(abs / 60), 2) + ":" + pad(abs % 60, 2);
+  }
+  return out;
+}
+
+const TIME_TEXT_RE = /^(\d{2}):(\d{2})(?::(\d{2})(\.\d+)?)?(Z|[+-]\d{2}:\d{2})?$/;
+
+/** The ISO-8601 text of a `time` leaf with its seconds always written (E-37):
+ * `12:00` is `12:00:00`; the fraction and the offset are kept as held. Text
+ * that is not clock-shaped is returned as it is. */
+export function timeText(t: TimeValue): string {
+  const m = TIME_TEXT_RE.exec(t.text);
+  if (m === null) return t.text;
+  return (m[1] as string) + ":" + (m[2] as string) + ":" + (m[3] ?? "00") + (m[4] ?? "") + (m[5] ?? "");
+}
+
+/** True if the `time` leaf carries an offset (TOML has no offset time). */
+export function timeHasOffset(t: TimeValue): boolean {
+  return /(?:Z|[+-]\d{2}:\d{2})$/.test(timeText(t));
 }
 
 /**
