@@ -63,7 +63,8 @@
  */
 
 import YAML from "yaml";
-import { buildNodeWithLimits, grouped, hasInterleaving, unwrapTimeValues, type Node, type Scalar } from "../document.js";
+import { buildNodeWithLimits, grouped, hasInterleaving, type Node, type Scalar } from "../document.js";
+import { isoText, TimeValue, timeText } from "../temporal.js";
 import {
   DEFAULT_MAX_DEPTH as MAX_DEPTH,
   digitsExceed,
@@ -147,6 +148,95 @@ function customBoolTags(tags: YAML.Tags): YAML.Tags {
     return boolTag.identify!(true)
       ? { ...boolTag, test: /^(?:[Yy]es|YES|[Tt]rue|TRUE|[Oo]n|ON)$/ }
       : { ...boolTag, test: /^(?:[Nn]o|NO|[Ff]alse|FALSE|[Oo]ff|OFF)$/ };
+  });
+}
+
+/**
+ * A scalar this writer spells itself (E-37, D-29): the `yaml` package would
+ * write a `Date` through its timestamp tag (converting to UTC and truncating to
+ * milliseconds) and a negative zero without its sign, so these leaves are
+ * replaced by a literal whose text is the exact spelling. `quoted` is a
+ * double-quoted string (a `time`, which YAML 1.1 has no literal for).
+ */
+class YamlLiteral {
+  readonly text: string;
+  readonly quoted: boolean;
+  constructor(text: string, quoted: boolean) {
+    this.text = text;
+    this.quoted = quoted;
+  }
+}
+
+const literalTag: YAML.ScalarTag = {
+  identify: (v) => v instanceof YamlLiteral,
+  default: true,
+  tag: "tag:yaml.org,2002:str",
+  /* v8 ignore next -- write-only tag: the type requires a resolver, a read never selects it */
+  resolve: (str) => str,
+  stringify: (item) => {
+    const lit = item.value as YamlLiteral;
+    return lit.quoted ? JSON.stringify(lit.text) : lit.text;
+  },
+};
+
+function writeTags(tags: YAML.Tags): YAML.Tags {
+  return [literalTag, ...customBoolTags(tags)];
+}
+
+/** Replace each temporal and negative-zero leaf of a Node tree by a {@link YamlLiteral}. */
+function literalize(node: Node, depth = 0): Node {
+  if (Array.isArray(node)) {
+    checkWriteDepth(depth);
+    return node.map(({ label, target }) => ({ label, target: literalize(target, depth + 1) }));
+  }
+  if (node instanceof Date) return new YamlLiteral(isoText(node), false) as unknown as Node;
+  if (node instanceof TimeValue) return new YamlLiteral(timeText(node), true) as unknown as Node;
+  if (Object.is(node, -0)) return new YamlLiteral("-0.0", false) as unknown as Node;
+  return node;
+}
+
+/** The characters YAML 1.1 does not print and PyYAML escapes (C-14), beyond the C0 range the package escapes. */
+const UNPRINTABLE = /[\x7f\x80-\x84\x86-\x9f\ufffe\uffff]/;
+
+/**
+ * C-17: narrow the `yaml` package's YAML 1.1 number tags to what PyYAML's
+ * `SafeLoader` resolves. The package is looser in four ways: a decimal integer
+ * may start with `0` (`08` is the string, since only `0` and leading-zero
+ * octal `010` are integers), a sexagesimal integer may start with `0` (`0:5`
+ * is a string), an exponent needs no point (`1e3` is a string), and an
+ * exponent needs a sign (`1.0e3` is a string, `1.0e+3` a number). A float also
+ * needs a digit beside its point (`.` alone is a string).
+ */
+function narrowNumberTags(tags: YAML.Tags): YAML.Tags {
+  return tags.map((tag) => {
+    const scalar = tag as YAML.ScalarTag; // a preset name (a string) has no .tag and falls through unchanged
+    if (scalar.tag === "tag:yaml.org,2002:int") {
+      if (scalar.format === undefined) return { ...scalar, test: /^[-+]?(?:0|[1-9][0-9_]*)$/ };
+      if (scalar.format === "TIME") return { ...scalar, test: /^[-+]?[1-9][0-9_]*(?::[0-5]?[0-9])+$/ };
+    } else if (scalar.tag === "tag:yaml.org,2002:float") {
+      if (scalar.format === undefined && scalar.test?.test("1.5") === true) {
+        return { ...scalar, test: /^[-+]?(?:[0-9][0-9_]*\.[0-9_]*|\.[0-9_]+)$/ };
+      }
+      if (scalar.format === "EXP") {
+        return { ...scalar, test: /^[-+]?(?:[0-9][0-9_]*\.[0-9_]*|\.[0-9_]+)[eE][-+][0-9]+$/ };
+      }
+    }
+    return tag;
+  });
+}
+
+/**
+ * C-12: a merge key contributes its entries first, whatever its position in
+ * the mapping, so a `<<` written after an explicit key still puts the merged
+ * entries before that mapping's own (an own key overrides a merged value in
+ * place). The mapping's merge pairs are moved to the front, in their order.
+ */
+function hoistMergeKeys(doc: YAML.Document.Parsed): void {
+  YAML.visit(doc, {
+    Map(_key, map) {
+      const isMerge = (p: YAML.Pair): boolean => YAML.isScalar(p.key) && typeof p.key.value === "symbol";
+      if (map.items.some(isMerge)) map.items = [...map.items.filter(isMerge), ...map.items.filter((p) => !isMerge(p))];
+    },
   });
 }
 
@@ -247,7 +337,7 @@ function parseYamlDocument(
 ): YAML.Document.Parsed {
   return YAML.parseDocument(text, {
     schema: "yaml-1.1",
-    customTags: (tags) => limitIntTags(customBoolTags(tags), maxIntDigits),
+    customTags: (tags) => limitIntTags(narrowNumberTags(customBoolTags(tags)), maxIntDigits),
     intAsBigInt: true,
     uniqueKeys,
     ...(lineCounter === undefined ? {} : { lineCounter }),
@@ -394,6 +484,7 @@ export function readYaml(text: string, opts: ReadYamlOptions = {}): Node {
   }
   rejectForbiddenTags(doc);
   makeStringMergeKeysOrdinary(doc);
+  hoistMergeKeys(doc);
   checkAliasExpansion(doc.contents, maxAliasExpansion, text, maxExpandedSlots);
   let parsed: unknown;
   try {
@@ -434,10 +525,10 @@ export function writeYaml(node: Node, opts: WriteYamlOptions = {}): string {
   // TimeValue leaf to its plain text first, same as a plain string.
   const doc = new YAML.Document(undefined, {
     schema: "yaml-1.1",
-    customTags: customBoolTags,
+    customTags: writeTags,
     sortMapEntries: false,
   });
-  doc.contents = doc.createNode(grouped(unwrapTimeValues(node))) as never;
+  doc.contents = doc.createNode(grouped(literalize(node))) as never;
   // Force every plain JS `number` scalar (never a bigint -- those are
   // genuinely integer-kinded and stringify bare via the yaml package's
   // own native bigint support) to render with at least one fraction
@@ -453,13 +544,21 @@ export function writeYaml(node: Node, opts: WriteYamlOptions = {}): string {
     Scalar(_key, scalarNode) {
       if (typeof scalarNode.value === "number" && Number.isFinite(scalarNode.value)) {
         scalarNode.minFractionDigits = 1;
+      } else if (typeof scalarNode.value === "string" && UNPRINTABLE.test(scalarNode.value)) {
+        scalarNode.type = "QUOTE_DOUBLE";
       }
     },
   });
   // E-34: YAML 1.1 folds a raw U+0085 inside a scalar as a line break. Every
   // scalar holding one is written double-quoted, where the escape `\N` is the
   // one spelling that reads back as the single character.
-  const text = (doc.toString() as string).split("\x85").join("\\N");
+  // C-14: the other unprintable characters are escaped the way PyYAML does,
+  // lowercase hex, inside the double-quoted scalars the visit above forced.
+  const text = (doc.toString() as string)
+    .split("\x85")
+    .join("\\N")
+    .replace(/[\x7f\x80-\x9f]/g, (c) => "\\x" + (c.codePointAt(0) as number).toString(16).padStart(2, "0"))
+    .replace(/[\ufffe\uffff]/g, (c) => "\\u" + (c.codePointAt(0) as number).toString(16));
   return finishWrite(text, rep, report === undefined ? { strict } : { strict, report });
 }
 
@@ -480,6 +579,9 @@ function scanYaml(node: Node): WriteReport {
         "label contains U+0085 (NEL); written double-quoted to round-trip correctly",
         "warning",
       );
+    }
+    if (value instanceof TimeValue) {
+      rep.add(path, "format.temporal-stringified", "YAML has no time-of-day literal; written as a string", "warning");
     }
     if (typeof value === "string" && value.includes("\x85")) {
       rep.add(
