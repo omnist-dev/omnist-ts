@@ -104,14 +104,14 @@ describe("round-trip", () => {
     const read = readToml("dt = 2024-01-01T12:00:00");
     const text = writeToml(read);
     // Must NOT gain an offset/Z marker that wasn't in the source literal.
-    expect(text.trim()).toBe("dt = 2024-01-01T12:00:00.000");
+    expect(text.trim()).toBe("dt = 2024-01-01T12:00:00");
     expect(readToml(text)).toEqual(read);
   });
 
   it("an offset datetime leaf still round-trips as offset (issue #26 doesn't regress this)", () => {
     const read = readToml("dt = 2024-01-01T12:00:00+02:00");
     const text = writeToml(read);
-    expect(text.trim()).toBe("dt = 2024-01-01T10:00:00.000Z");
+    expect(text.trim()).toBe("dt = 2024-01-01T12:00:00+02:00");
     expect(readToml(text)).toEqual(read);
   });
 });
@@ -327,9 +327,9 @@ describe("checkWriteDepth is a real, reachable guard (issue #37)", () => {
   });
 });
 
-describe("issue #96: a TimeValue writes as plain text (TOML has no native time syntax)", () => {
-  it("writeToml unwraps a TimeValue leaf to its plain text", () => {
+describe("E-37: a TimeValue writes as a TOML local time, or a string when it has an offset", () => {
+  it("writeToml writes a time without an offset as TOML's local time", () => {
     const text = writeToml([{ label: "t", target: new TimeValue("12:00:00") }]);
-    expect(text).toBe('t = "12:00:00"\n');
+    expect(text).toBe("t = 12:00:00\n");
   });
 });

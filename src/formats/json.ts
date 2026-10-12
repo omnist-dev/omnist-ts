@@ -23,10 +23,9 @@ import {
 } from "../limits.js";
 import { EdgePaths } from "../paths.js";
 import { checkEncodable } from "../encodable.js";
-import { TimeValue } from "../temporal.js";
+import { isoText, TimeValue, timeText } from "../temporal.js";
 import { WriteError } from "../errors.js";
 import { finishWrite, WriteReport } from "../report.js";
-import { dateKind } from "../temporal.js";
 import { materialize } from "../deserialize.js";
 import { rejectSecondLeadingBom, stripLeadingBom } from "../bom.js";
 import { codecSyntaxError, type CodecBlame } from "./codec-error.js";
@@ -248,7 +247,7 @@ function scanJson(node: Node): WriteReport {
   checkEncodable(node); // C-9, unconditional: a string with no UTF-8 encoding
   const rep = new WriteReport();
   for (const [path, v] of leaves(node)) {
-    if (v instanceof Date) {
+    if (v instanceof Date || v instanceof TimeValue) {
       rep.add(path, "format.temporal-stringified", "temporal value written as an ISO-8601 string", "warning");
     } else if (typeof v === "number" && !Number.isFinite(v)) {
       // issue #128: NaN/Infinity has no JSON token at all -- substituting
@@ -294,31 +293,6 @@ function prepareJson(node: Node, depth = 0): Node {
   return node;
 }
 
-function isoOf(d: Date): string {
-  const kind = dateKind(d);
-  const datePart =
-    String(d.getUTCFullYear()).padStart(4, "0") +
-    "-" +
-    String(d.getUTCMonth() + 1).padStart(2, "0") +
-    "-" +
-    String(d.getUTCDate()).padStart(2, "0");
-  const isMidnight =
-    d.getUTCHours() === 0 && d.getUTCMinutes() === 0 && d.getUTCSeconds() === 0 && d.getUTCMilliseconds() === 0;
-  if (kind === "date" || (kind === undefined && isMidnight)) return datePart;
-  const ms = d.getUTCMilliseconds();
-  const frac = ms === 0 ? "" : "." + String(ms).padStart(3, "0");
-  return (
-    datePart +
-    "T" +
-    String(d.getUTCHours()).padStart(2, "0") +
-    ":" +
-    String(d.getUTCMinutes()).padStart(2, "0") +
-    ":" +
-    String(d.getUTCSeconds()).padStart(2, "0") +
-    frac
-  );
-}
-
 function isPlainRecord(v: unknown): v is Record<string, unknown> {
   if (typeof v !== "object" || v === null) return false;
   const proto: unknown = Object.getPrototypeOf(v);
@@ -352,7 +326,7 @@ function serialize(value: unknown, indent: number | null, level: number): string
     if (value === Infinity) return "Infinity";
     if (value === -Infinity) return "-Infinity";
     /* v8 ignore stop */
-    const text = String(value);
+    const text = Object.is(value, -0) ? "-0" : String(value); // D-29: the sign of negative zero is data
     // Since issue #98, a bare digit-only token (no "." and no "e"/"E")
     // parses back as a bigint (via tagIntegerLiterals/bigintReviver
     // above) -- a different kind. A whole-valued `number` (e.g. -0, or
@@ -363,10 +337,10 @@ function serialize(value: unknown, indent: number | null, level: number): string
     if (!/[.eE]/.test(text)) return `${text}.0`;
     return text;
   }
-  if (value instanceof Date) return JSON.stringify(isoOf(value));
+  if (value instanceof Date) return JSON.stringify(isoText(value));
   // No native JSON time syntax (issue #96): a genuinely time-kinded value
   // still writes as its plain text, same as a plain string would.
-  if (value instanceof TimeValue) return JSON.stringify(value.text);
+  if (value instanceof TimeValue) return JSON.stringify(timeText(value));
   if (Array.isArray(value)) return serializeArray(value, indent, level);
   if (isPlainRecord(value)) return serializeObject(value, indent, level);
   throw new TypeError("cannot serialize " + typeName(value));
