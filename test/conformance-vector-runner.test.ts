@@ -254,9 +254,12 @@ describeIfVendored("main() against the real vendor/omnist-spec/test-suite", () =
     // limits are configurable per call, the write codes are the registered
     // ones, !!omap/!!pairs/!!set are refused, `!!str <<` is an ordinary key
     // and a YAML NEL is written as `\N`.
+    //
+    // v0.10.0-alpha: omnist-spec v0.35.0-beta (731 vectors, +209). Before
+    // any fix: 614 pass, 89 fail, 28 skip. Now 703 pass, 0 fail, 28 skip.
     expect(exitCode).toBe(0);
     expect(logs.at(-1)).toBe(
-      "\n494 passed, 0 failed, 28 skipped (of 522 vectors) -- " +
+      "\n703 passed, 0 failed, 28 skipped (of 731 vectors) -- " +
         "diagnostic paths always compared, codes compared where the error carries one (Sec8.5.2)",
     );
   }, 120000);
@@ -280,8 +283,8 @@ describeIfVendored("main() against the real vendor/omnist-spec/test-suite", () =
     }
   }, 120000);
 
-  it("iterVectors discovers all 522 real vectors", () => {
-    expect(iterVectors(REAL_SUITE_DIR).length).toBe(522);
+  it("iterVectors discovers all 731 real vectors", () => {
+    expect(iterVectors(REAL_SUITE_DIR).length).toBe(731);
   });
 });
 

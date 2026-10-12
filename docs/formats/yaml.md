@@ -283,3 +283,24 @@ it skips quoted scalars and `#` comments, but does not track block-scalar
 block-scalar text could in principle be misflagged. This is the same
 class of accepted, documented gap as this file's `"<<"` merge-key
 limitation above, not a full YAML grammar reimplementation.
+
+## Temporals, escapes and number spellings (since 0.10.0-alpha, spec v0.35.0-beta)
+
+- **Temporals (E-37).** A `date` and a `datetime` are YAML timestamps, written
+  with the `T` separator, no quotes, at their own offset and wall-clock reading
+  (`2024-01-15T12:00:00+01:00`), with every fractional digit; nothing is
+  converted to UTC. A `time` has no YAML literal (an unquoted `12:00:00` would
+  read as a sexagesimal integer), so it is written double-quoted with its
+  seconds and reported as `format.temporal-stringified`.
+- **Escapes (C-14).** A double-quoted scalar escapes the characters YAML 1.1
+  does not print, in lowercase hex: DEL and U+0080 to U+009F (except U+0085,
+  which is `\N`) as `\xXX`, and U+FFFE and U+FFFF as `\uXXXX`.
+- **Number spellings (C-17).** A plain scalar is a number only where PyYAML's
+  `SafeLoader` resolves one. `08`, `09`, `0o17`, `0:5`, `1e3` and `1.0e3` read
+  as strings (a leading zero makes `010` octal, a sexagesimal integer cannot
+  start with `0`, an exponent needs a point and a sign); `0`, `010`, `1_000`,
+  `190:20:30`, `5.`, `.5`, `1.0e+3` and `1:30.5` are numbers.
+- **Merge keys (C-12).** A `<<` contributes its entries first, wherever it is
+  written in the mapping, and a later explicit key overrides a merged value in
+  place.
+- A negative zero is written as `-0.0` (D-29).

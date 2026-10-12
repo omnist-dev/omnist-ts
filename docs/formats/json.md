@@ -105,3 +105,13 @@ conversion (the one sanctioned scalar-subtyping relation, spec Sec6.3);
 `materialize`, by contrast, always normalizes a `number`-typed field to a
 host float even from an integer-shaped source literal (spec Sec7.2) --
 see `docs/python-parity.md` for the worked example.
+
+## Temporal values and negative zero (since 0.10.0-alpha)
+
+A `date`, `time` or `datetime` is written as its ISO-8601 string and reported
+as `format.temporal-stringified`, once per leaf (a `time` leaf too; it was
+silent). Spec E-37: the value is never altered. A `datetime` with an offset is
+written at its own offset and wall-clock reading (`2024-01-15T12:00:00+01:00`,
+not `2024-01-15T11:00:00`), every fractional digit is kept (six, not three),
+and the seconds are always written (`12:00` is `12:00:00`). A negative zero is
+written as `-0.0` (spec D-29, OML-19).

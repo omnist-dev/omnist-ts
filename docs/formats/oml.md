@@ -536,3 +536,10 @@ optional input sugar for later.
 - The Python reference's [`docs/formats/oml.md`](https://github.com/omnist-dev/omnist/blob/master/docs/formats/oml.md)
   for the upstream design this port implements a subset of (this page
   documents this port's *actual* behavior, not a copy of that one).
+
+## Writing times and negative zero (since 0.10.0-alpha)
+
+The writer always writes the seconds of a `time` or `datetime` (spec E-37): a
+value read from `12:00` is written `12:00:00`, `12:00+05:30` as
+`12:00:00+05:30`. The offset and every fractional digit are kept, and nothing is
+converted to UTC. A negative zero is written `-0.0` (OML-19, D-29).
