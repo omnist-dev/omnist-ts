@@ -84,9 +84,9 @@ describe("Field / Record construction errors", () => {
     expect(() => field("x", t.string, 1, null)).not.toThrow();
   });
 
-  it("field() rejects [0,0] cardinality (issue #125) -- redundant with not declaring the field", () => {
-    expect(() => field("x", t.string, 0, 0)).toThrow(/invalid cardinality/);
-    // [0,1] and [1,1] stay legal -- only the exact [0,0] pair is new.
+  it("field() accepts [0,0] (S-15); inverted bounds still throw", () => {
+    expect(() => field("x", t.string, 0, 0)).not.toThrow();
+    expect(() => field("x", t.string, 1, 0)).toThrow(/invalid cardinality/);
     expect(() => field("x", t.string, 0, 1)).not.toThrow();
   });
 

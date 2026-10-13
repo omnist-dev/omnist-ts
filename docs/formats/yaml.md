@@ -292,6 +292,14 @@ limitation above, not a full YAML grammar reimplementation.
   converted to UTC. A `time` has no YAML literal (an unquoted `12:00:00` would
   read as a sexagesimal integer), so it is written double-quoted with its
   seconds and reported as `format.temporal-stringified`.
+- **Reading a timestamp never alters it (since 0.10.1-alpha, E-37).** A timestamp
+  with a time part keeps its clock reading, its offset (`Z` reads as `+00:00`; the
+  `yaml` library converted an offset to UTC) and up to six fraction digits (it
+  kept three). One that cannot be held exactly (a seventh significant fraction
+  digit) or whose day, hour, minute, second or offset is out of range (the library
+  rolled these over: `2024-02-30` became March 1) is `parse.codec-syntax`. A
+  datetime now has the `datetime` kind, so a schema `date` field no longer
+  accepts one.
 - **Escapes (C-14).** A double-quoted scalar escapes the characters YAML 1.1
   does not print, in lowercase hex: DEL and U+0080 to U+009F (except U+0085,
   which is `\N`) as `\xXX`, and U+FFFE and U+FFFF as `\uXXXX`.

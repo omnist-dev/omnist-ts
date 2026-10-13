@@ -357,6 +357,17 @@ describe("runVector() dispatch", () => {
 
 describe("parse", () => {
   const int = (value: number) => ({ scalar: { kind: "integer", value } });
+  it("DIV-33: a read report is compared by (path, code), not by path alone", () => {
+    const doc = { edges: [["a", { edges: [["b", { scalar: { kind: "string", value: "hi" } }]] }]] };
+    const input = { format: "xml", text: '<a x="1"><b>hi</b></a>' };
+    const exp = (code: string) => ({ ok: true, document: doc, diagnostics: [{ path: "$.a", code }] });
+    expect(runVector(vec("parse", input, exp("format.attribute-dropped"))).status).toBe("pass");
+    // Right path, wrong code: the old path-only comparison passed this.
+    expect(runVector(vec("parse", input, exp("format.namespace-dropped"))).status).toBe("fail");
+    // An expected diagnostic with no code is not satisfied by a reported one that has one.
+    const codeless = { ok: true, document: doc, diagnostics: [{ path: "$.a" }] };
+    expect(runVector(vec("parse", input, codeless)).status).toBe("fail");
+  });
   it.each([
     [
       "declared_max_depth", 3, "a: { b: { c: 1 } }\n", "a: { b: { c: { d: 1 } } }\n", "document.limit.depth", "$",
@@ -737,7 +748,7 @@ describe("parse", () => {
       ),
     );
     expect(r.status).toBe("fail");
-    expect(r.message).toContain("diagnostic paths differ");
+    expect(r.message).toContain("diagnostic paths and codes differ");
   });
 });
 

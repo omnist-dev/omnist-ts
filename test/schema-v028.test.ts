@@ -11,6 +11,11 @@ import {
   toOsd,
   type Field,
 } from "../src/index.js";
+import { extract } from "../src/ops/extract.js";
+import { normalize } from "../src/ops/minimize.js";
+import { prune } from "../src/ops/prune.js";
+import { compatibleWith } from "../src/ops/subschema.js";
+import { parseSchema } from "../src/osd.js";
 
 // omnist-spec v0.28.0-beta (S-8 addendum, S-22, S-23, S-24, OSD-16). DIV-5: no
 // conformance vector pins any of these, so this file is the only pin.
@@ -138,8 +143,23 @@ describe("OSD-16 / S-24: an OSD writer fails on max = 0", () => {
   it("a [0,1] field is still written", () => {
     expect(toOsd(new Schema(ref("R"), { R: record(field("a", t.string, 0, 1)) }))).toContain('"a" [0,1]');
   });
-  it("field() still rejects [0,0] at construction", () => {
-    expect(schemaDiag(() => field("a", t.string, 0, 0)).code).toBe("schema.invalid-cardinality");
+  it("field() accepts [0,0] at construction (S-15, omnist-ts#170)", () => {
+    expect(field("a", t.string, 0, 0)).toEqual({ label: "a", type: t.string, min: 0, max: 0 });
+  });
+  it("a field() built [0,0] schema fails the writer, and prune/normalize/extract all cope", () => {
+    const s = new Schema(ref("R"), { R: record(field("ok", t.string), field("dead", t.string, 0, 0)) });
+    expect(writeDiag(() => toOsd(s))).toEqual({ code: "write.unsupported-value", path: "R" });
+    const want = 'record R { "ok": string } root R\n';
+    expect(toOsd(prune(s), { indent: null })).toBe(want);
+    expect(toOsd(normalize(s), { indent: null })).toBe(want);
+    expect(toOsd(extract(s, new Set(["ok", "dead"])), { indent: null })).toBe(want);
+    expect(compatibleWith(s, s)).toBe(true);
+  });
+  it("OSD text still rejects [0,0] at the field path", () => {
+    expect(schemaDiag(() => parseSchema('record R { "a" [0,0]: string } root R'))).toEqual({
+      code: "schema.invalid-cardinality",
+      path: "R.a",
+    });
   });
 });
 
