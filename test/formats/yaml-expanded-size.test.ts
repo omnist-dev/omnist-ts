@@ -296,6 +296,22 @@ describe("a library failure while materializing", () => {
     }
   });
 
+  it("the library's own report of a stack overflow (a YAMLParseError carrying the message) is the depth limit too", () => {
+    // With a raised maxDepth the library can overflow while composing; it catches the RangeError and
+    // reports it as an error with the message and a position. (A real overflow is not used here: what
+    // the engine does after one differs by machine and Node version.)
+    const spy = vi.spyOn(YAML.Document.prototype, "toJS").mockImplementation(() => {
+      throw new Error("Maximum call stack size exceeded at line 1, column 3:");
+    });
+    try {
+      const err = thrown("a: 1\n", {});
+      expect(err).toBeInstanceOf(DocumentError);
+      expect((err as DocumentError).code).toBe("document.limit.depth");
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   it("any other library failure is still parse.codec-syntax, at 1:1 where the error names no position", () => {
     const spy = vi.spyOn(YAML.Document.prototype, "toJS").mockImplementation(() => {
       throw new ReferenceError("an unresolved alias");

@@ -30,13 +30,6 @@ describe("a deeply nested YAML document is document.limit.depth, one after anoth
     expect(codeOf(() => readYaml(text))).toBe("document.limit.depth");
   });
 
-  it("the library's own overflow is still the depth limit (a raised maxDepth), and the next parse is fine", () => {
-    const text = "a: " + "{a: ".repeat(3000) + "1" + "}".repeat(3000);
-    expect(codeOf(() => readYaml(text, { maxDepth: 100_000 }))).toBe("document.limit.depth");
-    expect(codeOf(() => readYaml(text, { maxDepth: 100_000 }))).toBe("document.limit.depth");
-    expect(codeOf(() => readYaml("a: 1\n"))).toBeUndefined();
-  });
-
   it("a document under the limit is unaffected, even when brackets and dashes are plentiful", () => {
     expect(codeOf(() => readYaml("a: " + "{a: ".repeat(150) + "1" + "}".repeat(150)))).toBeUndefined();
     // Unbalanced brackets inside quoted text only look deep to the cheap scan.
