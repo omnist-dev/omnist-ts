@@ -64,9 +64,11 @@
 
 import YAML from "yaml";
 import { buildNodeWithLimits, grouped, hasInterleaving, type Node, type Scalar } from "../document.js";
-import { isoText, TimeValue, timeText } from "../temporal.js";
+import { isoText, parseDateToken, parseDatetimeToken, TimeValue, timeText } from "../temporal.js";
 import {
   DEFAULT_MAX_DEPTH as MAX_DEPTH,
+  DEPTH_CODE,
+  depthIssue,
   digitsExceed,
   OverlongInteger,
   resolveLimits,
@@ -74,7 +76,7 @@ import {
 } from "../limits.js";
 import { EdgePaths } from "../paths.js";
 import { checkEncodable } from "../encodable.js";
-import { ParseError, WriteError } from "../errors.js";
+import { DocumentError, ParseError, WriteError } from "../errors.js";
 import { finishWrite, WriteReport } from "../report.js";
 import { materialize } from "../deserialize.js";
 import type { Schema } from "../schema.js";
@@ -111,6 +113,67 @@ function limitIntTags(tags: YAML.Tags, maxIntDigits: number): YAML.Tags {
         return digitsExceed(digits, radix, maxIntDigits) ? new OverlongInteger() : intTag.resolve(str, onError, options);
       },
     };
+  });
+}
+
+/**
+ * E-37 / omnist-ts#169: the `yaml` package resolves a timestamp to a bare
+ * `Date`, converting an offset to UTC and keeping three fraction digits, so
+ * `12:00:00.123456+01:00` would read as `11:00:00.123`. Reading never alters a
+ * temporal value: a timestamp with a time part is resolved through this
+ * port's own datetime token, which keeps the clock reading, the offset (`Z`
+ * is `+00:00`) and every fraction digit the Document can hold (six, trailing
+ * zeros insignificant); one that cannot be held exactly (a seventh significant
+ * fraction digit, or an hour, minute, second or offset out of range, which the
+ * package used to roll over silently) is a `parse.codec-syntax` error. A date
+ * with no time part keeps the package's `Date` (calendar-checked, no more
+ * rolling over).
+ */
+function exactTimestampTags(tags: YAML.Tags): YAML.Tags {
+  return tags.map((tag) => {
+    if (typeof tag === "string" || tag.tag !== "tag:yaml.org,2002:timestamp") return tag;
+    const ts = tag as YAML.ScalarTag;
+    const test = ts.test as RegExp;
+    return {
+      ...ts,
+      resolve(str: string, onError: (message: string) => void): unknown {
+        // The tag's own `test` has matched `str` already (groups: year, month,
+        // day, hour, minute, seconds[.fraction], fraction, zone).
+        const m = test.exec(str) as RegExpExecArray;
+        const pad = (v: string | undefined): string => (v as string).padStart(2, "0");
+        const day = (m[1] as string) + "-" + pad(m[2]) + "-" + pad(m[3]);
+        if (m[4] === undefined) {
+          const d = parseDateToken(day);
+          if (d === null) {
+            onError("!!timestamp: the date does not exist");
+            return str;
+          }
+          return new Date(d.getTime());
+        }
+        const sec = (m[6] as string).split(".")[0] as string;
+        const frac = (m[7] ?? "").slice(1).replace(/0+$/, "");
+        if (frac.length > 6) {
+          onError("!!timestamp: a fractional second of more than 6 digits cannot be held exactly");
+          return str;
+        }
+        let zone = "";
+        const tz = m[8];
+        if (tz === "Z") {
+          zone = "+00:00";
+        } else if (tz !== undefined) {
+          const [h, mi] = tz.slice(1).split(":") as [string, string | undefined];
+          zone = tz.charAt(0) + pad(h) + ":" + (mi ?? "00");
+        }
+        const dt = parseDatetimeToken(
+          day + "T" + pad(m[4]) + ":" + pad(m[5]) + ":" + pad(sec) + (frac === "" ? "" : "." + frac) + zone,
+        );
+        if (dt === null) {
+          onError("!!timestamp: the time or offset is out of range");
+          return str;
+        }
+        return dt;
+      },
+    } as YAML.ScalarTag;
   });
 }
 
@@ -310,8 +373,75 @@ export interface ReadYamlOptions extends DocumentLimits {
   maxInputBytes?: number;
 }
 
+/**
+ * The `yaml` package composes and converts a document by recursion, so a
+ * nesting of about 800 levels exhausts the call stack (and a stack overflow
+ * inside its regular expressions can leave the engine in a state that aborts
+ * the process on the next parse). The nesting is therefore measured on the
+ * library's own token stream, which is built without recursion, and a document
+ * past twice the depth limit (every collection is at least one node level and a
+ * sequence adds at most one raw level per node level, so the builder would
+ * refuse it anyway) is refused with `document.limit.depth` before it is
+ * composed. A cheap scan decides whether the token stream is worth building:
+ * the running depth of `[` and `{`, and a line's indentation plus its `- `
+ * indicators, are upper bounds of the nesting, so a document below the limit on
+ * both cannot be deep.
+ */
+function yamlNestingExceeds(text: string, maxDepth: number): boolean {
+  const limit = 2 * maxDepth + 2;
+  let flow = 0;
+  let indent = 0;
+  let dashes = 0;
+  let inIndent = true;
+  let suspect = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text.charCodeAt(i);
+    if (c === 10) {
+      indent = 0;
+      dashes = 0;
+      inIndent = true;
+    } else if (inIndent && c === 32) {
+      indent++;
+    } else {
+      inIndent = false;
+      if (c === 91 || c === 123) flow++;
+      else if ((c === 93 || c === 125) && flow > 0) flow--;
+      else if (c === 45 && text.charCodeAt(i + 1) === 32) dashes++;
+    }
+    if (flow > maxDepth || indent + dashes > maxDepth) {
+      suspect = true;
+      break;
+    }
+  }
+  if (!suspect) return false;
+  const collections = new Set(["block-map", "block-seq", "flow-collection"]);
+  const stack: Array<[object, number]> = [];
+  for (const token of new YAML.Parser().parse(text)) stack.push([token, 0]);
+  while (stack.length > 0) {
+    const [node, outer] = stack.pop() as [object, number];
+    const token = node as { type?: unknown; items?: unknown; key?: unknown; value?: unknown };
+    let depth = outer;
+    if (typeof token.type === "string" && collections.has(token.type)) {
+      depth++;
+      if (depth > limit) return true;
+    }
+    for (const child of [token.items, token.key, token.value]) {
+      if (Array.isArray(child)) for (const c of child) stack.push([c as object, depth]);
+      else if (child) stack.push([child as object, depth]);
+    }
+  }
+  return false;
+}
+
 /** Turn a failure from the `yaml` package into the `parse.codec-syntax` error. */
-function yamlSyntaxError(exc: unknown, text: string): ParseError {
+function yamlSyntaxError(exc: unknown, text: string, maxDepth: number): Error {
+  // The call stack ran out inside the library (a nesting past what the
+  // pre-check above refuses, reachable only with a raised `maxDepth`): the
+  // depth limit, not a syntax error.
+  if (exc instanceof RangeError || (exc instanceof Error && exc.message.startsWith("Maximum call stack size exceeded"))) {
+    const issue = depthIssue(maxDepth);
+    return new DocumentError("nesting is too deep for the YAML reader (the call stack was exhausted)", issue.code, issue.path);
+  }
   // The library always throws an Error instance (a YAMLParseError, or a
   // ReferenceError), never a bare value, so the non-Error branch below is a
   // defensive fallback that's never actually reached. (A malformed merge
@@ -342,7 +472,7 @@ function parseYamlDocument(
 ): YAML.Document.Parsed {
   return YAML.parseDocument(text, {
     schema: "yaml-1.1",
-    customTags: (tags) => limitIntTags(narrowNumberTags(customBoolTags(tags)), maxIntDigits),
+    customTags: (tags) => limitIntTags(narrowNumberTags(customBoolTags(exactTimestampTags(tags))), maxIntDigits),
     intAsBigInt: true,
     uniqueKeys,
     ...(lineCounter === undefined ? {} : { lineCounter }),
@@ -466,6 +596,10 @@ export function readYaml(text: string, opts: ReadYamlOptions = {}): Node {
   rejectSecondLeadingBom(text, "YAML"); // D-21: a second one is an error
   // Parse to the library's Document AST, which keeps Alias nodes, so the
   // D-18/D-22 checks can run on the reference graph BEFORE anything is expanded.
+  if (yamlNestingExceeds(text, limits.maxDepth)) {
+    const issue = depthIssue(limits.maxDepth);
+    throw new DocumentError(issue.message, DEPTH_CODE, issue.path);
+  }
   let doc: YAML.Document.Parsed;
   try {
     const lineCounter = new YAML.LineCounter();
@@ -485,7 +619,7 @@ export function readYaml(text: string, opts: ReadYamlOptions = {}): Node {
     // What YAML.parse itself does with a failed parse: throw the first error.
     if (doc.errors.length > 0) throw doc.errors[0];
   } catch (exc) {
-    throw yamlSyntaxError(exc, text);
+    throw yamlSyntaxError(exc, text, limits.maxDepth);
   }
   rejectForbiddenTags(doc);
   makeStringMergeKeysOrdinary(doc);
@@ -506,7 +640,7 @@ export function readYaml(text: string, opts: ReadYamlOptions = {}): Node {
     // bounded the expansion, so the library's guard has nothing left to do.
     parsed = doc.toJS({ mapAsMap: true, maxAliasCount: -1 });
   } catch (exc) {
-    throw yamlSyntaxError(exc, text);
+    throw yamlSyntaxError(exc, text, limits.maxDepth);
   }
   const node = buildNodeWithLimits(parsed, limits);
   if (opts.schema === undefined) return node;

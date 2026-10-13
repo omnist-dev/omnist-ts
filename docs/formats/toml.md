@@ -30,6 +30,15 @@ a double-quoted string and reported as `format.temporal-stringified`. A TOML
 `time` literal still reads as a plain string (this port's `Scalar` maps only
 `date`/`datetime` onto `Date`), so it writes back as a string.
 
+Since 0.10.1-alpha (spec E-37) a TOML reader never alters a temporal value:
+`smol-toml` keeps three fraction digits of a time, so a date-time or local-time
+literal with four or more fraction digits is read by this port and keeps up to
+six (trailing zeros are insignificant). A literal that cannot be held exactly (a
+seventh significant fraction digit) or whose fields are out of range is
+`parse.codec-syntax`, never rounded. The offset is kept (`Z` reads as `+00:00`).
+Text over 65,536 characters is also read in linear time (see
+[Limitations](../limitations.md)).
+
 Since 0.10.0-alpha a negative zero (`-0.0`) is written as `-0.0`; it was
 `0.0` (spec D-29).
 

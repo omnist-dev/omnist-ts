@@ -281,15 +281,29 @@ describe("checkAliasExpansion over tagged collections whose items are Pairs (!!o
 });
 
 describe("a library failure while materializing", () => {
-  it("is still parse.codec-syntax, at 1:1 where the error names no position", () => {
+  it("a stack overflow is document.limit.depth at $ (0.10.1-alpha), not a syntax error", () => {
     // toJS recurses on the JS stack, so a deep-but-parseable document can overflow it with a bare RangeError.
     const spy = vi.spyOn(YAML.Document.prototype, "toJS").mockImplementation(() => {
       throw new RangeError("Maximum call stack size exceeded");
     });
     try {
+      const err = thrown("a: 1\n", {});
+      expect(err).toBeInstanceOf(DocumentError);
+      expect((err as DocumentError).code).toBe("document.limit.depth");
+      expect((err as DocumentError).path).toBe("$");
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("any other library failure is still parse.codec-syntax, at 1:1 where the error names no position", () => {
+    const spy = vi.spyOn(YAML.Document.prototype, "toJS").mockImplementation(() => {
+      throw new ReferenceError("an unresolved alias");
+    });
+    try {
       const err = syntax("a: 1\n");
       expect(err.path).toBe("1:1");
-      expect(err.message).toContain("Maximum call stack size exceeded");
+      expect(err.message).toContain("an unresolved alias");
     } finally {
       spy.mockRestore();
     }

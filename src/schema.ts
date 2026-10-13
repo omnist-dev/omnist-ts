@@ -242,12 +242,10 @@ export function field(
       "schema.non-integer-cardinality",
     );
   }
-  if (min < 0 || (max !== null && max < min) || (min === 0 && max === 0)) {
-    // min === 0 && max === 0 (issue #125, omnist-spec Sec5.5): a field that
-    // must occur zero times is indistinguishable from a field never
-    // declared at all -- records are closed by default, so this is folded
-    // into the same schema.invalid-cardinality error as negative/inverted
-    // bounds, not a separate code.
+  // [0,0] is accepted (S-15: `max = 0` is representable; S-24: the OSD writer,
+  // not construction, refuses it with write.unsupported-value; prune() removes
+  // it). OSD text still rejects it, in the parser.
+  if (min < 0 || (max !== null && max < min)) {
     throw new SchemaError(
       `field ${JSON.stringify(label)} has an invalid cardinality [${min},${max ?? ""}]`,
       "schema.invalid-cardinality",
