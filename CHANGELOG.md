@@ -6,7 +6,26 @@ the first documented release of the TypeScript port; the public API
 mirrors the upstream Python package's `__all__` (camelCase names of the
 same functions).
 
-## Unreleased
+## [v0.10.2-alpha] -- adopts omnist-spec v0.36.0-beta: NaN equality in the runner
+
+A patch release: no library behaviour changes. The spec pin moves from
+v0.35.0-beta (`237ef00`) to **v0.36.0-beta** (`7575727`), which grows the suite
+from 731 to 793 vectors. Track 1 stays 19 of 19. Track 2 was 762 passed, 3
+failed, 28 skipped of 793 against the old runner; it is now **765 passed, 0
+failed, 28 skipped**. The 28 skips are the `extensions-osd-oml` vectors.
+
+- **The vector runner compares two NaN numbers as equal (E-33, DIV-47).** The
+  three `formats-{yaml,toml,oml}/nonfinite/nan-is-a-number` vectors failed
+  because JS `NaN !== NaN`, whatever the library read. The fix is in
+  `tools/conformance/vectorRunner.ts` only; `Doc.equals` is unchanged.
+- **Checked, no change needed:** XML pretyping already follows C-18 (`integer`
+  only from `-?(0|[1-9][0-9]*)`, `number` only from a JSON number), D-29
+  (`1e999` reads as Infinity, `1e-999` as 0, `-0` as -0) and D-28 (4,301 digits
+  is `document.limit.int-digits` at the leaf path). Probed with a schema, an
+  8 MB leaf of `99...9x`, `-99...9x`, `99...9.` and `99...9e` is refused in
+  linear time (1.4 to 2.5 s for 8 MB, about the cost of parsing the same leaf
+  as a string; 1, 2, 4 and 8 MB scale linearly).
+- **Migration:** none. No breaking change.
 
 - **Input size limit is 64 MiB, not 64 KiB.** A document over the default
   `maxInputBytes` (67,108,864 bytes, 64 MiB) is refused with
