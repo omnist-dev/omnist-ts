@@ -1,0 +1,67 @@
+name: release
+
+# Publishes to npm when a v* tag is pushed. The tagged commit must have every
+# CI check green, and the `publish` job waits for approval in the
+# `npm-publish` environment. npm releases cannot be undone.
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tag matches package.json
+        run: |
+          want="v$(node -p "require(\"./package.json\").version")"
+          if [ "$GITHUB_REF_NAME" != "$want" ]; then
+            echo "tag $GITHUB_REF_NAME does not match package.json ($want)"; exit 1
+          fi
+      - name: Every CI check on this commit is green
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          bad=$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/check-runs?per_page=100" \
+            --jq "[.check_runs[] | select(.name != \"verify\" and .name != \"publish\") | select(.conclusion != \"success\" and .conclusion != \"skipped\")] | length")
+          total=$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/check-runs?per_page=100" \
+            --jq "[.check_runs[] | select(.name != \"verify\" and .name != \"publish\")] | length")
+          echo "non-green checks: $bad of $total"
+          if [ "$total" -eq 0 ] || [ "$bad" -ne 0 ]; then exit 1; fi
+
+  publish:
+    needs: verify
+    runs-on: ubuntu-latest
+    environment: npm-publish
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          registry-url: https://registry.npmjs.org
+      - run: npm ci
+      - run: npm run build
+      - name: Publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          ver=$(node -p "require(\"./package.json\").version")
+          case "$ver" in
+            *-alpha*) tag=alpha ;;
+            *-beta*) tag=beta ;;
+            *) tag=latest ;;
+          esac
+          npm publish --provenance --access public --tag "$tag"
+          if [ "$tag" != latest ]; then
+            npm dist-tag add "@omnist-dev/omnist@$ver" latest
+          fi
