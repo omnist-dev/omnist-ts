@@ -249,6 +249,11 @@ function paths(diagnostics: readonly Diagnostic[]): Set<string> {
   return new Set(diagnostics.map((d) => d.path));
 }
 
+/** The (path, code) pairs of a diagnostic list, as a set of strings. */
+function pathCodes(diagnostics: readonly Diagnostic[]): Set<string> {
+  return new Set(diagnostics.map((d) => JSON.stringify([d.path, d.code ?? null])));
+}
+
 function asDiagnostics(v: JsonValue | undefined): Diagnostic[] {
   // Defensive: every call site in this file only calls asDiagnostics after
   // its own expect.diagnostics !== undefined check (or, for
@@ -570,10 +575,11 @@ function runParse(v: Vector): Result {
     return fail("parsed document does not match expected");
   }
   if (expect.diagnostics !== undefined) {
-    const expPaths = paths(asDiagnostics(expect.diagnostics));
-    const actPaths = paths(report.adjustments as unknown as Diagnostic[]);
-    if (!setsEqual(expPaths, actPaths)) {
-      return fail(`diagnostic paths differ: expected ${setStr(expPaths)}, got ${setStr(actPaths)}`);
+    // DIV-33: a read report is compared by (path, code), as a write report is.
+    const expPairs = pathCodes(asDiagnostics(expect.diagnostics));
+    const actPairs = pathCodes(report.adjustments as unknown as Diagnostic[]);
+    if (!setsEqual(expPairs, actPairs)) {
+      return fail(`diagnostic paths and codes differ: expected ${setStr(expPairs)}, got ${setStr(actPairs)}`);
     }
   }
   return pass();

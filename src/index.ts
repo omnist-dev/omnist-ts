@@ -205,4 +205,4 @@ _registerFormat({
 });
 
 /** The package version of `@omnist-dev/omnist`, matching `package.json`. */
-export const VERSION = "0.10.0-alpha";
+export const VERSION = "0.10.1-alpha";

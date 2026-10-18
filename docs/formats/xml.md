@@ -271,6 +271,13 @@ character it names. Entities are decoded exactly once, in a single pass:
 literal text. An `encoding=` declaration is ignored; the input is read as UTF-8
 (C-15).
 
+Hostile input (since 0.10.1-alpha): a document nested past `maxDepth` is
+refused with `document.limit.depth` by one linear pass over the text, before the
+parser (whose cost grows faster than linearly with the depth) sees it, and an
+attribute value too long for the validator (about 5 MB or more) is
+`parse.codec-syntax` rather than a stack overflow. See
+[Limitations](../limitations.md).
+
 Every Document path is built by one renderer (spec E-36): a label that is empty
 or holds `.` `[` `]` `"` `\`, a control character, U+007F, U+0085, U+2028 or
 U+2029 is written bracket-quoted (`$["a.b"]`, `$["l1\nl2"]`).

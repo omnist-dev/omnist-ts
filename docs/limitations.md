@@ -45,7 +45,7 @@ it does not make any parse fast. Measured on this port (WSL2, Node 20, `yaml`
 | OML, repeated edges | 10 MiB / 64 MiB | 0.7 s / 4.5 s |
 | XML, repeated elements | 10 MiB / 64 MiB | 0.9 s / 5.4 s |
 | YAML, block sequence of records | 2 MiB; 0.14 / 0.28 / 0.58 / 1.2 MiB of short records | 0.7 s; 0.7 / 0.8 / 1.1 / 2.3 s (the first includes warm-up; linear) |
-| TOML, array of tables | 1 / 2 / 4 / 10 MiB | 0.3 / 1.0 / 5.0 / 46.7 s |
+| TOML, array of tables | 1 / 2 / 4 / 10 MiB | 0.5 / 0.8 / 1.6 / 3.8 s (v0.10.1-alpha; before it 0.3 / 1.0 / 5.0 / 46.7 s) |
 | YAML, one block mapping | 91 / 183 / 388 / 1,004 KiB (5,000 / 10,000 / 20,000 / 50,000 keys) | 0.3 / 0.3 / 0.5 / 1.2 s (v0.8.1-alpha; before it 0.8 / 2.4 / 10.7 s, and minutes at 50,000) |
 
 So 64 MiB is a sound bound for JSON, OML, XML and YAML mappings, and **not** for
@@ -67,14 +67,35 @@ one parser:
   service, whether it is one huge mapping or many large ones (40 mappings of
   4,095 keys with one duplicate took 24 s to re-parse; now 5.4 s, most of it the parse itself). The aliases
   inside `!!pairs` and `!!omap` are a separate, still-open part of that issue.
-- **TOML:** the `smol-toml` parse of a long array of tables is superlinear
-  (about 47 s at 10 MiB; 0.2 / 0.8 / 3.5 s for 0.35 / 0.7 / 1.5 MiB). `readToml`
-  adds about 10 percent to the library's time, so the cost is the library's, and
-  the 64 MiB default does not bound it.
+- **TOML ([omnist-ts#170](https://github.com/omnist-dev/omnist-ts/issues/170),
+  ledger DIV-12):** `smol-toml` looks for the next `.` after every key with a plain
+  string search, so a key with no `.` later in the file scans to the end of the
+  text, and a file of many keys or tables was quadratic: 60,000 array tables took
+  2.0 s, 200,000 took 21.5 s and 10 MiB took 46.7 s. **Fixed in v0.10.1-alpha:** a
+  text over 65,536 characters is handed to the library with a `.` in a comment at
+  the end of every line (a comment cannot change a document; `readToml` maps a
+  syntax error back to its position in your input), so the library finds a `.` at
+  once. Now 60,000 / 200,000 array tables read in 0.5 / 1.5 s, and 1 / 2 / 4 / 10
+  MiB in 0.5 / 0.8 / 1.6 / 3.8 s: linear. A text of 65,536 characters or less is
+  not prepared, and its quadratic cost is negligible at that size.
+- **XML ([omnist-ts#169](https://github.com/omnist-dev/omnist-ts/issues/169)):**
+  `fast-xml-parser` is superlinear in the nesting depth (8,000 deep 1.2 s, 16,000
+  deep 6.0 s, 32,000 deep 35 s, so minutes at 100,000), and its validator
+  exhausts the call stack on an attribute value of about 5 MB or more. **Fixed in
+  v0.10.1-alpha:** `readXml` finds the nesting in one linear pass over the text
+  and refuses a document nested past `maxDepth` with `document.limit.depth`
+  before the parser sees it (1,000 / 10,000 / 100,000 deep: 7 / 32 / 112 ms), and
+  an attribute value too long to validate is `parse.codec-syntax` (1 / 2 / 4 MB
+  are read in 0.3 / 0.5 / 1.0 s, 8 MB is refused in 1.9 s).
+- **YAML and TOML depth:** the `yaml` library composes by recursion and fails at
+  about 800 levels. `readYaml` measures the nesting on the library's token stream
+  and refuses a document past twice `maxDepth` with `document.limit.depth` (100,000
+  levels of flow collections: 1.3 s). A `maxDepth` raised far above the default is
+  bounded by the call stack, as the safety-limits section says.
 
-If you read untrusted TOML, pass a `maxInputBytes` that matches what you expect to
+If you read untrusted YAML, pass a `maxInputBytes` that matches what you expect to
 receive (for example `1024 * 1024`), and run the parse in a process you can time
-out. The same advice holds for YAML until the `!!pairs` part of #157 is closed.
+out; the `!!pairs` part of #157 is still open.
 
 ### Safety limits and how to set them
 

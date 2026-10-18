@@ -6,6 +6,73 @@ the first documented release of the TypeScript port; the public API
 mirrors the upstream Python package's `__all__` (camelCase names of the
 same functions).
 
+## [v0.10.1-alpha] -- unaltered YAML and TOML temporals, hostile-input fixes, `[0,0]` cardinality
+
+A patch release; the spec pin stays at v0.35.0-beta (`237ef00`). Closes
+[omnist-ts#169](https://github.com/omnist-dev/omnist-ts/issues/169) and
+[omnist-ts#170](https://github.com/omnist-dev/omnist-ts/issues/170) (ledger
+DIV-12, DIV-13, DIV-33).
+
+- **The YAML reader no longer alters a timestamp (E-37).** `12:00:00+01:00` read
+  as `11:00:00`: the `yaml` library converts an offset to UTC and keeps three
+  fraction digits. A timestamp with a time part now keeps its clock reading, its
+  offset and up to six fraction digits (`Z` reads as the offset `+00:00`). One
+  the Document cannot hold exactly (a seventh significant fraction digit), or one
+  with an hour, minute, second, offset or day out of range (the library rolled
+  those over silently: `2024-02-30` became March 1), is `parse.codec-syntax`.
+  **Migration:** a YAML datetime now carries a `datetime` kind, so a schema field
+  of kind `date` no longer accepts one; and a `Z` datetime is written back with
+  `+00:00` by the JSON, YAML and OML writers (TOML writes `Z`).
+- **The TOML reader no longer truncates fractional seconds (E-37).** `smol-toml`
+  keeps three digits of a time. A date-time or local-time literal with four or
+  more fraction digits is now read by this port and keeps up to six; seven
+  significant digits is `parse.codec-syntax`. A literal of one to three digits is
+  read as before.
+- **A very large XML attribute value no longer throws a `RangeError`.** The
+  `fast-xml-parser` validator exhausts the call stack on a value of about 5 MB or
+  more; the read is now `parse.codec-syntax` ("an attribute value is too long for
+  this reader to validate"). 1, 2 and 4 MB values are read as before (0.3 / 0.5 / 1.0 s), an 8 MB
+  value is refused in 1.9 s.
+- **The XML depth limit is enforced before the parse.** A document nested past
+  `maxDepth` (default 200) reached `fast-xml-parser`, whose cost grows faster than
+  linearly with the depth (1,000 / 2,000 / 4,000 / 8,000 deep: 45 / 107 / 301 /
+  1,186 ms; a 100,000-deep document took minutes), before the limit was reported.
+  One linear pass over the text now finds the nesting and refuses it with
+  `document.limit.depth` first: 1,000 / 10,000 / 100,000 deep take 7 / 32 / 112 ms
+  (16,000 deep took 6.0 s and 32,000 deep 35 s before).
+  The limit sits where it did (200 nested elements are read, 201 refused).
+- **The TOML reader is linear on very large inputs (DIV-12).** `smol-toml` looks
+  for the next `.` after every key with a plain string search, so a key with no `.`
+  later in the file scans to the end of the text and a file of many keys or tables
+  is quadratic (60,000 array tables 2.0 s, 200,000 21.5 s; 10 MiB of array tables 46.7 s). A text over 65,536
+  characters is now handed to the library with a comment-borne `.` at the end of
+  every line (a comment cannot change a document; a fuzz test pins that), so
+  60,000 array tables read in 0.5 s, 200,000 in 1.5 s and 10 MiB in 3.8 s: linear. A syntax error is
+  still reported at its position in the input.
+- **`field(label, type, 0, 0)` is accepted (DIV-13, S-15).** The model keeps `[0,0]`
+  representable; `toOsd` refuses a schema holding one with
+  `write.unsupported-value` (S-24, unchanged), `prune` removes it, and `normalize`,
+  `extract` and `compatibleWith` accept it instead of throwing. OSD text still
+  rejects `[0,0]` (`schema.invalid-cardinality`, at `R.field`). **Migration:** code
+  that relied on `field()` throwing for `[0,0]` must check for it itself.
+- **The Track 2 vector runner compares a `parse` read report by (path, code)**,
+  as it compares a write report (DIV-33). No wrong code was exposed: every
+  read-side code was already right.
+- **Deep nesting is `document.limit.depth` in YAML and TOML too.** The `yaml`
+  library recurses, so about 800 levels of flow collections or block indentation
+  exhausted the call stack and surfaced as a `parse.codec-syntax` error whose
+  message was the stack overflow; worse, after such an overflow the next parse in
+  the same process could abort Node (a V8 fatal error compiling a regular
+  expression). The nesting is now measured on the library's token stream (built
+  without recursion) when a cheap scan says it could be deep, and a document past
+  twice the limit is refused with `document.limit.depth` at `$` before it is
+  composed (100,000 levels: 1.3 s). TOML's date conversion walk was recursive too:
+  10,000 dotted keys threw a `RangeError`; now `document.limit.depth`.
+- Cross-port checks: OML writing needs no change (a `Date` cannot hold more than
+  six fraction digits here and the reader and the schema-directed path refuse
+  more); no other uncaught exception was found on hostile input (deep nesting in
+  every format, huge labels, huge numbers, NaN and Infinity were measured).
+
 ## [v0.10.0-alpha] -- adopts omnist-spec v0.35.0-beta: quoted path labels, unaltered temporals, XML characters, YAML number spellings
 
 A minor release: new rejections and changed output. The spec pin moves from

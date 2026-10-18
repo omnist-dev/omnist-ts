@@ -32,6 +32,7 @@ import { parse as parseToml, stringify as stringifyToml, TomlDate, type TomlErro
 import { buildNodeWithLimits, findLeaf, grouped, hasInterleaving, type Node } from "../document.js";
 import {
   DEFAULT_MAX_DEPTH as MAX_DEPTH,
+  DEPTH_CODE,
   intDigitsIssue,
   resolveLimits,
   type DocumentLimits,
@@ -40,9 +41,9 @@ import {
 import { EdgePaths } from "../paths.js";
 import { checkEncodable } from "../encodable.js";
 import { datetimeOffset, isoText, TimeValue, timeHasOffset, timeText } from "../temporal.js";
-import { ParseError, WriteError } from "../errors.js";
+import { DocumentError, ParseError, WriteError } from "../errors.js";
 import { finishWrite, WriteReport } from "../report.js";
-import { parseDateToken, parseDatetimeToken, dateKind } from "../temporal.js";
+import { parseDateToken, parseDatetimeToken, parseTimeToken, dateKind } from "../temporal.js";
 import { materialize } from "../deserialize.js";
 import type { Schema } from "../schema.js";
 import { rejectSecondLeadingBom, stripLeadingBom } from "../bom.js";
@@ -101,11 +102,228 @@ function normalizeOffset(iso: string): string {
   return iso.endsWith("Z") ? iso.slice(0, -1) + "+00:00" : iso;
 }
 
+/**
+ * smol-toml is handed a prepared copy of the text (omnist-ts#169, #170), which
+ * differs from the input in two ways, both found by one lexing pass that skips
+ * comments and every kind of string:
+ *
+ * 1. E-37: smol-toml keeps three fraction digits of a time, so a date-time or
+ *    local-time literal with a longer fraction would read altered. Each such
+ *    literal is taken out of the parse (replaced by a quoted placeholder no
+ *    value in the text equals) and put back as the value it denotes, with every
+ *    fraction digit the Document can hold (six; trailing zeros are
+ *    insignificant). One that cannot be held exactly is a `parse.codec-syntax`
+ *    error.
+ * 2. DIV-12: smol-toml looks for the next `.` after every key with a plain
+ *    string search, so a key with no `.` anywhere after it scans to the end of
+ *    the text, and a file of many keys or tables is quadratic (200,000 array
+ *    tables took 25 s). A text over {@link INJECT_MIN} characters gets a `.`
+ *    in a comment at the end of every line (` #.`, or a `.` appended to a
+ *    comment already there), which a comment cannot change, so the search finds
+ *    one at once and the parse is linear.
+ *
+ * An error smol-toml reports is a position in the prepared text; it is mapped
+ * back to the input ({@link mapBack}) rather than found again by parsing the
+ * input, whose cost is the quadratic one.
+ */
+interface Literal {
+  readonly value: unknown;
+  /** The offset of the literal in the input. */
+  readonly at: number;
+  used: boolean;
+}
+
+/** A literal replaced by a placeholder: where it was in the input (1-based line and column) and how its length changed. */
+interface Edit {
+  readonly line: number;
+  readonly col: number;
+  readonly oldLen: number;
+  readonly newLen: number;
+}
+
+interface Prepared {
+  readonly text: string;
+  readonly byPlaceholder: Map<string, Literal>;
+  readonly edits: Edit[];
+}
+
+/** The input length from which every line gets its `.`. */
+export const INJECT_MIN = 1 << 16;
+
+const LONG_FRACTION =
+  /(?:\d{4}-\d{2}-\d{2}[Tt ]\d{2}:\d{2}:\d{2}\.\d{4,}(?:[Zz]|[+-]\d{2}:\d{2})?|\d{2}:\d{2}:\d{2}\.\d{4,})/y;
+
+/**
+ * Prepare TOML text for smol-toml (see {@link Prepared}); `force` injects the
+ * dots whatever the length. Returns undefined when nothing would change.
+ * Throws the `parse.codec-syntax` error for a literal that cannot be held
+ * exactly (a seventh significant fraction digit, or a field out of range).
+ * @internal
+ */
+export function prepareToml(text: string, force = false): Prepared | undefined {
+  const n = text.length;
+  const inject = force || n > INJECT_MIN;
+  const parts: string[] = [];
+  const byPlaceholder = new Map<string, Literal>();
+  const edits: Edit[] = [];
+  let k = 0;
+  while (text.includes("omnist-frac-" + String(k) + "-")) k++;
+  const prefix = "omnist-frac-" + String(k) + "-";
+  let from = 0;
+  let line = 1;
+  let lineStart = 0;
+  let commentDotted = false;
+  let i = 0;
+  while (i < n) {
+    const c = text.charCodeAt(i);
+    if (c === 10) {
+      // A newline outside any string.
+      if (inject && !commentDotted) {
+        const at = i > 0 && text.charCodeAt(i - 1) === 13 ? i - 1 : i;
+        parts.push(text.slice(from, at), " #.");
+        from = at;
+      }
+      commentDotted = false;
+      line++;
+      lineStart = i + 1;
+      i++;
+      continue;
+    }
+    if (c === 35) {
+      // A comment runs to the end of the line.
+      const nl = text.indexOf("\n", i);
+      const end = nl === -1 ? n : nl;
+      if (inject && nl !== -1) {
+        const at = text.charCodeAt(end - 1) === 13 ? end - 1 : end;
+        parts.push(text.slice(from, at), ".");
+        from = at;
+        commentDotted = true;
+      }
+      i = end;
+      continue;
+    }
+    if (c === 34 || c === 39) {
+      const q = text.charAt(i);
+      const multi = text.startsWith(q + q + q, i);
+      const close = multi ? q + q + q : q;
+      i += close.length;
+      for (; i < n; i++) {
+        const d = text.charCodeAt(i);
+        if (d === 10) {
+          if (!multi) break;
+          line++;
+          lineStart = i + 1;
+        } else if (d === 92 && c === 34) {
+          // An escape: the next character is not a closing quote (a backslash
+          // before a newline continues the line, which still is a newline).
+          if (text.charCodeAt(i + 1) === 10) {
+            line++;
+            lineStart = i + 2;
+          }
+          i++;
+        } else if (text.startsWith(close, i)) {
+          i += close.length;
+          // A multi-line string may end in up to two more quotes of its content.
+          if (multi) for (let extra = 0; extra < 2 && text.charAt(i) === q; extra++) i++;
+          break;
+        }
+      }
+      continue;
+    }
+    if (c >= 48 && c <= 57 && !/[A-Za-z0-9_-]/.test(text.charAt(i - 1))) {
+      LONG_FRACTION.lastIndex = i;
+      const m = LONG_FRACTION.exec(text);
+      if (m !== null) {
+        const placeholder = prefix + String(byPlaceholder.size) + "-x";
+        byPlaceholder.set(placeholder, { value: exactLiteral(m[0], text, i), at: i, used: false });
+        edits.push({ line, col: i - lineStart + 1, oldLen: m[0].length, newLen: placeholder.length + 2 });
+        parts.push(text.slice(from, i), '"' + placeholder + '"');
+        i += m[0].length;
+        from = i;
+        continue;
+      }
+    }
+    i++;
+  }
+  if (byPlaceholder.size === 0 && parts.length === 0) return undefined;
+  parts.push(text.slice(from));
+  return { text: parts.join(""), byPlaceholder, edits };
+}
+
+/** The value of one long-fraction literal: a tagged Date, or a time as its text. */
+function exactLiteral(literal: string, text: string, at: number): unknown {
+  const body = literal.replace(/[Zz]$/, "+00:00");
+  const dot = body.indexOf(".");
+  let end = dot + 1;
+  while (end < body.length && body.charAt(end) >= "0" && body.charAt(end) <= "9") end++;
+  const frac = body.slice(dot + 1, end).replace(/0+$/, "");
+  if (frac.length > 6) {
+    throw codecSyntaxError("TOML", "a fractional second of more than 6 digits cannot be held exactly", text, { offset: at });
+  }
+  const clock = body.slice(0, dot) + (frac === "" ? "" : "." + frac) + body.slice(end);
+  const isTime = literal.charAt(2) === ":";
+  const value = isTime
+    ? parseTimeToken(clock) === null
+      ? null
+      : clock
+    : parseDatetimeToken(clock.replace(/^(\d{4}-\d{2}-\d{2})[ t]/, "$1T"));
+  if (value === null) {
+    throw codecSyntaxError("TOML", "the date or time is out of range", text, { offset: at });
+  }
+  return value;
+}
+
+/**
+ * The input offset of a position (1-based line and column) smol-toml reported
+ * in the prepared text: the line is the same, the column is moved back past
+ * each replaced literal before it and clamped to the input line's length (the
+ * injected comments sit after it).
+ */
+function mapBack(text: string, edits: readonly Edit[], line: number, col: number): number {
+  let start = 0;
+  for (let l = 1; l < line; l++) {
+    // The line count is the input's (the preparation adds no newline), so every line is there.
+    start = text.indexOf("\n", start) + 1;
+  }
+  const nl = text.indexOf("\n", start);
+  let end = nl === -1 ? text.length : nl;
+  if (end > start && text.charCodeAt(end - 1) === 13) end--;
+  let shift = 0;
+  let mapped = -1;
+  for (const e of edits) {
+    if (e.line !== line) continue;
+    const modStart = e.col + shift;
+    if (col < modStart) break;
+    if (col < modStart + e.newLen) {
+      mapped = e.col;
+      break;
+    }
+    shift += e.newLen - e.oldLen;
+  }
+  if (mapped === -1) mapped = col - shift;
+  return Math.min(start + mapped - 1, end);
+}
+
 /** Recursively replace every smol-toml TomlDate in a parsed TOML value with
  * this port's own Scalar form: a plain string for a bare time literal, or a
  * tagged Date (see temporal.ts) for a date/datetime literal -- so buildNode
  * never has to know smol-toml's TomlDate exists. */
-function convertTomlDates(value: unknown): unknown {
+function convertTomlDates(value: unknown, exact: Prepared | undefined, maxDepth: number, depth = 0): unknown {
+  // This walk is recursive and runs before the builder checks the depth limit, so
+  // a hostile nesting (10,000 dotted keys) would exhaust the call stack here.
+  // Every table level is at least one node level and a nested array adds at most
+  // one raw level per node level, so a raw depth past twice the limit is refused
+  // by the builder anyway: refuse it with the same diagnostic, now.
+  if (depth > 2 * maxDepth + 2) {
+    throw new DocumentError("nesting exceeds the maximum depth (" + String(maxDepth) + ")", DEPTH_CODE, "$");
+  }
+  if (typeof value === "string" && exact !== undefined) {
+    const lit = exact.byPlaceholder.get(value);
+    if (lit !== undefined) {
+      lit.used = true;
+      return lit.value;
+    }
+  }
   if (value instanceof TomlDate) {
     if (value.isTime()) return timeOf(value);
     // parseDateToken/parseDatetimeToken only return null for a calendar
@@ -126,7 +344,7 @@ function convertTomlDates(value: unknown): unknown {
     // as a local date-time (issue #26); an offset literal keeps its offset.
     return dt;
   }
-  if (Array.isArray(value)) return value.map(convertTomlDates);
+  if (Array.isArray(value)) return value.map((v) => convertTomlDates(v, exact, maxDepth, depth + 1));
   if (isPlainObject(value)) {
     // Security (issue #32 follow-up): `value` here is smol-toml's own
     // parsed table, which smol-toml itself builds with a null prototype --
@@ -142,7 +360,7 @@ function convertTomlDates(value: unknown): unknown {
     // further downstream). Object.create(null) makes every key, including
     // "__proto__", an ordinary own property.
     const out: Record<string, unknown> = Object.create(null) as Record<string, unknown>;
-    for (const [k, v] of Object.entries(value)) out[k] = convertTomlDates(v);
+    for (const [k, v] of Object.entries(value)) out[k] = convertTomlDates(v, exact, maxDepth, depth + 1);
     return out;
   }
   return value;
@@ -256,11 +474,29 @@ function hugeDecimalPath(text: string, at: { start: number; end: number }, limit
   const content = ("omnist-overlong-" + String(k) + "-").padEnd(len - 2, "x");
   const defused = text.slice(0, at.start) + '"' + content + '"' + text.slice(at.end);
   try {
-    const node = buildNodeWithLimits(convertTomlDates(parseToml(defused, { integersAsBigInt: true })), limits);
+    const prep = prepareToml(defused);
+    const parsed = parseToml(prep === undefined ? defused : prep.text, { integersAsBigInt: true });
+    const node = buildNodeWithLimits(convertTomlDates(parsed, prep, limits.maxDepth), limits);
     return findLeaf(node, (leaf) => leaf === content);
   } catch {
     return undefined;
   }
+}
+
+/** Turn a failure from smol-toml into the `parse.codec-syntax` error, positioned in the input `text`. */
+function tomlSyntaxError(exc: unknown, text: string, prepared?: Prepared): ParseError {
+  // smol-toml's parse always throws a TomlError (an Error instance) on
+  // malformed input, never a bare value, so the non-Error branch below
+  // is a defensive fallback that's never actually reached -- same
+  // convention as json.ts's readJson catch.
+  /* v8 ignore next */
+  const message = exc instanceof Error ? exc.message : String(exc);
+  // smol-toml's TomlError carries a 1-based `line` and `column` (UTF-16 units).
+  // Every TomlError sets both (smol-toml's constructor), so no fallback.
+  const e = exc as { line: number; column: number };
+  const at: CodecBlame =
+    prepared === undefined ? { line: e.line, col: e.column } : { offset: mapBack(text, prepared.edits, e.line, e.column) };
+  return codecSyntaxError("TOML", message.split(String.fromCharCode(10))[0] as string, text, at);
 }
 
 /** Parses TOML text into a Document node (spec §4). */
@@ -278,22 +514,23 @@ export function readToml(text: string, opts: ReadTomlOptions = {}): Node {
     }
   }
   let parsed: unknown;
+  const exact = prepareToml(text);
   try {
-    parsed = parseToml(text, { integersAsBigInt: true });
+    parsed = parseToml(exact === undefined ? text : exact.text, { integersAsBigInt: true });
   } catch (exc) {
-    // smol-toml's parse always throws a TomlError (an Error instance) on
-    // malformed input, never a bare value, so the non-Error branch below
-    // is a defensive fallback that's never actually reached -- same
-    // convention as json.ts's readJson catch.
-    /* v8 ignore next */
-    const message = exc instanceof Error ? exc.message : String(exc);
-    // smol-toml's TomlError carries a 1-based `line` and `column` (UTF-16 units).
-    // Every TomlError sets both (smol-toml's constructor), so no fallback.
-    const e = exc as { line: number; column: number };
-    const at: CodecBlame = { line: e.line, col: e.column };
-    throw codecSyntaxError("TOML", message.split(String.fromCharCode(10))[0] as string, text, at);
+    throw tomlSyntaxError(exc, text, exact);
   }
-  const node = buildNodeWithLimits(convertTomlDates(parsed), limits);
+  const converted = convertTomlDates(parsed, exact, limits.maxDepth);
+  if (exact !== undefined) {
+    // A literal that sat where a key goes was made a valid key by its
+    // placeholder: it is a syntax error all the same.
+    for (const lit of exact.byPlaceholder.values()) {
+      if (!lit.used) {
+        throw codecSyntaxError("TOML", "a date-time literal cannot be used here", text, { offset: lit.at });
+      }
+    }
+  }
+  const node = buildNodeWithLimits(converted, limits);
   if (opts.schema === undefined) return node;
   return materialize(node, opts.schema) as Node;
 }

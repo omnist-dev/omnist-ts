@@ -306,13 +306,35 @@ export function readXml(text: string, opts: ReadXmlOptions = {}): Node {
   // fast-xml-parser's validator treats a DOCTYPE and an undeclared entity
   // reference (`<r>&foo;</r>`) as well-formed, so it does not pre-empt the
   // refusal below, and it rejects `<r><a>&foo;</a>` (unclosed) on its own.
-  const valid = XMLValidator.validate(text);
+  let valid: ReturnType<typeof XMLValidator.validate>;
+  try {
+    valid = XMLValidator.validate(text);
+  } catch (exc) {
+    // The validator matches an attribute with a backtracking regex, which
+    // exhausts the call stack on a value of about 5 MB or more (the size
+    // depends on the stack already in use). That is a limit of the reader, not
+    // a malformed document: refuse it with a coded diagnostic instead of
+    // letting a RangeError escape.
+    /* v8 ignore else -- the validator throws nothing but a stack overflow */
+    if (exc instanceof RangeError) {
+      throw codecSyntaxError("XML", "an attribute value is too long for this reader to validate", text);
+    }
+    /* v8 ignore next */
+    throw exc;
+  }
   if (valid !== true) {
     // The validator reports a 1-based `line` (and usually `col`, UTF-16 units).
     throw codecSyntaxError("XML", valid.err.msg, text, { line: valid.err.line, col: valid.err.col });
   }
   assertXmlCharacters(text);
   refuseOutOfProfile(text);
+  // The depth limit is enforced here, on the text, in one linear pass: the
+  // parser's own cost grows faster than linearly with the nesting depth (a
+  // 100,000-deep document took minutes to parse before this check), so a
+  // document past the limit must never reach it.
+  if (xmlNestingExceeds(text, limits.maxDepth)) {
+    throw limitError(depthIssue(limits.maxDepth));
+  }
   let parsed: XmlEntry[];
   try {
     parsed = PARSER.parse(text) as XmlEntry[];
@@ -353,6 +375,58 @@ export function readXml(text: string, opts: ReadXmlOptions = {}): Node {
   if (opts.schema === undefined) return node;
   const pretyped = xmlPretype(node, opts.schema, opts.schema.root, "$", limits.maxIntDigits);
   return materialize(pretyped, opts.schema) as Node;
+}
+
+/**
+ * True when the element nesting of well-formed XML `text` is deeper than the
+ * depth limit allows: an element with element children at nesting `e` (the
+ * document element is 1) is a node at level `e + 1`, so a document is refused
+ * when its elements nest more than `maxDepth` deep. One pass over the text,
+ * no recursion and no allocation proportional to the depth, stopping at the
+ * first excess. Comments, CDATA sections and processing instructions are
+ * skipped, and `>` inside a quoted attribute value does not end a tag. The
+ * text has already been validated, so it is well-formed here.
+ */
+function xmlNestingExceeds(text: string, maxDepth: number): boolean {
+  let depth = 0;
+  const n = text.length;
+  let i = text.indexOf("<");
+  while (i !== -1 && i < n) {
+    let next: number;
+    if (text.startsWith("<!--", i)) {
+      next = text.indexOf("-->", i + 4);
+    } else if (text.startsWith("<![CDATA[", i)) {
+      next = text.indexOf("]]>", i + 9);
+    } else if (text.startsWith("<?", i)) {
+      next = text.indexOf("?>", i + 2);
+    } else if (text.startsWith("</", i)) {
+      depth--;
+      next = text.indexOf(">", i + 2);
+    } else {
+      // A start tag: find the `>` that ends it, outside any quoted value.
+      let j = i + 1;
+      let quote = "";
+      for (; j < n; j++) {
+        const c = text.charAt(j);
+        if (quote !== "") {
+          if (c === quote) quote = "";
+        } else if (c === '"' || c === "'") {
+          quote = c;
+        } else if (c === ">") {
+          break;
+        }
+      }
+      if (text.charAt(j - 1) !== "/") {
+        depth++;
+        if (depth > maxDepth) return true;
+      }
+      next = j;
+    }
+    /* v8 ignore next -- the text is validated, so every construct is closed */
+    if (next === -1) return false;
+    i = text.indexOf("<", next + 1);
+  }
+  return false;
 }
 
 /** True for a character-data entry of a preserveOrder element: text, or a CDATA section. */
@@ -423,9 +497,13 @@ function xmlToNode(
   // categorically distinct from `node`, and must not be counted (issue #107).
   // A node at `depth` (the first element's being 0) is level depth + 2 of the
   // nesting: the Document root is level 1.
+  /* v8 ignore start -- unreachable: readXml has refused a document nested past
+   * maxDepth (xmlNestingExceeds) before this walk starts. Kept as the walk's own
+   * guard, since it is recursive. */
   if (depth + 2 > limits.maxDepth) {
     throw limitError(depthIssue(limits.maxDepth));
   }
+  /* v8 ignore stop */
   counter.count++;
   if (counter.count > limits.maxNodes) {
     throw limitError(nodesIssue(limits.maxNodes));

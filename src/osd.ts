@@ -277,7 +277,16 @@ class Parser {
     this.expect("punct", "}");
     const built = fields.map((f) =>
       atPath(
-        () => field(f.label, f.type, f.min, f.max),
+        () => {
+          // OSD text cannot spell [0,0] (Sec5.5, S-15); the model can hold it, so the parser refuses it.
+          if (f.min === 0 && f.max === 0) {
+            throw new SchemaError(
+              `field ${JSON.stringify(f.label)} has an invalid cardinality [0,0]`,
+              "schema.invalid-cardinality",
+            );
+          }
+          return field(f.label, f.type, f.min, f.max);
+        },
         // E-30: a label problem is reported at the record, a cardinality problem at the field.
         (code) => (code.endsWith("-label") ? name : `${name}.${f.label}`),
       ),
