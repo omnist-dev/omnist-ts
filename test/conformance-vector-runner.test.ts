@@ -31,7 +31,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { main, runVector, iterVectors, isWellFormedPosition } from "../tools/conformance/vectorRunner.js";
+import { main, runVector, iterVectors, isWellFormedPosition, nodesEqual } from "../tools/conformance/vectorRunner.js";
 import { ParseError } from "../src/errors.js";
 import { registerFormat } from "../src/registry.js";
 
@@ -257,9 +257,13 @@ describeIfVendored("main() against the real vendor/omnist-spec/test-suite", () =
     //
     // v0.10.0-alpha: omnist-spec v0.35.0-beta (731 vectors, +209). Before
     // any fix: 614 pass, 89 fail, 28 skip. Now 703 pass, 0 fail, 28 skip.
+    //
+    // v0.10.2-alpha: omnist-spec v0.36.0-beta (793 vectors, +62). Before the
+    // runner fix: 762 pass, 3 fail (the three nan-is-a-number vectors), 28
+    // skip. Now 765 pass, 0 fail, 28 skip.
     expect(exitCode).toBe(0);
     expect(logs.at(-1)).toBe(
-      "\n703 passed, 0 failed, 28 skipped (of 731 vectors) -- " +
+      "\n765 passed, 0 failed, 28 skipped (of 793 vectors) -- " +
         "diagnostic paths always compared, codes compared where the error carries one (Sec8.5.2)",
     );
   }, 120000);
@@ -283,8 +287,8 @@ describeIfVendored("main() against the real vendor/omnist-spec/test-suite", () =
     }
   }, 120000);
 
-  it("iterVectors discovers all 731 real vectors", () => {
-    expect(iterVectors(REAL_SUITE_DIR).length).toBe(731);
+  it("iterVectors discovers all 793 real vectors", () => {
+    expect(iterVectors(REAL_SUITE_DIR).length).toBe(793);
   });
 });
 
@@ -1616,4 +1620,29 @@ describe("bytes_hex driver: expect.ok === false with no diagnostics field to com
     const r = runVector(vec("parse_schema", { bytes_hex: "80" }, { ok: false }));
     expect(r).toEqual({ status: "pass", message: "ok" });
   }, 20000);
+});
+
+describe("nodesEqual: Doc equality with E-33 NaN equality (runner-only)", () => {
+  it("treats two NaN numbers as equal, at the root and nested", () => {
+    expect(nodesEqual(NaN, NaN)).toBe(true);
+    expect(nodesEqual([{ label: "a", target: NaN }], [{ label: "a", target: NaN }])).toBe(true);
+  });
+
+  it("still tells a NaN from every other scalar and from a different number", () => {
+    expect(nodesEqual(NaN, 1)).toBe(false);
+    expect(nodesEqual(1, NaN)).toBe(false);
+    expect(nodesEqual(NaN, "NaN")).toBe(false);
+    expect(nodesEqual(Infinity, Infinity)).toBe(true);
+    expect(nodesEqual(Infinity, -Infinity)).toBe(false);
+  });
+
+  it("keeps Doc.equals semantics for edge count, labels, structure and plain scalars", () => {
+    const one = [{ label: "a", target: NaN }];
+    expect(nodesEqual(one, [])).toBe(false);
+    expect(nodesEqual(one, [{ label: "b", target: NaN }])).toBe(false);
+    expect(nodesEqual(one, [{ label: "a", target: 1 }])).toBe(false);
+    expect(nodesEqual(one, NaN)).toBe(false);
+    expect(nodesEqual("x", "x")).toBe(true);
+    expect(nodesEqual("x", "y")).toBe(false);
+  });
 });

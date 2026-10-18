@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Runs omnist-spec's `test-suite/` JSON-vector suite (731 vectors, envelope
+ * Runs omnist-spec's `test-suite/` JSON-vector suite (793 vectors, envelope
  * `name`/`spec`/`operation`/`purpose`/`input`/`expect` -- see
  * `vendor/omnist-spec/test-suite/README.md` and
  * `docs/08-conformance-and-errors.md` Sec8.5) against omnist-ts's own
@@ -449,7 +449,7 @@ function runParseBytesHex(v: Vector): Result {
     }
     if (expect.document !== undefined) {
       const expected = decodeDocument(expect.document as EncodedNode);
-      if (!new Doc(node).equals(new Doc(expected))) {
+      if (!nodesEqual(node, expected)) {
         return fail("parsed document does not match expected");
       }
     }
@@ -571,7 +571,7 @@ function runParse(v: Vector): Result {
     return fail("expected failure, parse succeeded");
   }
   const expected = decodeDocument(expect.document as EncodedNode);
-  if (!new Doc(node).equals(new Doc(expected))) {
+  if (!nodesEqual(node, expected)) {
     return fail("parsed document does not match expected");
   }
   if (expect.diagnostics !== undefined) {
@@ -677,7 +677,7 @@ function runMaterialize(v: Vector): Result {
       return fail(`expected success, threw: ${errorMessage(e)}`);
     }
     const expected = decodeDocument(expect.document as EncodedNode);
-    if (new Doc(actual).equals(new Doc(expected))) return pass();
+    if (nodesEqual(actual, expected)) return pass();
     return fail("materialized document does not match expected");
   }
   try {
@@ -993,6 +993,31 @@ function runInfer(v: Vector): Result {
 
 function runInferWithReport(v: Vector): Result {
   return runInferCommon(v, true);
+}
+
+/**
+ * Document equality for a vector's expected-vs-read comparison (Sec8.5.2,
+ * E-33): `Doc.equals`, except that two NaN `number` scalars are equal. JS
+ * `NaN !== NaN`, so the library equality alone fails every NaN vector
+ * whatever the implementation read. Runner-only: the library's `Doc.equals`
+ * is unchanged.
+ */
+export function nodesEqual(a: Node, b: Node): boolean {
+  if (Array.isArray(a) && Array.isArray(b)) {
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) {
+      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+      const ea = a[i]!;
+      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+      const eb = b[i]!;
+      if (ea.label !== eb.label || !nodesEqual(ea.target, eb.target)) return false;
+    }
+    return true;
+  }
+  if (typeof a === "number" && typeof b === "number" && Number.isNaN(a) && Number.isNaN(b)) {
+    return true;
+  }
+  return new Doc(a).equals(new Doc(b));
 }
 
 function setsEqual<T>(a: Set<T>, b: Set<T>): boolean {
