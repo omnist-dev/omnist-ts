@@ -6,6 +6,20 @@ the first documented release of the TypeScript port; the public API
 mirrors the upstream Python package's `__all__` (camelCase names of the
 same functions).
 
+## Unreleased
+
+- **Input size limit is 64 MiB, not 64 KiB.** A document over the default
+  `maxInputBytes` (67,108,864 bytes, 64 MiB) is refused with
+  `document.limit.input-size` at `$` before any parsing, even when it also
+  contains `[[a]`. Probed: a 67,108,865-byte TOML input with `[[a]` is refused
+  with that code; a 70,006-byte valid TOML input of the same shape is accepted.
+- **Depth limit wins over mixed content.** When an XML document both nests
+  past `maxDepth` and contains mixed content, the reported error is
+  `document.limit.depth` (`nesting exceeds the maximum depth (N)`), wherever
+  the mixed content sits. `format.mixed-content` is reported only when the
+  depth is within the limit. Probed with `maxDepth: 3`: mixed text at the root
+  followed by a 4-deep chain gives `document.limit.depth`.
+
 ## [v0.10.1-alpha] -- unaltered YAML and TOML temporals, hostile-input fixes, `[0,0]` cardinality
 
 A patch release; the spec pin stays at v0.35.0-beta (`237ef00`). Closes
